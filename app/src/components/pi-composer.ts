@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from "lit";
 import type { ImageInput, PromptMode } from "../../../shared/src/protocol.ts";
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { toast } from "../lib/toast.ts";
+import { checkImageFile } from "../lib/images.ts";
 import { UNAVAILABLE_IN_TERMINAL } from "../render/sheets.ts";
 import { sharedStyles } from "../styles/shared.ts";
 
@@ -123,7 +124,7 @@ export class PiComposer extends LitElement {
 
 	private onKey = (e: KeyboardEvent) => {
 		const menu = this.menu;
-		if (menu.length) {
+		if (menu.length && !e.isComposing && e.keyCode !== 229) {
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 				e.preventDefault();
 				const step = e.key === "ArrowDown" ? 1 : -1;
@@ -157,6 +158,17 @@ export class PiComposer extends LitElement {
 
 	private onPressEnd = () => clearTimeout(this.pressTimer);
 
+	private onPressCancel = () => {
+		clearTimeout(this.pressTimer);
+		this.longPressed = false;
+	};
+
+	disconnectedCallback(): void {
+		clearTimeout(this.pressTimer);
+		this.longPressed = false;
+		super.disconnectedCallback();
+	}
+
 	private onSendClick = () => {
 		if (this.longPressed) {
 			this.longPressed = false;
@@ -172,15 +184,16 @@ export class PiComposer extends LitElement {
 		const read = (f: File) =>
 			new Promise<ImageInput>((resolve, reject) => {
 				const r = new FileReader();
-				r.onload = () => resolve({ mimeType: f.type || "image/png", data: String(r.result).replace(/^data:[^,]*,/, "") });
+				r.onload = () => resolve({ mimeType: f.type, data: String(r.result).replace(/^data:[^,]*,/, "") });
 				r.onerror = () => reject(r.error);
 				r.readAsDataURL(f);
 			});
-		try {
-			this.images = [...this.images, ...(await Promise.all(files.map(read)))];
-		} catch {
-			toast("That image couldn't be read.", "error");
-		}
+		const accepted = files.filter((f) => checkImageFile(f));
+		if (accepted.length < files.length) toast("Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached.", "warning");
+		const results = await Promise.allSettled(accepted.map(read));
+		const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+		if (ok.length < accepted.length) toast("An image couldn't be read.", "error");
+		if (ok.length) this.images = [...this.images, ...ok];
 	};
 
 	updated(): void {
@@ -196,9 +209,9 @@ export class PiComposer extends LitElement {
 		return html`<div class="inner">
 			${queued.length ? html`<div class="queue" aria-label="Queued messages">${queued.map(([k, t]) => html`<span class="chip"><span class="label">${k}</span> ${t}</span>`)}</div>` : nothing}
 			${menu.length
-				? html`<div class="menu" role="listbox" aria-label="Commands">
+				? html`<div class="menu" id="slash-menu" role="listbox" aria-label="Commands">
 						${menu.map(
-							(item, i) => html`<div role="option" aria-selected=${i === this.menuIndex ? "true" : "false"} class="opt ${i === this.menuIndex ? "on" : ""} ${item.rpcOnly && this.rpcOnlyDisabled ? "off" : ""}" @pointerdown=${(e: Event) => {
+							(item, i) => html`<div id="slash-opt-${i}" role="option" aria-selected=${i === this.menuIndex ? "true" : "false"} class="opt ${i === this.menuIndex ? "on" : ""} ${item.rpcOnly && this.rpcOnlyDisabled ? "off" : ""}" @pointerdown=${(e: Event) => {
 								e.preventDefault();
 								this.complete(item);
 							}}><code>/${item.name}</code><span>${item.description}</span></div>`,
@@ -211,13 +224,13 @@ export class PiComposer extends LitElement {
 					)}</div>`
 				: nothing}
 			<div class="box">
-				<textarea aria-label="Message" rows="1" placeholder=${this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, or / for commands"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey}></textarea>
+				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu.length ? "true" : "false"} aria-activedescendant=${menu.length ? `slash-opt-${Math.min(this.menuIndex, menu.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, or / for commands"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey}></textarea>
 				<div class="actions">
 					${this.canImages
 						? html`<label class="icon" aria-label="Attach image" style="display:grid;place-items:center;cursor:pointer">＋<input class="sr-only" type="file" accept="image/*" multiple @change=${this.onFiles} /></label>`
 						: nothing}
 					${this.streaming ? html`<button class="btn ghost" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>stop</button>` : nothing}
-					<button class="btn" @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @click=${this.onSendClick}>${this.streaming ? "steer" : "send"}</button>
+					<button class="btn" @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${this.streaming ? "steer" : "send"}</button>
 				</div>
 			</div>
 			${this.statuses.length ? html`<div class="status">${this.statuses.map((s) => html`<span>${s}</span>`)}</div>` : nothing}
