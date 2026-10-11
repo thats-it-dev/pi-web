@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, type TestContext, test } from "node:test";
+import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ListMessage, StreamMessage } from "../../shared/src/protocol.ts";
+import type { HubConfig } from "../src/config.ts";
 import { startBridgeServer } from "../src/bridge-server.ts";
 import type { SessionHandle } from "../src/handle.ts";
 import { Registry } from "../src/registry.ts";
 import { RpcHandle } from "../src/rpc-handle.ts";
+import { createHubServer } from "../src/server.ts";
 import { SessionIndex } from "../src/sessions.ts";
 import { type FakeModel, HELLO, startFakeModel } from "./support/fake-model.ts";
+import { openSse } from "./support/http.ts";
 import { makePiEnv } from "./support/pi-env.ts";
 import { Recorder } from "./support/recorder.ts";
 import { BRIDGE_ENTRY, startTerminalPi } from "./support/terminal-pi.ts";
@@ -18,6 +22,8 @@ before(async () => {
 	model = await startFakeModel();
 });
 after(() => model.close());
+
+const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };
 
 // A hub with the bridge loaded for every pi in this config, the hub's own children included.
 async function setup(t: TestContext) {
@@ -34,6 +40,26 @@ async function setup(t: TestContext) {
 	const list = new Recorder<ListMessage>();
 	registry.onChange((m) => list.push(m));
 	const bridge = await startBridgeServer({ socketPath, registry, switchGraceMs: 3000 });
+	const cfg: HubConfig = {
+		port: 0,
+		hostname: "hub.test:7878",
+		allowedLogin: "me@github",
+		allowedOrigins: ["https://pi.thatsit.app"],
+		idleMinutes: 20,
+		maxHeadless: 6,
+		piBin: env.piBin,
+		dev: false,
+		dataDir: env.root,
+	};
+	const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: env.workDir, log: () => {} });
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	const port = (server.address() as AddressInfo).port;
+	const sse: Array<{ close(): void }> = [];
+	const openStream = async (id: string) => {
+		const c = await openSse(port, `/api/sessions/${id}/stream`, GOOD);
+		sse.push(c);
+		return c;
+	};
 	const terminals: ReturnType<typeof startTerminalPi>[] = [];
 	const terminal = (sessionFile?: string) => {
 		const term = startTerminalPi({ piBin: env.piBin, cwd: env.workDir, env: env.env, socketPath, sessionFile, loadBridge: false });
@@ -41,13 +67,16 @@ async function setup(t: TestContext) {
 		return term;
 	};
 	t.after(async () => {
+		for (const c of sse) c.close();
+		server.closeAllConnections();
+		server.close();
 		await Promise.all(terminals.map((x) => x.quit()));
 		registry.closeAll();
 		await bridge.close();
 		await sleep(300);
 		env.cleanup();
 	});
-	return { env, registry, list, terminal };
+	return { env, registry, list, terminal, openStream };
 }
 
 const until = async (cond: () => boolean, timeoutMs = 15_000) => {
@@ -118,7 +147,7 @@ test("the hub's own headless children load the bridge but never attach as termin
 	assert.equal(registry.all().filter((h) => h.kind === "bridge").length, 0);
 });
 
-test("a terminal resuming a session the app holds idle takes it over; a busy one makes it wait", async (t) => {
+test("a terminal resuming a session a busy headless pi holds is told to wait, then takes over once it settles", async (t) => {
 	const { env, registry, terminal } = await setup(t);
 	// A session with a file on disk, held by a headless pi.
 	const rpc = await registry.create(env.workDir);
@@ -140,6 +169,35 @@ test("a terminal resuming a session the app holds idle takes it over; a busy one
 	await until(() => registry.get(id)?.kind === "bridge", 30_000);
 	assert.equal(registry.get(id)?.pid, term.pid);
 	assert.equal(registry.all().filter((h) => h.kind === "rpc").length, 0);
+});
+
+test("a terminal resuming a session an idle headless pi holds takes it over, and the app's open stream follows without reconnecting", async (t) => {
+	const { env, registry, terminal, openStream } = await setup(t);
+	const rpc = await registry.create(env.workDir);
+	const id = rpc.sessionId;
+	const done = watch(rpc);
+	await rpc.command({ type: "prompt", text: "first", mode: "send" });
+	await done.next((m) => m.type === "event" && m.event.type === "agent_settled");
+	const file = rpc.sessionFile as string;
+	assert.equal(rpc.isBusy(), false);
+
+	// The app has the session open over the real HTTP stream while the headless pi holds it.
+	const sse = await openStream(id);
+	const before = (await sse.next((m) => m.type === "snapshot")) as any;
+	assert.equal(before.snapshot.handleKind, "rpc");
+
+	const term = terminal(file);
+	// The same connection gets a snapshot from the terminal's bridge, with no reload.
+	const after = (await sse.next((m) => m.type === "snapshot" && (m as any).snapshot.handleKind === "bridge", 20_000)) as any;
+	assert.equal(after.snapshot.sessionId, id);
+	assert.equal(registry.get(id)?.kind, "bridge");
+	assert.equal(registry.get(id)?.pid, term.pid);
+	await until(() => registry.all().filter((h) => h.kind === "rpc").length === 0);
+
+	// A prompt typed in the terminal now arrives as events on that same connection.
+	term.send({ type: "prompt", message: "typed after takeover" });
+	await sse.next((m) => m.type === "event" && (m as any).event.type === "message_end" && (m as any).event.message.role === "user" && /typed after takeover/.test(text((m as any).event.message)), 20_000);
+	await sse.next((m) => m.type === "event" && (m as any).event.type === "agent_settled", 20_000);
 });
 
 test("a /new in the terminal moves the app's stream to the new session", async (t) => {
