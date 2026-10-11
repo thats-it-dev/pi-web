@@ -96,6 +96,7 @@ export function wordCount(s: string): number {
 }
 
 export function blocksText(content: unknown): string {
+	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
-	return contentText(content as AgentMessage["content"]);
+	return contentText(content.filter((b) => b !== null && typeof b === "object") as AgentMessage["content"]);
 }

@@ -68,5 +68,7 @@ describe("format", () => {
 		expect(wordCount("")).toBe(0);
 		expect(blocksText([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }])).toBe("a\nb");
 		expect(blocksText(undefined)).toBe("");
+		expect(blocksText("hi")).toBe("hi");
+		expect(blocksText([null, { type: "text", text: "a" }])).toBe("a");
 	});
 });
