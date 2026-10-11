@@ -8,7 +8,7 @@ after thatsit.dev.
 - `hub/`: Node server on spark. Runs one headless `pi --mode rpc` per open
   session, serves REST + SSE, accepts only your Tailscale identity from the
   app's origin. Zero runtime dependencies; runs `.ts` directly on Node ≥ 22.18.
-- `app/`: Vite + Lit PWA (static; deploys to pi.thatsit.dev).
+- `app/`: Vite + Lit PWA (static; deploys to pi.thatsit.app).
 - `shared/`: wire types and the conversation reducer both sides use.
 - Design: `docs/superpowers/specs/2026-10-10-pi-web-design.md`.
 
@@ -47,15 +47,21 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "port": 7878,
   "hostname": "spark-713a.tail9274fa.ts.net:7878",
   "allowedLogin": "michaelthatsit@github",
-  "allowedOrigins": ["https://pi.thatsit.dev"],
+  "allowedOrigins": ["https://pi.thatsit.app"],
   "idleMinutes": 20,
   "maxHeadless": 6,
   "piBin": "pi"
 }
 ```
 
+## Deploy
+
+The app is a Cloudflare Pages project (`pi-web`) connected to this repo. A push
+to `master` builds `npm run build -w app` (Node 24) and publishes `app/dist` to
+https://pi.thatsit.app; other branches get preview deployments.
+
 Starting a new session with a preselected model is not in Plan 1: start the
 session, then switch via the model sheet.
 
-Deployment (tailscale serve, Netlify, systemd), terminal sync (the bridge
+Hub deployment (tailscale serve, systemd), terminal sync (the bridge
 extension) and push notifications are Plans 2–4.

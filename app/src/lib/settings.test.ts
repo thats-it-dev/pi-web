@@ -15,6 +15,6 @@ describe("normalizeHubUrl", () => {
 describe("defaultHubUrl", () => {
 	it("uses the dev server's own origin on localhost only", () => {
 		expect(defaultHubUrl({ hostname: "localhost", origin: "http://localhost:5173" })).toBe("http://localhost:5173");
-		expect(defaultHubUrl({ hostname: "pi.thatsit.dev", origin: "https://pi.thatsit.dev" })).toBe(null);
+		expect(defaultHubUrl({ hostname: "pi.thatsit.app", origin: "https://pi.thatsit.app" })).toBe(null);
 	});
 });

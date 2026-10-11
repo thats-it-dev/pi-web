@@ -21,7 +21,7 @@ test("a filled-in config loads with defaults merged and dataDir set", () => {
 	const cfg = loadConfig(dir);
 	assert.equal(cfg.port, 7878);
 	assert.equal(cfg.maxHeadless, 6);
-	assert.deepEqual(cfg.allowedOrigins, ["https://pi.thatsit.dev"]);
+	assert.deepEqual(cfg.allowedOrigins, ["https://pi.thatsit.app"]);
 	assert.equal(cfg.dataDir, dir);
 });
 

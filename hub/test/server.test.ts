@@ -28,14 +28,14 @@ const cfg: HubConfig = {
 	port: 0,
 	hostname: "hub.test:7878",
 	allowedLogin: "me@github",
-	allowedOrigins: ["https://pi.thatsit.dev"],
+	allowedOrigins: ["https://pi.thatsit.app"],
 	idleMinutes: 20,
 	maxHeadless: 6,
 	piBin: "pi",
 	dev: false,
 	dataDir: root,
 };
-const GOOD = { origin: "https://pi.thatsit.dev", host: "hub.test:7878", "tailscale-user-login": "me@github" };
+const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };
 
 const handles = new Map<string, FakeHandle>();
 let n = 0;
@@ -75,9 +75,9 @@ test("rejects requests from other origins or without the tailnet identity", asyn
 });
 
 test("answers CORS preflight only for the app's origin", async () => {
-	const ok = await call(port, "OPTIONS", "/api/sessions", { origin: "https://pi.thatsit.dev", host: "hub.test:7878" });
+	const ok = await call(port, "OPTIONS", "/api/sessions", { origin: "https://pi.thatsit.app", host: "hub.test:7878" });
 	assert.equal(ok.status, 204);
-	assert.equal(ok.headers["access-control-allow-origin"], "https://pi.thatsit.dev");
+	assert.equal(ok.headers["access-control-allow-origin"], "https://pi.thatsit.app");
 	assert.equal((await call(port, "OPTIONS", "/api/sessions", { origin: "https://evil.example" })).status, 403);
 });
 
@@ -85,7 +85,7 @@ test("health reports the caller's login and the hub version", async () => {
 	const r = await call(port, "GET", "/api/health", GOOD);
 	assert.equal(r.status, 200);
 	assert.deepEqual(r.body, { ok: true, login: "me@github", hubVersion: "0.1.0-test", vapidPublicKey: null });
-	assert.equal(r.headers["access-control-allow-origin"], "https://pi.thatsit.dev");
+	assert.equal(r.headers["access-control-allow-origin"], "https://pi.thatsit.app");
 });
 
 test("lists sessions from disk and new live sessions without files", async () => {

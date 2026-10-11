@@ -20,7 +20,7 @@ A PWA for using the pi coding agent (pi 1.0.2, `@earendil-works/pi-coding-agent`
 - Sessions open in the CLI and in the app stay **live-synced** in both directions, through a pi extension ("bridge").
 - Real **push notifications** are in v1.
 - Auth uses **Tailscale identity**. The hub is reachable only on the tailnet.
-- The app is a static PWA hosted publicly at **`pi.thatsit.dev`** (or `pi.thatsit.app`). The user enters the hub's tailnet URL in the app's settings.
+- The app is a static PWA hosted publicly at **`pi.thatsit.app`**. The user enters the hub's tailnet URL in the app's settings.
 - There is **one hub** (spark). Settings are stored so that supporting several hubs later is a small change.
 - Visual direction **"b · instrument"**: thatsit.dev's tokens and fonts, tuned for density. Mockup: https://claude.ai/artifact/8hbwyi1ouXPbHaBmiDWMai
 - Structure: **a hub server with two session adapters** (headless RPC, and the terminal bridge).
@@ -41,8 +41,8 @@ A PWA for using the pi coding agent (pi 1.0.2, `@earendil-works/pi-coding-agent`
 ```
  iPhone / iPad / Mac                       spark (127.0.0.1)
 ┌───────────────────────┐   HTTPS (tailnet)   ┌──────────────────────────────┐
-│ PWA  pi.thatsit.dev   │ ── REST + SSE ────▶ │ tailscale serve :7878        │
-│  (static, Netlify)    │ ◀── Web Push ─────┐ │        │                     │
+│ PWA  pi.thatsit.app   │ ── REST + SSE ────▶ │ tailscale serve :7878        │
+│  (static, CF Pages)   │ ◀── Web Push ─────┐ │        │                     │
 └───────────────────────┘    (via Apple/    │ │        ▼                     │
                               Google push)  └─┤  hub  (Node, :7878)          │
                                               │   ├─ RpcHandle ──stdio──▶ pi --mode rpc
@@ -55,7 +55,7 @@ A PWA for using the pi coding agent (pi 1.0.2, `@earendil-works/pi-coding-agent`
 
 There is one repository, `~/workspace/pi-web`, organized as npm workspaces:
 
-- `app/`: the PWA. Built with Vite, TypeScript and Lit web components (`pi-*` elements, matching the site's `ti-*` web-component idiom), and deployed to Netlify. Design tokens and fonts (Inter, Nunito, Work Sans) come from `website/src/styles/base.css` and `website/public/fonts`.
+- `app/`: the PWA. Built with Vite, TypeScript and Lit web components (`pi-*` elements, matching the site's `ti-*` web-component idiom), and deployed to Cloudflare Pages (project `pi-web`, built from GitHub `thats-it-dev/pi-web`: `npm run build -w app` → `app/dist`). Design tokens and fonts (Inter, Nunito, Work Sans) come from `website/src/styles/base.css` and `website/public/fonts`.
 - `hub/`: the Node (≥22) server. Its only runtime dependency is a Web Push library (`web-push`). Everything else uses Node built-ins.
 - `bridge/`: the pi extension, a single TypeScript file loaded by pi (pi loads TS extensions through jiti) with no dependencies.
 - `shared/`: TypeScript types for the wire protocols, plus the conversation reducer used by both `app/` and `hub/`.
@@ -243,7 +243,7 @@ The hub runs an agent with shell access, so every request is checked. Requests f
 
 1. **Bind:** `127.0.0.1` only. Exposed solely by `tailscale serve --bg --https=7878 http://127.0.0.1:7878`.
 2. **Identity:** `Tailscale-User-Login` must equal `config.allowedLogin`.
-3. **Origin:** the `Origin` header must be in `config.allowedOrigins` (default `["https://pi.thatsit.dev"]`, plus `http://localhost:5173` when `config.dev` is true). This applies to every route, including GET and SSE, and blocks other websites from using the ambient tailnet identity.
+3. **Origin:** the `Origin` header must be in `config.allowedOrigins` (default `["https://pi.thatsit.app"]`, plus `http://localhost:5173` when `config.dev` is true). This applies to every route, including GET and SSE, and blocks other websites from using the ambient tailnet identity.
 4. **Host:** must equal `config.hostname` (for example `spark-713a.tail9274fa.ts.net:7878`). This blocks DNS rebinding.
 5. **CORS:** echo only an allowed origin, with no credentials. Preflight allows `content-type`.
 6. **Bridge socket:** `0600` in a `0700` directory.
@@ -279,15 +279,15 @@ Config file: `~/.config/pi-web/config.json`, with `{ port, hostname, allowedLogi
 - **RpcHandle integration:** real `pi --mode rpc --no-session` against the fake model, driven through the hub API: prompt, steer, abort, set model, a dialog round trip (via a test extension), fork, compact.
 - **BridgeHandle integration:** real pi with the bridge extension loaded against the fake model: hello, event forwarding, commands taking effect, re-hello on session switch, and no added startup delay when the socket is absent.
 - **App:** component tests for the composer, slash menu and reducer-driven message list. One Playwright smoke test against the hub plus the fake model: open, start a session, stream, switch model, `/compact`.
-- **Manual checklist:** installing to the iOS home screen, push received on iOS and dismissed, Chrome desktop access from `pi.thatsit.dev` to the tailnet hub.
+- **Manual checklist:** installing to the iOS home screen, push received on iOS and dismissed, Chrome desktop access from `pi.thatsit.app` to the tailnet hub.
 
 ## 9. Delivery milestones
 
-0. **Spike (do first):** a static page on Netlify fetching a tailnet `tailscale serve` endpoint from Chrome, Safari and iOS. It checks Local Network Access and CORS with Tailscale identity headers. **If it is blocked, the app is served from the hub itself (same origin)**, and §2.3 and §6.3 change accordingly before any other work.
+0. **Spike (dropped 2026-10-11):** the plan was a static page fetching a tailnet `tailscale serve` endpoint from Chrome, Safari and iOS. It checks Local Network Access and CORS with Tailscale identity headers. **If it is blocked, the app is served from the hub itself (same origin)**, and §2.3 and §6.3 change accordingly before any other work. We skipped it once Plan 1 was built: the deployed app at `pi.thatsit.app` is the probe. If a browser blocks it, add the same-origin fallback then.
 1. Hub (RpcHandle, sessions, auth) plus the app (list, view, continue, start, models, stats, slash commands, dialogs) in style b, run locally.
 2. Bridge extension with live terminal sync.
 3. Push notifications.
-4. Deploy: Netlify site at `pi.thatsit.dev`, the `tailscale serve` entry, the bridge added to `~/.pi/agent/settings.json` `packages`, and a systemd user unit for the hub.
+4. Deploy: Cloudflare Pages site at `pi.thatsit.app` (Git-connected; `master` is production), the `tailscale serve` entry, the bridge added to `~/.pi/agent/settings.json` `packages`, and a systemd user unit for the hub.
 
 ## 10. Out of scope (v1)
 

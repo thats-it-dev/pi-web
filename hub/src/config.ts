@@ -18,7 +18,7 @@ export const DEFAULTS = {
 	port: 7878,
 	hostname: "",
 	allowedLogin: "",
-	allowedOrigins: ["https://pi.thatsit.dev"],
+	allowedOrigins: ["https://pi.thatsit.app"],
 	idleMinutes: 20,
 	maxHeadless: 6,
 	piBin: "pi",
