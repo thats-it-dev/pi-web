@@ -2,6 +2,7 @@
 
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
@@ -31,14 +32,22 @@ const registry = new Registry({
 	idleMs: cfg.idleMinutes * 60_000,
 });
 setInterval(() => registry.reap(), 60_000).unref();
+let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
+try {
+	bridge = await startBridgeServer({ socketPath: join(cfg.dataDir, "bridge.sock"), registry, log: (m) => console.log(m) });
+} catch (err) {
+	console.error((err as Error).message);
+	process.exit(1);
+}
 
 const server = createHubServer({ cfg, registry, index, version });
 server.listen(cfg.port, "127.0.0.1", () => {
-	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir})`);
+	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });
 
 const shutdown = () => {
 	registry.closeAll();
+	void bridge.close();
 	server.close();
 	setTimeout(() => process.exit(0), 2000).unref();
 };
