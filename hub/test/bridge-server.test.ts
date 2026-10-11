@@ -180,7 +180,46 @@ test("a connection the registry ignores is left alone", async (t) => {
 	await until(() => attached.length === 1);
 	const { stream } = watch(attached[0]);
 	a.send({ type: "event", event: { type: "agent_start" } });
+	a.send(hello("s-1")); // a second hello on an ignored connection does nothing
 	await sleep(100);
 	assert.equal(stream.items.length, 0);
+	assert.equal(attached.length, 1);
 	a.sock.destroy();
+});
+
+test("a duplicate hello for a pid keeps one handle and delivers events once", async (t) => {
+	const { socketPath, attached } = await setup(t);
+	const a = await client(socketPath);
+	a.send(hello("s-1"));
+	await until(() => attached.length === 1);
+	const { stream } = watch(attached[0]);
+	const b = await client(socketPath);
+	b.send(hello("s-1"));
+	await stream.next((m) => m.type === "snapshot");
+	b.send(hello("s-1")); // again, on the same connection
+	await sleep(50);
+	const before = stream.items.length;
+	b.send({ type: "event", event: { type: "agent_start" } });
+	await until(() => stream.items.length > before);
+	await sleep(50);
+	assert.equal(stream.items.length - before, 1);
+	assert.equal(stream.items.filter((m) => m.type === "handle_gone").length, 0);
+	assert.equal(attached.length, 1);
+	b.sock.destroy();
+});
+
+test("a malformed message drops only that connection", async (t) => {
+	const { socketPath, attached } = await setup(t);
+	const bad = await client(socketPath);
+	bad.sock.write("null\n");
+	await bad.closed;
+	const bad2 = await client(socketPath);
+	const { sync: _sync, ...noSync } = hello("s-9", 9);
+	bad2.send(noSync);
+	await bad2.closed;
+	const good = await client(socketPath);
+	good.send(hello("s-1"));
+	await until(() => attached.length >= 1);
+	assert.equal(attached.at(-1)?.sessionId, "s-1");
+	good.sock.destroy();
 });

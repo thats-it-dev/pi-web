@@ -98,18 +98,22 @@ export async function startBridgeServer(opts: BridgeServerOptions): Promise<Brid
 		sock.on(
 			"data",
 			lineSplitter((line) => {
-				let msg: BridgeToHub;
 				try {
-					msg = JSON.parse(line);
-				} catch {
-					return;
+					const msg = JSON.parse(line) as BridgeToHub;
+					if (!msg || typeof msg !== "object") throw new Error("not an object");
+					if (msg.type === "hello") {
+						if (ignored) return;
+						return onHello(msg);
+					}
+					if (ignored || pid === null) return;
+					const e = byPid.get(pid);
+					if (!e || e.sock !== sock) return; // late messages from a replaced runtime
+					if (msg.type === "bye") return onBye(pid, e, msg.reason);
+					e.handle.receive(msg);
+				} catch (err) {
+					log(`dropping a bridge connection after a bad message: ${(err as Error).message}`);
+					sock.destroy();
 				}
-				if (msg.type === "hello") return onHello(msg);
-				if (ignored || pid === null) return;
-				const e = byPid.get(pid);
-				if (!e || e.sock !== sock) return; // late messages from a replaced runtime
-				if (msg.type === "bye") return onBye(pid, e, msg.reason);
-				e.handle.receive(msg);
 			}),
 		);
 
