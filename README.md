@@ -29,7 +29,7 @@ http://localhost:5173.
 ## Test
 
 ```bash
-npm test              # shared + hub (node:test, real pi against a fake model) + app (vitest)
+npm test              # shared + hub + bridge (node:test, real pi against a fake model) + app (vitest)
 npm run typecheck
 npm run e2e -w app    # Playwright: desktop + phone flows against the real hub
 ```
@@ -53,6 +53,24 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "piBin": "pi"
 }
 ```
+
+## Terminal sync (bridge)
+
+A pi started in a terminal shows up live in pi-web when it loads the bridge extension in `bridge/`. Load it for one run:
+
+```bash
+pi -e ~/workspace/pi-web/bridge/index.ts
+```
+
+Or load it for every run:
+
+```bash
+pi install ~/workspace/pi-web/bridge
+```
+
+The bridge connects to the hub at `~/.config/pi-web/bridge.sock`. Set `PI_WEB_BRIDGE_SOCKET` to use another socket, for example `.dev-data/bridge.sock` for `npm run dev -w hub`. If the hub isn't running, the bridge waits quietly and connects when it starts.
+
+From the app you can watch the terminal session stream, prompt, steer and queue follow-ups, switch the model and thinking level, compact, and rename. Fork, clone, `!bash`, export and extension commands stay in the terminal, and extension dialogs show as "waiting for you in the terminal". If the app is running a reply in headless pi when you resume that session in a terminal, the terminal is told to wait and takes over once the reply finishes.
 
 ## Deploy
 

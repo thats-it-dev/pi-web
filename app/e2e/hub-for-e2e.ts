@@ -17,6 +17,10 @@ const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);
 writeFileSync(join(dataDir, "config.json"), JSON.stringify({ port: PORT, hostname: "localhost:5173", allowedLogin: "dev@local", dev: true, piBin: pi.piBin }));
 
+// The terminal e2e test starts its own pi against this hub; it needs the same pi config and socket.
+const E2E_ENV_FILE = join(tmpdir(), "pi-web-e2e-env.json"); // keep in sync with smoke.spec.ts
+writeFileSync(E2E_ENV_FILE, JSON.stringify({ piBin: pi.piBin, agentDir: pi.agentDir, socketPath: join(dataDir, "bridge.sock") }));
+
 Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir });
 process.on("exit", () => pi.cleanup());
 await import("../../hub/src/main.ts");

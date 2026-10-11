@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { startTerminalPi } from "../../hub/test/support/terminal-pi.ts";
 
 const WORKDIR = join(tmpdir(), "pi-web-e2e-work"); // keep in sync with hub-for-e2e.ts
 
@@ -54,4 +56,36 @@ test("phone: send with the button, then find the session from the menu", async (
 	await expect(layout).toHaveClass(/nav-open/);
 	await page.locator("pi-sidebar a.row.cur").click(); // the session already open: no hash change
 	await expect(layout).not.toHaveClass(/nav-open/);
+});
+
+const E2E_ENV_FILE = join(tmpdir(), "pi-web-e2e-env.json"); // written by hub-for-e2e.ts
+
+test("terminal: a pi open in a terminal is live in the app, and prompts from either side show in both", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	const e2e = JSON.parse(readFileSync(E2E_ENV_FILE, "utf8")) as { piBin: string; agentDir: string; socketPath: string };
+	const term = startTerminalPi({ piBin: e2e.piBin, cwd: WORKDIR, env: { PI_CODING_AGENT_DIR: e2e.agentDir }, socketPath: e2e.socketPath });
+	try {
+		const id = (await term.call({ type: "get_state" })).data.sessionId as string;
+		await page.goto(`/#/s/${id}`);
+		await expect(page.locator("pi-header")).toContainText("open in terminal");
+
+		const input = page.getByLabel("Message");
+		await input.fill("from the app");
+		await input.press("Enter");
+		await expect(page.locator("pi-messages")).toContainText("Hello world");
+		await term.records.waitFor((r) => r.type === "message_end" && r.message?.role === "user" && JSON.stringify(r.message.content).includes("from the app"));
+
+		term.send({ type: "prompt", message: "from the terminal" });
+		await expect(page.locator("pi-messages")).toContainText("from the terminal");
+		await expect(page.locator("pi-messages").getByText("Hello world")).toHaveCount(2);
+
+		await input.fill("/as");
+		await expect(page.getByRole("listbox", { name: "Commands" }).locator(".opt.off")).toContainText("/ask");
+		await input.fill("");
+
+		await term.quit();
+		await expect(page.getByLabel("Message")).toHaveAttribute("placeholder", "continue here");
+	} finally {
+		await term.quit();
+	}
 });
