@@ -1,5 +1,5 @@
 // The seam between the hub and "something running a pi session". RpcHandle
-// (headless child, this plan) and BridgeHandle (terminal pi, Plan 2) implement it.
+// (headless child) and BridgeHandle (terminal pi) implement it.
 
 import type { AppCommand, Capabilities, CommandResult, HandleKind, LiveState, Snapshot, StreamMessage } from "../../shared/src/protocol.ts";
 
@@ -24,5 +24,6 @@ export interface SessionHandle {
 	command(cmd: AppCommand): Promise<CommandResult>;
 	subscribe(fn: (msg: StreamMessage) => void): () => void;
 	onEvent(fn: (e: HandleEvent) => void): () => void;
+	notice?(text: string): void; // bridge only: shown in the terminal TUI
 	close(): void;
 }
