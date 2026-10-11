@@ -5,6 +5,7 @@ import { type Route, hrefFor, parseRoute } from "../lib/route.ts";
 import { getHubUrl } from "../lib/settings.ts";
 import { sharedStyles } from "../styles/shared.ts";
 import "./pi-new-session.ts";
+import "./pi-session.ts";
 import "./pi-settings.ts";
 import "./pi-sidebar.ts";
 import "./pi-toasts.ts";
