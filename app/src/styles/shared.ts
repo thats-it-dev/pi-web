@@ -34,6 +34,9 @@ export const sharedStyles = css`
 	.dot.needs_you { background: var(--primary); }
 	.dot.error { background: transparent; box-shadow: inset 0 0 0 2px var(--primary); }
 	@keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary), transparent 70%); } }
+	.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; width: max-content; }
+	.seg button { padding: 5px 14px; font-size: 0.9rem; }
+	.seg button.on { background: var(--text); color: var(--bg); }
 	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 `;
