@@ -5,6 +5,7 @@
 	"version": "0.1.0",
 	"scripts": {
 		"start": "node src/main.ts",
+		"dev": "PI_WEB_DATA_DIR=../.dev-data node --watch src/main.ts",
 		"test": "node --test --test-concurrency=1 test/*.test.ts",
 		"typecheck": "tsc -p tsconfig.json"
 	},
