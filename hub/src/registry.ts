@@ -32,6 +32,8 @@ export class Registry {
 	private opts: RegistryOptions;
 	private handles = new Map<string, SessionHandle>();
 	private starting = new Map<string, Promise<SessionHandle>>();
+	private pending = 0;
+	private unsubscribers = new Map<SessionHandle, () => void>();
 	private errors = new Map<string, string>();
 	private listeners = new Set<(m: ListMessage) => void>();
 
@@ -117,14 +119,19 @@ export class Registry {
 
 	private async launch(o: { cwd: string; sessionFile?: string }): Promise<SessionHandle> {
 		this.makeRoom();
-		const h = await this.opts.factory.startRpc(o);
-		this.adopt(h);
-		return h;
+		this.pending++;
+		try {
+			const h = await this.opts.factory.startRpc(o);
+			this.adopt(h);
+			return h;
+		} finally {
+			this.pending--;
+		}
 	}
 
 	private makeRoom(): void {
 		const headless = this.all().filter((h) => h.kind === "rpc");
-		if (headless.length < this.opts.maxHeadless) return;
+		if (headless.length + this.pending < this.opts.maxHeadless) return;
 		const victim = headless.filter((h) => this.isIdle(h)).sort((a, b) => a.lastActive - b.lastActive)[0];
 		if (!victim) throw new HttpError(503, `${this.opts.maxHeadless} pi sessions are already running. Close one first.`);
 		this.forget(victim);
@@ -134,7 +141,7 @@ export class Registry {
 	private adopt(h: SessionHandle): void {
 		this.errors.delete(h.sessionId);
 		this.handles.set(h.sessionId, h);
-		h.onEvent((e) => {
+		const off = h.onEvent((e) => {
 			switch (e.type) {
 				case "state_changed":
 					this.emitState(h.sessionId);
@@ -158,10 +165,13 @@ export class Registry {
 					break;
 			}
 		});
+		this.unsubscribers.set(h, off);
 		this.emitState(h.sessionId);
 	}
 
 	private forget(h: SessionHandle): void {
+		this.unsubscribers.get(h)?.();
+		this.unsubscribers.delete(h);
 		for (const [id, x] of [...this.handles]) {
 			if (x !== h) continue;
 			this.handles.delete(id);

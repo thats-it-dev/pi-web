@@ -13,6 +13,8 @@ export class FakeHandle implements SessionHandle {
 	busy = false;
 	state: LiveState = "idle";
 	closed = false;
+	/** When true, close() does not fire the exit event (simulates a child that has not exited yet). */
+	deferExit = false;
 	received: AppCommand[] = [];
 	conv = createConversation();
 	private subs = new Set<(m: StreamMessage) => void>();
@@ -77,6 +79,9 @@ export class FakeHandle implements SessionHandle {
 		if (this.closed) return;
 		this.closed = true;
 		this.push({ type: "handle_gone", reason: "closed" });
+		if (!this.deferExit) this.fireExit();
+	}
+	fireExit(): void {
 		this.fire({ type: "exit", code: 0, stderr: "", closedByHub: true });
 	}
 }

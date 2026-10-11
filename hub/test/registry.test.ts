@@ -126,3 +126,41 @@ test("close() and closeAll() stop headless sessions", async () => {
 	assert.equal(started[1].closed, true);
 	assert.deepEqual(registry.all(), []);
 });
+
+test("concurrent starts of different sessions never exceed the cap", async () => {
+	const { registry, started } = setup({ maxHeadless: 2 });
+	const results = await Promise.allSettled([registry.ensure("disk-1"), registry.ensure("disk-2"), registry.create("/w"), registry.create("/w")]);
+	const ok = results.filter((r) => r.status === "fulfilled");
+	const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+	assert.equal(ok.length, 2);
+	assert.ok(rejected.every((r) => r.reason instanceof HttpError && r.reason.status === 503));
+	assert.equal(started.length, 2);
+	assert.equal(registry.all().length, 2);
+});
+
+test("a forgotten handle's late events no longer affect the registry", async () => {
+	const { registry, changes } = setup();
+	const h = (await registry.ensure("disk-1")) as FakeHandle;
+	h.deferExit = true;
+	registry.close("disk-1");
+	const before = changes.length;
+	h.sessionId = "late";
+	h.fire({ type: "session_changed", from: "disk-1", to: "late" });
+	h.fire({ type: "state_changed" });
+	assert.equal(registry.get("late"), undefined);
+	assert.equal(changes.length, before);
+});
+
+test("close() drops the handle immediately, before the process has exited", async () => {
+	const { registry, started } = setup();
+	const h = (await registry.ensure("disk-1")) as FakeHandle;
+	h.deferExit = true;
+	registry.close("disk-1");
+	assert.equal(h.closed, true);
+	assert.equal(registry.get("disk-1"), undefined);
+	const again = await registry.ensure("disk-1");
+	assert.notEqual(again, h);
+	assert.equal(started.length, 2);
+	h.fireExit();
+	assert.equal(registry.get("disk-1"), again);
+});
