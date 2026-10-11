@@ -1,0 +1,13 @@
+{
+	"name": "@pi-web/bridge",
+	"private": true,
+	"type": "module",
+	"description": "pi extension: mirrors a terminal pi session to the pi-web hub",
+	"keywords": ["pi-package"],
+	"pi": { "extensions": ["./index.ts"] },
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+}
