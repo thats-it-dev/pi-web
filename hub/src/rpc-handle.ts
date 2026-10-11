@@ -28,7 +28,7 @@ import type {
 import { applyEvent, createConversation } from "../../shared/src/reducer.ts";
 import { HttpError } from "./errors.ts";
 import type { HandleEvent, SessionHandle } from "./handle.ts";
-import { lineSplitter } from "./jsonl.ts";
+import { lineSplitter } from "../../shared/src/jsonl.ts";
 import { type RpcCommand, toRpc } from "./translate.ts";
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
@@ -133,6 +133,7 @@ export class RpcHandle implements SessionHandle {
 			dialogs: [...this.dialogs.values()],
 			statuses: this.statuses,
 			widgets: this.widgets,
+			terminalPrompt: null,
 		};
 	}
 
@@ -433,7 +434,7 @@ export class RpcHandle implements SessionHandle {
 	}
 
 	private meta(): StreamMessage {
-		return { type: "meta", state: this.state as SessionStateInfo, stats: this.stats, statuses: this.statuses, widgets: this.widgets, thinkingLevels: this.thinkingLevels };
+		return { type: "meta", state: this.state as SessionStateInfo, stats: this.stats, statuses: this.statuses, widgets: this.widgets, thinkingLevels: this.thinkingLevels, terminalPrompt: null };
 	}
 
 	private onExit(code: number | null): void {
@@ -457,7 +458,7 @@ export class RpcHandle implements SessionHandle {
 	}
 
 	private emit(e: HandleEvent): void {
-		for (const fn of this.listeners) fn(e);
+		for (const fn of [...this.listeners]) fn(e);
 	}
 }
 

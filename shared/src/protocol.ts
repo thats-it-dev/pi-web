@@ -75,6 +75,13 @@ export interface Widget {
 	placement: "aboveEditor" | "belowEditor";
 }
 
+// A blocking extension dialog open in a terminal pi (bridge sessions only).
+// The app can't answer it; it says "waiting for you in the terminal".
+export interface TerminalPrompt {
+	kind: string; // select | confirm | input | editor | custom
+	title: string;
+}
+
 export type ContentBlock =
 	| { type: "text"; text: string }
 	| { type: "thinking"; thinking: string; redacted?: boolean }
@@ -135,6 +142,7 @@ export interface Snapshot {
 	dialogs: Dialog[];
 	statuses: Record<string, string>;
 	widgets: Record<string, Widget>;
+	terminalPrompt: TerminalPrompt | null;
 }
 
 export type StreamMessage =
@@ -148,6 +156,7 @@ export type StreamMessage =
 			statuses: Record<string, string>;
 			widgets: Record<string, Widget>;
 			thinkingLevels: ThinkingLevel[];
+			terminalPrompt: TerminalPrompt | null;
 	  }
 	| { type: "dialog"; dialog: Dialog }
 	| { type: "dialog_closed"; id: string }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, before, test } from "node:test";
-import { lineSplitter } from "../src/jsonl.ts";
+import { lineSplitter } from "../../shared/src/jsonl.ts";
 import { type FakeModel, startFakeModel } from "./support/fake-model.ts";
 import { makePiEnv } from "./support/pi-env.ts";
 

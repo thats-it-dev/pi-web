@@ -8,7 +8,7 @@ const snap = (id = "s1"): Snapshot => ({
 	capabilities: { dialogs: "here", fork: true, clone: true, newSession: true, bash: true, export: true },
 	conv: createConversation([{ role: "user", content: "hi", timestamp: 1 }]),
 	state: { model: null, thinkingLevel: "medium", isStreaming: false, isCompacting: false, sessionId: id, messageCount: 1, pendingMessageCount: 0, autoCompactionEnabled: true },
-	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {},
+	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null,
 });
 
 describe("SessionStore", () => {
@@ -31,7 +31,7 @@ describe("SessionStore", () => {
 		s.apply({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hi" } } });
 		expect(s.conv.partial?.content).toEqual([{ type: "text", text: "Hi" }]);
 		const m = snap();
-		s.apply({ type: "meta", state: { ...m.state, thinkingLevel: "high" }, stats: null, statuses: { lsp: "LSP Inactive" }, widgets: {}, thinkingLevels: ["off", "high"] });
+		s.apply({ type: "meta", state: { ...m.state, thinkingLevel: "high" }, stats: null, statuses: { lsp: "LSP Inactive" }, widgets: {}, thinkingLevels: ["off", "high"], terminalPrompt: null });
 		expect(s.snapshot?.state.thinkingLevel).toBe("high");
 		expect(s.snapshot?.statuses).toEqual({ lsp: "LSP Inactive" });
 		s.apply({ type: "dialog", dialog: { id: "d1", method: "confirm", title: "Allow rm?" } });

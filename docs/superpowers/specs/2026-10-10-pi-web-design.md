@@ -111,9 +111,20 @@ Capabilities by handle:
 
 **Bridge ↔ hub** (newline-delimited JSON over `~/.config/pi-web/bridge.sock`, socket mode 0600):
 
-- Bridge → hub: `hello {sessionId, sessionFile, cwd, pid, piVersion}`, `event {event}` (pi events in RPC shapes, with `partial` stripped from `message_update` the same way RPC strips it), `state {model, thinkingLevel, sessionName, contextUsage, isIdle}`, `commands {commands}`, `result {id, ok, data?, error?}`, `bye`.
-- Hub → bridge: `cmd {id, command: AppCommand}`, `notice {text}` (shown in the TUI with `ctx.ui.notify`).
+- Bridge → hub (types in `shared/src/bridge.ts`):
+  - `hello {protocol, sessionId, sessionFile, cwd, pid, piVersion, sync: FullSync, prompt}`. `FullSync` is `{state, stats, thinkingLevels, models, commands, messages}`, everything a snapshot needs.
+  - `event {event}`: pi events in RPC shapes, with `message` and `partial` stripped from `message_update` the way RPC mode's `toJsonEvent` strips them. `compaction_start` and `compaction_end` are synthesized from `session_before_compact`, `session_compact` and `session_compact_failed`.
+  - `sync {sync}`: state, stats and thinking levels after `turn_end`, `agent_settled`, a model, thinking or name change; the full sync after compaction.
+  - `prompt_state {prompt}`: a blocking TUI dialog opened or closed (`ui_prompt_start` / `ui_prompt_end`).
+  - `result {id, ok, data?, error?}`
+  - `bye {reason}`: `reason` is `session_shutdown`'s.
+- Hub → bridge: `cmd {id, command}`, where `command` is `prompt`, `abort`, `set_model`, `set_thinking`, `compact` or `rename`; and `notice {text}`, shown with `ctx.ui.notify`.
+- A TUI `/new`, `/resume` or `/fork` replaces pi's extension runtime, so the old connection says `bye` and a new connection says `hello` from the same pid, in either order. The hub keeps the same `BridgeHandle` for a pid through a 5 s grace period and re-keys it.
 - The bridge sends `hello` again on every `session_start`, since `/new`, `/resume` and `/fork` in the TUI change the session.
+
+### 2.4 Bridge limitations
+
+pi's extension API has no `queue_update`, `auto_retry_*`, or view of other extensions' UI calls. On a bridge session the app therefore shows no queue chips, no "retrying (n/max)", and no other extensions' statuses, widgets or toasts. Extension dialogs are shown as "waiting for you in the terminal: <title>". Extension commands can't be run from the app, because `sendUserMessage` never dispatches them; the slash menu shows them disabled. Prompt templates and skills work (`expandPromptTemplates: true`). A manual compaction that another extension cancels leaves "compacting…" showing until the next run settles.
 
 ## 3. Behaviour
 
