@@ -39,11 +39,13 @@ const GOOD = { origin: "https://pi.thatsit.dev", host: "hub.test:7878", "tailsca
 
 const handles = new Map<string, FakeHandle>();
 let n = 0;
+let nextId: string | null = null; // forces the id of the next started handle
 const index = new SessionIndex(sessions);
 const registry = new Registry({
 	factory: {
 		async startRpc(o) {
-			const id = o.sessionFile ? "disk-1" : `new-${++n}`;
+			const id = nextId ?? (o.sessionFile ? "disk-1" : `new-${++n}`);
+			nextId = null;
 			const h = new FakeHandle(id, o.cwd, o.sessionFile ?? null);
 			handles.set(id, h);
 			return h;
@@ -110,6 +112,18 @@ test("new sessions need an existing folder; ~ expands to home", async () => {
 	assert.equal(handles.get(home.body.sessionId)?.cwd, work);
 });
 
+test("a relative folder is resolved against home, not the hub's working directory", async () => {
+	mkdirSync(join(work, "proj"), { recursive: true });
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: "proj" });
+	assert.equal(r.status, 200);
+	assert.equal(handles.get(r.body.sessionId)?.cwd, join(work, "proj"));
+	const tilde = await call(port, "POST", "/api/sessions", GOOD, { cwd: "~/proj/" });
+	assert.equal(handles.get(tilde.body.sessionId)?.cwd, join(work, "proj"));
+	const missing = await call(port, "POST", "/api/sessions", GOOD, { cwd: "nope" });
+	assert.equal(missing.status, 400);
+	assert.equal(missing.body.error, `Not a folder: ${join(work, "nope")}`);
+});
+
 test("commands: validated, 404 for unknown sessions, forwarded to the session's handle", async () => {
 	registry.close("disk-1");
 	assert.equal((await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "rm_rf" })).status, 400);
@@ -139,6 +153,33 @@ test("a stream waits detached, then attaches when the session starts", async () 
 	handles.get("disk-1")?.close();
 	await sse.next((m) => m.type === "handle_gone");
 	await sse.next((m) => m.type === "detached");
+	sse.close();
+});
+
+test("a stream follows session_changed and re-attaches under the new id", async () => {
+	const created = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const from = created.body.sessionId as string;
+	const h = handles.get(from) as FakeHandle;
+	const sse = await openSse(port, `/api/sessions/${from}/stream`, GOOD);
+	assert.equal(((await sse.next((m) => m.type === "snapshot")).snapshot as { sessionId: string }).sessionId, from);
+	// What RpcHandle does after fork/clone/new: a snapshot under the new id, then session_changed.
+	h.sessionId = "moved-1";
+	h.push({ type: "snapshot", snapshot: h.snapshot() });
+	h.fire({ type: "session_changed", from, to: "moved-1" });
+	assert.equal(((await sse.next((m) => m.type === "snapshot")).snapshot as { sessionId: string }).sessionId, "moved-1");
+	h.close();
+	await sse.next((m) => m.type === "handle_gone");
+	await sse.next((m) => m.type === "detached");
+	// A process for the old id must not grab the stream; one for the new id does.
+	nextId = from;
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	nextId = "moved-1";
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const again = await sse.next((m) => m.type === "snapshot");
+	assert.equal((again.snapshot as { sessionId: string }).sessionId, "moved-1");
+	assert.equal(sse.messages.filter((m) => (m as { type?: string }).type === "snapshot").length, 0);
+	registry.close(from);
+	registry.close("moved-1");
 	sse.close();
 });
 

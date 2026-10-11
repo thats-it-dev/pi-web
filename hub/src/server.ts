@@ -4,7 +4,7 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage } from "../../shared/src/protocol.ts";
 import { checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
@@ -44,7 +44,9 @@ export function createHubServer(deps: HubDeps): Server {
 		if (m === "GET" && p === "/api/events") return listStream(req, res, cors);
 		if (m === "POST" && p === "/api/sessions") {
 			const body = (await readJson(req)) as { cwd?: unknown };
-			const cwd = (typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : home).replace(/^~(?=\/|$)/, home);
+			// Relative folders are relative to home, not to wherever the hub was started.
+			const raw = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : "~";
+			const cwd = resolve(home, raw.replace(/^~(?=\/|$)/, home));
 			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
 			const h = await registry.create(cwd);
 			return sendJson(res, 200, { sessionId: h.sessionId }, cors);

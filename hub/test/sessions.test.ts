@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SessionIndex, historyFromText, knownCwds, sessionsDir } from "../src/sessions.ts";
+import { SessionIndex, historyFromText, knownCwds, sessionsDir, summarize } from "../src/sessions.ts";
 
 const line = (o: object) => `${JSON.stringify(o)}\n`;
 const header = (id: string, cwd: string, ts = "2026-10-07T01:23:32.125Z") => line({ type: "session", version: 3, id, timestamp: ts, cwd });
@@ -93,6 +93,13 @@ test("history follows the active branch and renders compaction and branch summar
 	const h = historyFromText(text);
 	assert.equal((h[1].content as Array<{ text: string }>)[0].text, "branched answer");
 	assert.equal(h[2].tokensBefore, 50000);
+});
+
+test("a header without a string cwd summarizes with an empty cwd", () => {
+	for (const cwd of [undefined, null, 42, { path: "/x" }]) {
+		const s = summarize("/f.jsonl", line({ type: "session", version: 3, id: "x", timestamp: "2026-10-07T00:00:00.000Z", cwd }), 5);
+		assert.equal(s?.cwd, "", `cwd ${JSON.stringify(cwd)}`);
+	}
 });
 
 test("knownCwds ranks folders by session count and always includes home", async () => {

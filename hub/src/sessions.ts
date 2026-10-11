@@ -61,7 +61,7 @@ export function summarize(file: string, text: string, mtimeMs: number): FileSumm
 	return {
 		id: header.id,
 		file,
-		cwd: header.cwd,
+		cwd: typeof header.cwd === "string" ? header.cwd : "",
 		name,
 		firstPrompt,
 		userMessages,
