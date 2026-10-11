@@ -1,24 +1,8 @@
 import { LitElement, css, html, nothing } from "lit";
 import { formatCost, formatTokens } from "../lib/format.ts";
 import type { SessionStore } from "../lib/session-store.ts";
+import { headerStatus } from "../lib/status.ts";
 import { sharedStyles } from "../styles/shared.ts";
-
-export function headerStatus(s: SessionStore): string | null {
-	switch (s.status) {
-		case "loading":
-			return "loading…";
-		case "starting":
-			return "starting pi…";
-		case "reconnecting":
-			return "reconnecting…";
-		case "history":
-			return s.lastExit ? `pi stopped: ${s.lastExit.split("\n").at(-1)}. Send a message to restart it.` : "pi isn't running for this session. Sending a message starts it.";
-	}
-	if (s.conv.retry) return `retrying (${s.conv.retry.attempt}/${s.conv.retry.max})…`;
-	if (s.conv.compacting) return "compacting…";
-	if (s.snapshot?.handleKind === "bridge") return "open in terminal";
-	return null;
-}
 
 export class PiHeader extends LitElement {
 	static properties = { store: { attribute: false }, version: { attribute: false }, heading: { attribute: false } };

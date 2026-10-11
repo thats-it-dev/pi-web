@@ -4,7 +4,7 @@ export interface SlashItem {
 	name: string;
 	description: string;
 	kind: "builtin" | CommandInfo["source"];
-	rpcOnly?: boolean; // unavailable while the session is open in the terminal (Plan 2)
+	rpcOnly?: boolean; // unavailable while the session is open in the terminal
 }
 
 // TUI built-ins that RPC doesn't expose; the app implements them (spec §5.3).
@@ -27,7 +27,7 @@ export const BUILTIN_NAMES = new Set(BUILTINS.map((b) => b.name));
 export function slashItems(commands: CommandInfo[]): SlashItem[] {
 	return [
 		...BUILTINS,
-		...commands.filter((c) => !BUILTIN_NAMES.has(c.name)).map((c) => ({ name: c.name, description: c.description || c.source, kind: c.source })),
+		...commands.filter((c) => !BUILTIN_NAMES.has(c.name)).map((c) => ({ name: c.name, description: c.description || c.source, kind: c.source, rpcOnly: c.source === "extension" })),
 	];
 }
 

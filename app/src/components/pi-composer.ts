@@ -17,6 +17,7 @@ const LONG_PRESS_MS = 500;
 export class PiComposer extends LitElement {
 	static properties = {
 		streaming: { attribute: false },
+		detached: { attribute: false },
 		items: { attribute: false },
 		canImages: { attribute: false },
 		rpcOnlyDisabled: { attribute: false },
@@ -28,6 +29,7 @@ export class PiComposer extends LitElement {
 		menuDismissed: { state: true },
 	};
 	declare streaming: boolean;
+	declare detached: boolean;
 	declare items: SlashItem[];
 	declare canImages: boolean;
 	declare rpcOnlyDisabled: boolean;
@@ -66,6 +68,7 @@ export class PiComposer extends LitElement {
 	constructor() {
 		super();
 		this.streaming = false;
+		this.detached = false;
 		this.items = [];
 		this.canImages = false;
 		this.rpcOnlyDisabled = false;
@@ -224,7 +227,7 @@ export class PiComposer extends LitElement {
 					)}</div>`
 				: nothing}
 			<div class="box">
-				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu.length ? "true" : "false"} aria-activedescendant=${menu.length ? `slash-opt-${Math.min(this.menuIndex, menu.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, or / for commands"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey}></textarea>
+				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu.length ? "true" : "false"} aria-activedescendant=${menu.length ? `slash-opt-${Math.min(this.menuIndex, menu.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, or / for commands"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey}></textarea>
 				<div class="actions">
 					${this.canImages
 						? html`<label class="icon" aria-label="Attach image" style="display:grid;place-items:center;cursor:pointer">＋<input class="sr-only" type="file" accept="image/*" multiple @change=${this.onFiles} /></label>`

@@ -30,6 +30,16 @@ describe("slash commands", () => {
 		expect(filterSlash(items, "ctxst").map((i) => i.name)).toEqual(["skill:ctx-stats"]);
 		expect(filterSlash(items, "").slice(0, 2).map((i) => i.name)).toEqual(["model", "thinking"]);
 	});
+	it("marks extension commands unavailable in the terminal; prompts and skills stay available", () => {
+		const items = slashItems([
+			{ name: "ask", source: "extension" },
+			{ name: "greet", source: "prompt" },
+			{ name: "skill:demo", source: "skill" },
+		]);
+		expect(items.find((i) => i.name === "ask")?.rpcOnly).toBe(true);
+		expect(items.find((i) => i.name === "greet")?.rpcOnly).toBe(false);
+		expect(items.find((i) => i.name === "skill:demo")?.rpcOnly).toBe(false);
+	});
 	it("parses built-ins, shell commands and prompts", () => {
 		expect(parseInput("/compact keep the API notes")).toEqual({ kind: "builtin", name: "compact", args: "keep the API notes" });
 		expect(parseInput("/model")).toEqual({ kind: "builtin", name: "model", args: "" });

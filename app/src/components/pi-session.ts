@@ -375,6 +375,7 @@ export class PiSession extends LitElement {
 			${this.renderTray(snap)}
 			<pi-composer
 				.streaming=${s.conv.streaming}
+				.detached=${s.status === "history"}
 				.items=${slashItems(snap?.commands ?? [])}
 				.canImages=${Boolean(snap?.state.model?.input.includes("image"))}
 				.rpcOnlyDisabled=${snap?.handleKind === "bridge"}
