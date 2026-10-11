@@ -130,6 +130,9 @@ export function createHubServer(deps: HubDeps): Server {
 					unsubscribe();
 					detach = null;
 					sse.send({ type: "detached" });
+					// Another handle may already hold the session (a terminal took over before this one exited).
+					const next = registry.get(id);
+					if (next && next !== h) attach(next);
 				}
 			});
 			detach = unsubscribe;

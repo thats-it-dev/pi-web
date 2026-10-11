@@ -183,6 +183,22 @@ test("a stream follows session_changed and re-attaches under the new id", async 
 	sse.close();
 });
 
+test("a stream moves to the terminal when it takes over a session the app had open", async () => {
+	await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "attach" });
+	const rpc = handles.get("disk-1") as FakeHandle;
+	rpc.deferGone = true; // like RpcHandle: handle_gone comes when the child exits, later
+	const sse = await openSse(port, "/api/sessions/disk-1/stream", GOOD);
+	assert.equal(((await sse.next((m) => m.type === "snapshot")).snapshot as { handleKind: string }).handleKind, "rpc");
+	const term = new FakeHandle("disk-1", work, null, { kind: "bridge", pid: 31337 });
+	assert.equal(registry.attachBridge(term), "attached");
+	rpc.goneNow();
+	await sse.next((m) => m.type === "detached");
+	assert.equal(((await sse.next((m) => m.type === "snapshot")).snapshot as { handleKind: string }).handleKind, "bridge");
+	term.leave();
+	await sse.next((m) => m.type === "detached");
+	sse.close();
+});
+
 test("reconnecting mid-reply gets the partial message and running tools in the snapshot", async () => {
 	registry.close("disk-1");
 	await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "attach" });

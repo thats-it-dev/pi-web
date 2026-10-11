@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ListMessage } from "../../shared/src/protocol.ts";
 import { HttpError } from "../src/errors.ts";
-import { Registry, type RegistryOptions } from "../src/registry.ts";
+import { BUSY_NOTICE, ELSEWHERE_NOTICE, Registry, type RegistryOptions } from "../src/registry.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
 function setup(opts: Partial<RegistryOptions> = {}) {
@@ -163,4 +163,97 @@ test("close() drops the handle immediately, before the process has exited", asyn
 	assert.equal(started.length, 2);
 	h.fireExit();
 	assert.equal(registry.get("disk-1"), again);
+});
+
+const bridge = (id: string, pid = 900) => new FakeHandle(id, "/w", `/s/${id}.jsonl`, { kind: "bridge", pid });
+
+test("a terminal pi on a session nobody holds is attached as a bridge", async () => {
+	const { registry, changes } = setup();
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "attached");
+	assert.equal(registry.get("disk-1"), b);
+	assert.deepEqual(registry.info("disk-1"), { live: true, handleKind: "bridge", state: "idle" });
+	assert.ok(changes.some((m) => m.type === "session_state" && m.sessionId === "disk-1" && m.handleKind === "bridge"));
+});
+
+test("an idle headless pi gives way to the terminal", async () => {
+	const { registry, started } = setup();
+	await registry.ensure("disk-1");
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "attached");
+	assert.equal(started[0].closed, true);
+	assert.equal(registry.get("disk-1"), b);
+	assert.deepEqual(b.notices, []);
+});
+
+test("a busy headless pi keeps the session; the terminal is told and takes over once it settles", async () => {
+	const { registry, started } = setup();
+	const rpc = (await registry.ensure("disk-1")) as FakeHandle;
+	rpc.busy = true;
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "waiting");
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
+	assert.equal(registry.get("disk-1"), rpc);
+	rpc.state = "running";
+	rpc.fire({ type: "state_changed" }); // still busy: nothing changes
+	assert.equal(registry.get("disk-1"), rpc);
+	rpc.busy = false;
+	rpc.state = "idle";
+	rpc.fire({ type: "state_changed" });
+	assert.equal(started[0].closed, true);
+	assert.equal(registry.get("disk-1"), b);
+});
+
+test("a second terminal on the same session waits until the first one leaves", async () => {
+	const { registry } = setup();
+	const first = bridge("disk-1", 901);
+	const second = bridge("disk-1", 902);
+	registry.attachBridge(first);
+	assert.equal(registry.attachBridge(second), "waiting");
+	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE]);
+	first.leave();
+	assert.equal(registry.get("disk-1"), second);
+});
+
+test("a waiting terminal that quits is forgotten", async () => {
+	const { registry } = setup();
+	const first = bridge("disk-1", 901);
+	const second = bridge("disk-1", 902);
+	registry.attachBridge(first);
+	registry.attachBridge(second);
+	second.leave();
+	first.leave();
+	assert.equal(registry.get("disk-1"), undefined);
+});
+
+test("the hub's own headless child is never taken for a terminal", async () => {
+	const { registry } = setup();
+	const rpc = await registry.ensure("disk-1");
+	assert.equal(registry.attachBridge(bridge("disk-2", rpc.pid)), "ignored");
+	assert.equal(registry.get("disk-2"), undefined);
+});
+
+test("bridges are never reaped, evicted or closed, and don't count toward maxHeadless", async () => {
+	const { registry, setClock } = setup({ maxHeadless: 1 });
+	const b = bridge("disk-2");
+	registry.attachBridge(b);
+	await registry.ensure("disk-1"); // the one headless slot
+	setClock(1_000_000);
+	registry.reap();
+	registry.close("disk-2");
+	registry.closeAll();
+	assert.equal(b.closed, false);
+	assert.equal(registry.get("disk-2"), b);
+});
+
+test("a terminal that switches onto a session an idle headless pi holds takes it over", async () => {
+	const { registry, started } = setup();
+	const b = bridge("disk-2");
+	registry.attachBridge(b);
+	await registry.ensure("disk-1");
+	b.sessionId = "disk-1";
+	b.fire({ type: "session_changed", from: "disk-2", to: "disk-1" });
+	assert.equal(started[0].closed, true);
+	assert.equal(registry.get("disk-1"), b);
+	assert.equal(registry.get("disk-2"), undefined);
 });

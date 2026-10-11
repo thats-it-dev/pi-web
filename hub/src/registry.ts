@@ -1,10 +1,14 @@
 // Which pi process (if any) is serving each session. Starts headless pi on
 // demand, follows sessions that move (fork/clone/new), keeps at most
-// maxHeadless running, and closes idle ones (spec §3.2).
+// maxHeadless running, closes idle ones, and decides between a headless pi
+// and a terminal pi that want the same session (spec §3.2).
 
 import type { HandleKind, ListMessage, LiveState } from "../../shared/src/protocol.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
+
+export const BUSY_NOTICE = "This session is running in pi-web. Wait for it to finish, or /quit.";
+export const ELSEWHERE_NOTICE = "This session is open in another terminal; pi-web follows that one.";
 
 export interface HandleFactory {
 	startRpc(opts: { cwd: string; sessionFile?: string }): Promise<SessionHandle>;
@@ -36,6 +40,7 @@ export class Registry {
 	private unsubscribers = new Map<SessionHandle, () => void>();
 	private errors = new Map<string, string>();
 	private listeners = new Set<(m: ListMessage) => void>();
+	private waiting = new Map<SessionHandle, () => void>(); // terminals waiting for a session another handle holds
 
 	constructor(opts: RegistryOptions) {
 		this.opts = opts;
@@ -113,6 +118,50 @@ export class Registry {
 		}
 	}
 
+	// A terminal pi announced itself over the bridge socket.
+	attachBridge(h: SessionHandle): "attached" | "waiting" | "ignored" {
+		if (this.all().some((x) => x.kind === "rpc" && x.pid === h.pid)) return "ignored"; // our own headless child
+		return this.claim(h);
+	}
+
+	private claim(h: SessionHandle): "attached" | "waiting" {
+		const holder = this.handles.get(h.sessionId);
+		if (holder && holder !== h) {
+			if (holder.kind !== "rpc" || holder.isBusy()) {
+				this.wait(h);
+				h.notice?.(holder.kind === "rpc" ? BUSY_NOTICE : ELSEWHERE_NOTICE);
+				return "waiting";
+			}
+			this.forget(holder, false);
+			holder.close();
+		}
+		this.adopt(h);
+		return "attached";
+	}
+
+	private wait(h: SessionHandle): void {
+		const off = h.onEvent((e) => {
+			if (e.type !== "exit" && e.type !== "session_changed") return;
+			off();
+			this.waiting.delete(h);
+			if (e.type === "session_changed") this.claim(h);
+		});
+		this.waiting.set(h, off);
+	}
+
+	private hasWaiter(id: string): boolean {
+		return [...this.waiting.keys()].some((h) => h.sessionId === id);
+	}
+
+	// The session is free: the longest-waiting terminal for it takes over.
+	private promote(id: string): void {
+		const next = [...this.waiting.keys()].find((h) => h.sessionId === id);
+		if (!next) return;
+		this.waiting.get(next)?.();
+		this.waiting.delete(next);
+		this.claim(next);
+	}
+
 	private isIdle(h: SessionHandle): boolean {
 		return h.subscriberCount() === 0 && !h.isBusy();
 	}
@@ -145,17 +194,30 @@ export class Registry {
 			switch (e.type) {
 				case "state_changed":
 					this.emitState(h.sessionId);
+					if (h.kind === "rpc" && !h.isBusy() && this.hasWaiter(h.sessionId)) {
+						this.forget(h);
+						h.close();
+					}
 					break;
 				case "renamed":
 					this.emit({ type: "session_list_changed" });
 					break;
-				case "session_changed":
+				case "session_changed": {
+					const holder = this.handles.get(e.to);
+					if (holder && holder !== h) {
+						// A terminal moved onto a session someone else holds.
+						this.forget(h);
+						this.claim(h);
+						break;
+					}
 					if (this.handles.get(e.from) === h) this.handles.delete(e.from);
 					this.handles.set(e.to, h);
 					this.emitState(e.from);
 					this.emitState(e.to);
 					this.emit({ type: "session_list_changed" });
+					this.promote(e.from);
 					break;
+				}
 				case "exit":
 					this.forget(h);
 					if (!e.closedByHub && e.code !== 0) {
@@ -169,14 +231,17 @@ export class Registry {
 		this.emitState(h.sessionId);
 	}
 
-	private forget(h: SessionHandle): void {
+	private forget(h: SessionHandle, promote = true): void {
 		this.unsubscribers.get(h)?.();
 		this.unsubscribers.delete(h);
+		const freed: string[] = [];
 		for (const [id, x] of [...this.handles]) {
 			if (x !== h) continue;
 			this.handles.delete(id);
 			this.emitState(id);
+			freed.push(id);
 		}
+		if (promote) for (const id of freed) this.promote(id);
 	}
 
 	private emitState(id: string): void {
