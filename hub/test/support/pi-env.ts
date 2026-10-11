@@ -26,7 +26,7 @@ export default function (pi) {
 }
 `;
 
-export function makePiEnv(opts: { modelUrl: string; extensions?: Record<string, string> }): PiEnv {
+export function makePiEnv(opts: { modelUrl: string; extensions?: Record<string, string>; settings?: Record<string, unknown> }): PiEnv {
 	const root = mkdtempSync(join(tmpdir(), "pi-web-pi-"));
 	const agentDir = join(root, "agent");
 	const workDir = join(root, "work");
@@ -49,7 +49,7 @@ export function makePiEnv(opts: { modelUrl: string; extensions?: Record<string, 
 			},
 		}),
 	);
-	writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "fake-a" }));
+	writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "fake-a", ...opts.settings }));
 	for (const [name, source] of Object.entries({ "ask.ts": ASK_EXTENSION, ...opts.extensions })) {
 		writeFileSync(join(agentDir, "extensions", name), source);
 	}

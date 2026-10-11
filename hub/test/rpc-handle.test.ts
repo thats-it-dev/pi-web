@@ -254,3 +254,45 @@ test("a throwing subscriber does not stop other subscribers", async (t) => {
 	assert.ok(errors.mock.callCount() > 0);
 	unsubscribe();
 });
+
+test("steer queues a message mid-reply and pi delivers it before settling", async (t) => {
+	// The fake model's request counter is shared across tests, so key the reply off the last user message.
+	const { h } = await startHandle(t, (req) => (JSON.stringify(req.messages.at(-1)?.content).includes("change course") ? { text: "steered reply" } : { text: "word ".repeat(40), chunkDelayMs: 50 }));
+	const w = watch(h);
+	const first = model.requests.length;
+	await h.command({ type: "prompt", text: "talk", mode: "send" });
+	await w.next((m) => m.type === "event" && m.event.assistantMessageEvent?.type === "text_delta");
+	assert.deepEqual(await h.command({ type: "prompt", text: "change course", mode: "steer" }), { ok: true, data: { disposition: "queued" } });
+	await w.next((m) => m.type === "event" && m.event.type === "queue_update" && Boolean(m.event.steering?.includes("change course")));
+	await w.next(isEvent("agent_settled"));
+	const roles = h.snapshot().conv.messages.map((m) => `${m.role}:${textOf(m) || (typeof m.content === "string" ? m.content : "")}`.trim());
+	assert.deepEqual(roles.slice(-2), ["user:change course", "assistant:steered reply"]);
+	assert.match(textOf(lastAssistant(h.snapshot().conv.messages.slice(0, -2))), /^word word/, "the first reply finished, not aborted");
+	assert.equal(model.requests.length - first, 2, "steering ran a second turn");
+	assert.deepEqual(h.snapshot().conv.queue, { steering: [], followUp: [] });
+});
+
+test("compact summarizes older turns and resyncs subscribers with a snapshot", async (t) => {
+	// Auto-compaction off so only the command compacts; a tiny keep window so three turns are enough.
+	const env = makePiEnv({ modelUrl: model.url, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
+	const { h } = await startHandle(t, () => ({ text: "Summary of the chat" }), undefined, env);
+	const w = watch(h);
+	for (const text of ["one", "two", "three"]) {
+		await h.command({ type: "prompt", text, mode: "send" });
+		await w.next(isEvent("agent_settled"));
+	}
+	const sent = model.requests.length;
+	const r = await h.command({ type: "compact", instructions: "keep it short" });
+	assert.equal(r.ok, true);
+	assert.match((r.data as { summary: string }).summary, /Summary of the chat/);
+	assert.match(JSON.stringify(model.requests.slice(sent)), /keep it short/, "custom instructions reach the summarizer");
+	await w.next(isEvent("compaction_start"));
+	await w.next(isEvent("compaction_end"));
+	const snap = await w.next((m) => m.type === "snapshot");
+	assert.ok(snap.type === "snapshot");
+	const msgs = snap.snapshot.conv.messages;
+	assert.equal(msgs[0].role, "compactionSummary");
+	assert.ok(!msgs.some((m) => m.role === "user" && textOf(m) === "one"), "summarized turns are gone");
+	assert.equal(snap.snapshot.conv.compacting, false);
+	assert.equal(h.isBusy(), false);
+});
