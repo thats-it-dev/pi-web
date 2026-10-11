@@ -26,6 +26,7 @@ export class ListStore extends EventTarget {
 	private api: Pick<HubApi, "sessions" | "eventsUrl">;
 	private open: typeof openStream;
 	private stream: { close(): void } | null = null;
+	private refreshSeq = 0;
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private onVisible = () => {
 		if (document.visibilityState === "visible") void this.refresh();
@@ -44,7 +45,18 @@ export class ListStore extends EventTarget {
 
 	start(): void {
 		void this.refresh();
-		this.stream = this.open<ListMessage>(this.api.eventsUrl(), (m) => this.apply(m), () => {});
+		let wasDown = false;
+		this.stream = this.open<ListMessage>(
+			this.api.eventsUrl(),
+			(m) => this.apply(m),
+			(st) => {
+				if (st === "reconnecting") wasDown = true;
+				else if (st === "open" && wasDown) {
+					wasDown = false;
+					void this.refresh(); // events were missed while the stream was down
+				}
+			},
+		);
 		this.timer = setInterval(() => void this.refresh(), 30_000);
 		if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisible);
 	}
@@ -56,13 +68,16 @@ export class ListStore extends EventTarget {
 	}
 
 	async refresh(): Promise<void> {
+		const seq = ++this.refreshSeq;
 		try {
 			const r = await this.api.sessions();
+			if (seq !== this.refreshSeq) return; // a newer refresh superseded this one
 			this.sessions = r.sessions;
 			this.home = r.home;
 			this.error = null;
 			writeCache(r);
 		} catch (e) {
+			if (seq !== this.refreshSeq) return;
 			this.error = (e as Error).message;
 		}
 		this.loaded = true;

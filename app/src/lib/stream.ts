@@ -30,9 +30,13 @@ export function openStream<T>(
 			onStatus("open");
 		};
 		source.onmessage = (e) => {
+			let msg: T;
 			try {
-				onMessage(JSON.parse(e.data) as T);
-			} catch {}
+				msg = JSON.parse(e.data) as T;
+			} catch {
+				return; // ignore malformed frames
+			}
+			onMessage(msg); // handler errors must surface, not vanish
 		};
 		source.onerror = () => {
 			source.close();

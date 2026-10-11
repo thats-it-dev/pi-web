@@ -46,4 +46,9 @@ describe("openStream", () => {
 		s.close();
 		expect(FakeES.all.at(-1)?.closed).toBe(true);
 	});
+	it("lets handler errors propagate instead of swallowing them", () => {
+		FakeES.all = [];
+		openStream("u", () => { throw new Error("handler broke"); }, () => {}, FakeES);
+		expect(() => FakeES.all[0].onmessage?.({ data: '{"type":"x"}' } as MessageEvent)).toThrow("handler broke");
+	});
 });
