@@ -1,5 +1,6 @@
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
+import { CSP } from "./src/lib/csp";
 
 // In dev the app talks to the hub through Vite at the same origin. The proxy
 // plays the part of `tailscale serve`: it adds the identity header the hub
@@ -7,19 +8,6 @@ import { defineConfig } from "vitest/config";
 const HUB = process.env.PI_WEB_HUB ?? "http://127.0.0.1:7878";
 const DEV_LOGIN = process.env.PI_WEB_DEV_LOGIN ?? "dev@local";
 const DEV_ORIGIN = "http://localhost:5173";
-
-const CSP = [
-	"default-src 'self'",
-	"script-src 'self'",
-	"style-src 'self' 'unsafe-inline'",
-	"font-src 'self'",
-	"img-src 'self' data: blob:",
-	"connect-src 'self' https://*.ts.net",
-	"manifest-src 'self'",
-	"worker-src 'self'",
-	"base-uri 'none'",
-	"form-action 'none'",
-].join("; ");
 
 // Only built HTML gets the CSP, so Vite's dev client keeps working.
 function csp(): Plugin {
