@@ -1,0 +1,12 @@
+{
+	"name": "@pi-web/hub",
+	"private": true,
+	"type": "module",
+	"version": "0.1.0",
+	"scripts": {
+		"start": "node src/main.ts",
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+}
