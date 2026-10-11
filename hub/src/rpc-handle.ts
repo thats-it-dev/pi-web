@@ -206,12 +206,13 @@ export class RpcHandle implements SessionHandle {
 		proc.stderr.on("data", (d: string) => {
 			this.stderr = (this.stderr + d).slice(-8000);
 		});
-		proc.stdin.on("error", () => {}); // EPIPE after exit is reported via "exit"
+		proc.stdin.on("error", () => {}); // EPIPE after exit is reported via "close"
 		proc.on("error", (err) => {
 			this.stderr += `\n${err.message}`;
 			this.onExit(null);
 		});
-		proc.on("exit", (code) => this.onExit(code));
+		// "close" (not "exit") fires after stdio has drained, so stderr and final stdout lines are complete.
+		proc.on("close", (code) => this.onExit(code));
 		await this.refresh({ messages: true, catalog: true }, BOOT_TIMEOUT_MS);
 	}
 
@@ -248,15 +249,19 @@ export class RpcHandle implements SessionHandle {
 			this.data<SessionStats>({ type: "get_session_stats" }, timeoutMs).catch(() => null),
 			opts.messages ? this.data<{ messages: AgentMessage[] }>({ type: "get_messages" }, timeoutMs) : Promise.resolve(null),
 		]);
+		const sessionChanged = this.state !== null && this.state.sessionId !== state.sessionId;
 		this.state = { ...state, model: state.model ? slimModel(state.model) : null };
 		this.stats = stats;
 		if (msgs) {
 			const prev = this.conv;
 			this.conv = createConversation(msgs.messages);
 			this.conv.streaming = prev.streaming || state.isStreaming;
-			this.conv.partial = prev.partial;
-			this.conv.tools = prev.tools;
-			this.conv.queue = prev.queue;
+			if (!sessionChanged) {
+				// Same session: keep in-flight state the message list doesn't carry.
+				this.conv.partial = prev.partial;
+				this.conv.tools = prev.tools;
+				this.conv.queue = prev.queue;
+			}
 		}
 		if (opts.catalog) {
 			const [commands, models, levels] = await Promise.all([
@@ -442,7 +447,13 @@ export class RpcHandle implements SessionHandle {
 	}
 
 	private broadcast(m: StreamMessage): void {
-		for (const fn of this.subscribers) fn(m);
+		for (const fn of [...this.subscribers]) {
+			try {
+				fn(m);
+			} catch (err) {
+				console.error("pi-web: stream subscriber threw", err);
+			}
+		}
 	}
 
 	private emit(e: HandleEvent): void {

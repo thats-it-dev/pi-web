@@ -174,6 +174,8 @@ test("fork moves the handle to a new session and announces it", async (t) => {
 	const e = await changed;
 	assert.ok(e.type === "session_changed" && e.from === before && e.to === h.sessionId && e.to !== before);
 	assert.ok(w.seen.some((m) => m.type === "snapshot" && m.snapshot.sessionId === h.sessionId));
+	assert.deepEqual(h.snapshot().conv.tools, {});
+	assert.deepEqual(h.snapshot().conv.queue, { steering: [], followUp: [] });
 });
 
 test("reports pi exiting unexpectedly", async (t) => {
@@ -238,4 +240,17 @@ test("a pi that crashes on startup fails fast with its stderr in the 502", async
 	} finally {
 		env.cleanup();
 	}
+});
+
+test("a throwing subscriber does not stop other subscribers", async (t) => {
+	const { h } = await startHandle(t);
+	const errors = t.mock.method(console, "error", () => {});
+	const unsubscribe = h.subscribe(() => {
+		throw new Error("bad subscriber");
+	});
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "hi", mode: "send" });
+	await w.next(isEvent("agent_settled"));
+	assert.ok(errors.mock.callCount() > 0);
+	unsubscribe();
 });
