@@ -1,0 +1,173 @@
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, test } from "node:test";
+import { applyEvent } from "../../shared/src/reducer.ts";
+import type { HubConfig } from "../src/config.ts";
+import { Registry } from "../src/registry.ts";
+import { createHubServer } from "../src/server.ts";
+import { SessionIndex } from "../src/sessions.ts";
+import { FakeHandle } from "./support/fake-handle.ts";
+import { call, openSse } from "./support/http.ts";
+
+const root = mkdtempSync(join(tmpdir(), "pi-web-server-"));
+const work = join(root, "work");
+const sessions = join(root, "sessions");
+mkdirSync(work);
+mkdirSync(join(sessions, "--work--"), { recursive: true });
+writeFileSync(
+	join(sessions, "--work--", "2026-10-07T00-00-00-000Z_disk-1.jsonl"),
+	`${JSON.stringify({ type: "session", version: 3, id: "disk-1", timestamp: "2026-10-07T00:00:00.000Z", cwd: work })}\n` +
+		`${JSON.stringify({ type: "message", id: "u1", parentId: null, timestamp: "x", message: { role: "user", content: "from the cli", timestamp: 1 } })}\n`,
+);
+
+const cfg: HubConfig = {
+	port: 0,
+	hostname: "hub.test:7878",
+	allowedLogin: "me@github",
+	allowedOrigins: ["https://pi.thatsit.dev"],
+	idleMinutes: 20,
+	maxHeadless: 6,
+	piBin: "pi",
+	dev: false,
+	dataDir: root,
+};
+const GOOD = { origin: "https://pi.thatsit.dev", host: "hub.test:7878", "tailscale-user-login": "me@github" };
+
+const handles = new Map<string, FakeHandle>();
+let n = 0;
+const index = new SessionIndex(sessions);
+const registry = new Registry({
+	factory: {
+		async startRpc(o) {
+			const id = o.sessionFile ? "disk-1" : `new-${++n}`;
+			const h = new FakeHandle(id, o.cwd, o.sessionFile ?? null);
+			handles.set(id, h);
+			return h;
+		},
+	},
+	lookup: index,
+	maxHeadless: 6,
+	idleMs: 60_000,
+});
+const logs: string[] = [];
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m) });
+let port = 0;
+before(async () => {
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+	port = (server.address() as AddressInfo).port;
+});
+after(() => {
+	server.closeAllConnections();
+	server.close();
+});
+
+test("rejects requests from other origins or without the tailnet identity", async () => {
+	assert.equal((await call(port, "GET", "/api/sessions", { ...GOOD, origin: "https://evil.example" })).status, 403);
+	assert.equal((await call(port, "GET", "/api/sessions", { ...GOOD, "tailscale-user-login": undefined })).status, 403);
+	assert.equal((await call(port, "GET", "/api/sessions", { ...GOOD, host: "evil.example" })).status, 403);
+	assert.ok(logs.some((l) => l.includes("origin https://evil.example")));
+});
+
+test("answers CORS preflight only for the app's origin", async () => {
+	const ok = await call(port, "OPTIONS", "/api/sessions", { origin: "https://pi.thatsit.dev", host: "hub.test:7878" });
+	assert.equal(ok.status, 204);
+	assert.equal(ok.headers["access-control-allow-origin"], "https://pi.thatsit.dev");
+	assert.equal((await call(port, "OPTIONS", "/api/sessions", { origin: "https://evil.example" })).status, 403);
+});
+
+test("health reports the caller's login and the hub version", async () => {
+	const r = await call(port, "GET", "/api/health", GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, { ok: true, login: "me@github", hubVersion: "0.1.0-test", vapidPublicKey: null });
+	assert.equal(r.headers["access-control-allow-origin"], "https://pi.thatsit.dev");
+});
+
+test("lists sessions from disk and new live sessions without files", async () => {
+	let r = await call(port, "GET", "/api/sessions", GOOD);
+	const disk = r.body.sessions.find((s: { id: string }) => s.id === "disk-1");
+	assert.equal(disk.firstPrompt, "from the cli");
+	assert.equal(disk.live, false);
+	assert.equal(disk.file, undefined, "file paths stay on the hub");
+	const created = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	assert.equal(created.status, 200);
+	r = await call(port, "GET", "/api/sessions", GOOD);
+	const fresh = r.body.sessions.find((s: { id: string }) => s.id === created.body.sessionId);
+	assert.equal(fresh.live, true);
+	assert.equal(fresh.cwd, work);
+});
+
+test("new sessions need an existing folder; ~ expands to home", async () => {
+	const bad = await call(port, "POST", "/api/sessions", GOOD, { cwd: join(root, "missing") });
+	assert.equal(bad.status, 400);
+	assert.match(bad.body.error, /Not a folder/);
+	const home = await call(port, "POST", "/api/sessions", GOOD, { cwd: "~" });
+	assert.equal(home.status, 200);
+	assert.equal(handles.get(home.body.sessionId)?.cwd, work);
+});
+
+test("commands: validated, 404 for unknown sessions, forwarded to the session's handle", async () => {
+	registry.close("disk-1");
+	assert.equal((await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "rm_rf" })).status, 400);
+	assert.equal((await call(port, "POST", "/api/sessions/nope/commands", GOOD, { type: "attach" })).status, 404);
+	const r = await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "prompt", text: "hi", mode: "send" });
+	assert.deepEqual(r.body, { result: { ok: true }, sessionId: "disk-1" });
+	assert.deepEqual(handles.get("disk-1")?.received.at(-1), { type: "prompt", text: "hi", mode: "send" });
+});
+
+test("history reads the file when no process is running", async () => {
+	registry.close("disk-1");
+	const r = await call(port, "GET", "/api/sessions/disk-1/history", GOOD);
+	assert.equal(r.body.live, false);
+	assert.equal(r.body.messages[0].content, "from the cli");
+	assert.equal((await call(port, "GET", "/api/sessions/nope/history", GOOD)).status, 404);
+});
+
+test("a stream waits detached, then attaches when the session starts", async () => {
+	registry.close("disk-1");
+	const sse = await openSse(port, "/api/sessions/disk-1/stream", GOOD);
+	assert.equal((await sse.next((m) => m.type !== undefined)).type, "detached");
+	await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "attach" });
+	const snap = await sse.next((m) => m.type === "snapshot");
+	assert.equal((snap.snapshot as { sessionId: string }).sessionId, "disk-1");
+	handles.get("disk-1")?.push({ type: "notify", message: "hello", level: "info" });
+	assert.equal((await sse.next((m) => m.type === "notify")).message, "hello");
+	handles.get("disk-1")?.close();
+	await sse.next((m) => m.type === "handle_gone");
+	await sse.next((m) => m.type === "detached");
+	sse.close();
+});
+
+test("reconnecting mid-reply gets the partial message and running tools in the snapshot", async () => {
+	registry.close("disk-1");
+	await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "attach" });
+	const h = handles.get("disk-1") as FakeHandle;
+	applyEvent(h.conv, { type: "agent_start" });
+	applyEvent(h.conv, { type: "message_start", message: { role: "assistant", content: [], timestamp: 1 } });
+	applyEvent(h.conv, { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hel" } });
+	applyEvent(h.conv, { type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "ls" } });
+	const sse = await openSse(port, "/api/sessions/disk-1/stream", GOOD);
+	const snap = await sse.next((m) => m.type === "snapshot");
+	const conv = (snap.snapshot as { conv: { streaming: boolean; partial: { content: Array<{ text: string }> }; tools: Record<string, { running: boolean; name: string }> } }).conv;
+	assert.equal(conv.streaming, true);
+	assert.equal(conv.tools.t1.running, true);
+	assert.equal(conv.tools.t1.name, "bash");
+	assert.equal(conv.partial.content[0].text, "Hel");
+	sse.close();
+});
+
+test("the events stream relays session state changes", async () => {
+	const sse = await openSse(port, "/api/events", GOOD);
+	const created = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const m = await sse.next((x) => x.type === "session_state" && x.sessionId === created.body.sessionId);
+	assert.equal(m.live, true);
+	sse.close();
+});
+
+test("unknown routes are 404 JSON", async () => {
+	const r = await call(port, "GET", "/api/nope", GOOD);
+	assert.equal(r.status, 404);
+	assert.equal(r.body.error, "Not found");
+});

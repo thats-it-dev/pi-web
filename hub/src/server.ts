@@ -1,0 +1,209 @@
+// HTTP API for the PWA (spec §2.3). Every request passes checkRequest except
+// CORS preflights from an allowed origin. Streams are Server-Sent Events.
+
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage } from "../../shared/src/protocol.ts";
+import { checkRequest, corsHeaders } from "./auth.ts";
+import type { HubConfig } from "./config.ts";
+import { HttpError } from "./errors.ts";
+import type { SessionHandle } from "./handle.ts";
+import type { Registry } from "./registry.ts";
+import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
+
+export interface HubDeps {
+	cfg: HubConfig;
+	registry: Registry;
+	index: SessionIndex;
+	version: string;
+	home?: string;
+	log?: (msg: string) => void;
+}
+
+type Cors = Record<string, string>;
+const MAX_BODY = 50 * 1024 * 1024; // prompts can carry images
+const SSE_PING_MS = 20_000;
+
+export function createHubServer(deps: HubDeps): Server {
+	const home = deps.home ?? homedir();
+	const log = deps.log ?? ((m: string) => console.log(m));
+	const { cfg, registry, index } = deps;
+
+	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
+		const { pathname: p } = new URL(req.url ?? "/", "http://hub");
+		const m = req.method;
+
+		if (m === "GET" && p === "/api/health") {
+			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: null };
+			return sendJson(res, 200, body, cors);
+		}
+		if (m === "GET" && p === "/api/sessions") return sendJson(res, 200, { sessions: await listSessions(), home }, cors);
+		if (m === "GET" && p === "/api/cwds") return sendJson(res, 200, { cwds: knownCwds(await index.list(), home), home }, cors);
+		if (m === "GET" && p === "/api/events") return listStream(req, res, cors);
+		if (m === "POST" && p === "/api/sessions") {
+			const body = (await readJson(req)) as { cwd?: unknown };
+			const cwd = (typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : home).replace(/^~(?=\/|$)/, home);
+			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
+			const h = await registry.create(cwd);
+			return sendJson(res, 200, { sessionId: h.sessionId }, cors);
+		}
+
+		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close)$/);
+		if (sm) {
+			const [, id, action] = sm;
+			if (m === "GET" && action === "history") return sendJson(res, 200, await history(id), cors);
+			if (m === "GET" && action === "stream") return sessionStream(req, res, cors, id);
+			if (m === "POST" && action === "commands") {
+				const cmd = parseCommand(await readJson(req));
+				const h = await registry.ensure(id);
+				const result = await h.command(cmd);
+				return sendJson(res, 200, { result, sessionId: h.sessionId }, cors);
+			}
+			if (m === "POST" && action === "close") {
+				registry.close(id);
+				return sendJson(res, 200, { ok: true }, cors);
+			}
+		}
+
+		const ex = p.match(/^\/api\/exports\/([\w.-]+\.html)$/);
+		if (m === "GET" && ex) {
+			const file = join(cfg.dataDir, "exports", ex[1]);
+			if (!existsSync(file)) throw new HttpError(404, "Export not found");
+			res.writeHead(200, { ...cors, "content-type": "text/html; charset=utf-8", "content-disposition": `attachment; filename="${ex[1]}"` });
+			createReadStream(file).pipe(res);
+			return;
+		}
+		throw new HttpError(404, "Not found");
+	}
+
+	async function listSessions(): Promise<SessionSummary[]> {
+		const files = await index.list();
+		const known = new Set(files.map((f) => f.id));
+		const now = Date.now();
+		// A brand-new session has no file until its first message.
+		const fresh = registry
+			.all()
+			.filter((h) => h.sessionId && !known.has(h.sessionId))
+			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null }));
+		const onDisk = files.map(({ file: _file, ...s }) => s);
+		return [...fresh, ...onDisk].map((s) => ({ ...s, ...registry.info(s.id) }));
+	}
+
+	async function history(id: string) {
+		const h = registry.get(id);
+		if (h) return { messages: h.snapshot().conv.messages, live: true, cwd: h.cwd };
+		const s = await index.find(id);
+		if (!s) throw new HttpError(404, "Session not found");
+		return { messages: await readHistory(s.file), live: false, cwd: s.cwd, name: s.name, error: registry.lastError(id) ?? null };
+	}
+
+	function sessionStream(req: IncomingMessage, res: ServerResponse, cors: Cors, sessionId: string): void {
+		const sse = openSse(res, cors);
+		let id = sessionId;
+		let detach: (() => void) | null = null;
+		const attach = (h: SessionHandle) => {
+			detach?.();
+			const unsubscribe = h.subscribe((msg) => {
+				if (msg.type === "snapshot") id = msg.snapshot.sessionId; // follows fork/clone/new
+				sse.send(msg);
+				if (msg.type === "handle_gone") {
+					unsubscribe();
+					detach = null;
+					sse.send({ type: "detached" });
+				}
+			});
+			detach = unsubscribe;
+			sse.send({ type: "snapshot", snapshot: h.snapshot() });
+		};
+		const existing = registry.get(id);
+		if (existing) attach(existing);
+		else sse.send({ type: "detached" });
+		const stopWatching = registry.onChange((m) => {
+			if (detach || m.type !== "session_state" || m.sessionId !== id || !m.live) return;
+			const h = registry.get(id);
+			if (h) attach(h);
+		});
+		req.on("close", () => {
+			detach?.();
+			stopWatching();
+			sse.close();
+		});
+	}
+
+	function listStream(req: IncomingMessage, res: ServerResponse, cors: Cors): void {
+		const sse = openSse(res, cors);
+		const stop = registry.onChange((m) => sse.send(m));
+		req.on("close", () => {
+			stop();
+			sse.close();
+		});
+	}
+
+	return createServer(async (req, res) => {
+		const cors = corsHeaders(cfg, req.headers.origin);
+		try {
+			if (req.method === "OPTIONS") {
+				if (!cors["access-control-allow-origin"]) throw new HttpError(403, "Forbidden");
+				res.writeHead(204, cors);
+				res.end();
+				return;
+			}
+			const auth = checkRequest(cfg, req.headers);
+			if (!auth.ok) {
+				log(`rejected ${req.method} ${req.url}: ${auth.reason}`);
+				throw new HttpError(403, "Forbidden");
+			}
+			await route(req, res, cors);
+		} catch (err) {
+			const status = err instanceof HttpError ? err.status : 500;
+			if (status === 500) log(`error ${req.method} ${req.url}: ${(err as Error).stack}`);
+			if (!res.headersSent) sendJson(res, status, { error: (err as Error).message }, cors);
+			else res.end();
+		}
+	});
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown, cors: Cors): void {
+	res.writeHead(status, { ...cors, "content-type": "application/json", "cache-control": "no-store" });
+	res.end(JSON.stringify(body));
+}
+
+function openSse(res: ServerResponse, cors: Cors) {
+	res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
+	res.write(": connected\n\n");
+	const ping = setInterval(() => res.write(": ping\n\n"), SSE_PING_MS);
+	return {
+		send(m: StreamMessage | ListMessage) {
+			res.write(`data: ${JSON.stringify(m)}\n\n`);
+		},
+		close() {
+			clearInterval(ping);
+		},
+	};
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of req as AsyncIterable<Buffer>) {
+		size += chunk.length;
+		if (size > MAX_BODY) throw new HttpError(413, "Request too large");
+		chunks.push(chunk);
+	}
+	if (chunks.length === 0) return {};
+	try {
+		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+	} catch {
+		throw new HttpError(400, "Invalid JSON");
+	}
+}
+
+function parseCommand(body: unknown): AppCommand {
+	const type = (body as { type?: unknown } | null)?.type;
+	if (typeof type !== "string" || !(APP_COMMAND_TYPES as readonly string[]).includes(type)) throw new HttpError(400, `Unknown command: ${String(type)}`);
+	const cmd = body as AppCommand;
+	if (cmd.type === "prompt" && typeof cmd.text !== "string") throw new HttpError(400, "A prompt needs text");
+	return cmd;
+}
