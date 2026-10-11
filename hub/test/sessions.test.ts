@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -102,4 +102,44 @@ test("knownCwds ranks folders by session count and always includes home", async 
 	// Fixture cwds don't exist on this machine, so only the real home survives the existence filter.
 	assert.deepEqual(knownCwds(list, home), [home]);
 	assert.deepEqual(knownCwds([{ ...list[0], cwd: tmpdir() }, { ...list[1], cwd: tmpdir() }], home), [tmpdir(), home]);
+});
+
+test("non-object JSON lines are ignored in listing and history", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pi-web-junk-"));
+	const dir = join(root, "--junk--");
+	mkdirSync(dir);
+	writeFileSync(
+		join(dir, "2026-10-09T00-00-00-000Z_jjj.jsonl"),
+		header("jjj", "/nonexistent/junk", "2026-10-09T00:00:00.000Z") +
+			"null\n42\n[1,2]\n" +
+			msg("u1", null, user("still here")) +
+			"null\n" +
+			msg("a1", "u1", assistant("yes")),
+	);
+	const list = await new SessionIndex(root).list();
+	assert.deepEqual(list.map((s) => s.id), ["jjj"]);
+	assert.equal(list[0].firstPrompt, "still here");
+	assert.equal(list[0].userMessages, 1);
+	const h = historyFromText(readFileSync(join(dir, "2026-10-09T00-00-00-000Z_jjj.jsonl"), "utf8"));
+	assert.deepEqual(h.map((m) => m.role), ["user", "assistant"]);
+});
+
+test("message entries without a message object are skipped in history", () => {
+	const text =
+		header("m", "/x") +
+		line({ type: "message", id: "n1", parentId: null, timestamp: "x" }) +
+		line({ type: "message", id: "n2", parentId: "n1", timestamp: "x", message: "oops" }) +
+		line({ type: "message", id: "n3", parentId: "n2", timestamp: "x", message: null }) +
+		msg("u1", "n3", user("ok"));
+	const h = historyFromText(text);
+	assert.deepEqual(h.map((m) => m.role), ["user"]);
+	assert.ok(h.every((m) => typeof m === "object" && m !== null));
+});
+
+test("a parentId cycle terminates history", () => {
+	const text =
+		header("c", "/x") +
+		msg("u1", "a1", user("loop")) + // u1 -> a1 -> u1 forms a cycle; a1 is the last entry
+		msg("a1", "u1", assistant("loop back"));
+	assert.deepEqual(historyFromText(text).map((m) => m.role), ["user", "assistant"]);
 });
