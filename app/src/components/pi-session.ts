@@ -1,5 +1,5 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
-import type { AppCommand, Capabilities, CommandResult, ForkPoint, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import type { HubApi } from "../lib/api.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
@@ -44,6 +44,7 @@ export class PiSession extends LitElement {
 	private atBottom = true;
 	private lastScrollTop = 0;
 	private ticker: ReturnType<typeof setInterval> | undefined;
+	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
 
 	static styles = [
@@ -90,16 +91,26 @@ export class PiSession extends LitElement {
 		store.addEventListener("change", this.onStoreChange);
 		store.addEventListener("notice", this.onNotice);
 		store.addEventListener("snapshot", this.onSnapshot);
+		store.addEventListener("offline", this.onOffline);
+		this.loadHistory(store);
+		this.connectStream(id);
+	}
+
+	private loadHistory(store: SessionStore, initial = true): void {
 		this.api
-			.history(id)
+			.history(store.id)
 			.then((h) => store === this.store && store.setHistory(h))
 			.catch((e: Error) => {
-				if (store !== this.store) return;
+				if (store !== this.store || !initial) return; // a failed refetch keeps what's on screen
 				toast(e.message, "error");
 				store.setHistory({ messages: [], live: false, cwd: "" });
 			});
-		this.connectStream(id);
 	}
+
+	// The process went away mid-session: the file on disk is now the truth.
+	private onOffline = () => {
+		if (this.store) this.loadHistory(this.store, false);
+	};
 
 	private connectStream(id: string): void {
 		this.stream?.close();
@@ -122,6 +133,7 @@ export class PiSession extends LitElement {
 		s.removeEventListener("change", this.onStoreChange);
 		s.removeEventListener("notice", this.onNotice);
 		s.removeEventListener("snapshot", this.onSnapshot);
+		s.removeEventListener("offline", this.onOffline);
 	}
 
 	private onStoreChange = () => {
@@ -144,7 +156,14 @@ export class PiSession extends LitElement {
 	private onNotice = (e: Event) => {
 		const m = (e as CustomEvent<StreamMessage>).detail;
 		if (m.type === "notify") toast(m.message, m.level);
-		else if (m.type === "command_error") toast(m.error, "error");
+		else if (m.type === "command_error") {
+			toast(m.error, "error");
+			const p = this.pendingPrompt;
+			if (m.command === "prompt" && p) {
+				this.pendingPrompt = null;
+				this.composer?.restore(p.text, p.images); // a no-op if the composer has new text
+			}
+		}
 		else if (m.type === "error") toast(m.message, "error");
 		else if (m.type === "editor_text") this.composer?.setText(m.text);
 	};
@@ -204,7 +223,10 @@ export class PiSession extends LitElement {
 		else if (parsed.kind === "builtin") ok = await this.runBuiltin(parsed.name, parsed.args);
 		else {
 			const streaming = this.store?.conv.streaming ?? false;
-			ok = await this.ok({ type: "prompt", text: parsed.text, images: images.length ? images : undefined, mode: streaming ? mode : "send" });
+			this.pendingPrompt = null;
+			const r = await this.run({ type: "prompt", text: parsed.text, images: images.length ? images : undefined, mode: streaming ? mode : "send" });
+			ok = Boolean(r?.ok);
+			if (r?.pending) this.pendingPrompt = { text, images }; // may still fail later as a command_error
 		}
 		if (!ok) this.composer?.restore(text, images);
 	};

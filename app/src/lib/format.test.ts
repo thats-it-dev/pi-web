@@ -33,6 +33,15 @@ describe("format", () => {
 		expect(abbreviateCwd("/home/michael", "/home/michael")).toBe("~");
 		expect(abbreviateCwd("/home/michaelx", "/home/michael")).toBe("/home/michaelx");
 	});
+	it("tolerates a missing or non-string cwd from a malformed session file", () => {
+		expect(abbreviateCwd("", "/home/m")).toBe("unknown folder");
+		expect(abbreviateCwd(undefined, "/home/m")).toBe("unknown folder");
+		expect(abbreviateCwd(42, "/home/m")).toBe("unknown folder");
+		const list = [s({ id: "a", cwd: "" }), s({ id: "b", cwd: undefined as unknown as string, name: "katsu" }), s({ id: "c" })];
+		const groups = groupSessions(list, "", "/home/m");
+		expect(groups.map((g) => [g.label, g.sessions.map((x) => x.id)])).toEqual([["unknown folder", ["a", "b"]], ["~", ["c"]]]);
+		expect(groupSessions(list, "katsu", "/home/m").flatMap((g) => g.sessions.map((x) => x.id))).toEqual(["b"]);
+	});
 	it("titles sessions by name, then first prompt line", () => {
 		expect(sessionTitle({ name: "katsu", firstPrompt: "How do I…" })).toBe("katsu");
 		expect(sessionTitle({ name: null, firstPrompt: "line one\nline two" })).toBe("line one");

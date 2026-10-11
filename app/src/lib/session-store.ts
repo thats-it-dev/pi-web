@@ -64,8 +64,7 @@ export class SessionStore extends EventTarget {
 				this.dispatchEvent(new Event("snapshot"));
 				break;
 			case "detached":
-				this.snapshot = null;
-				this.dialogs = [];
+				this.goOffline();
 				if (this.status !== "starting") this.status = "history";
 				break;
 			case "event":
@@ -82,8 +81,7 @@ export class SessionStore extends EventTarget {
 				this.dialogs = this.dialogs.filter((d) => d.id !== msg.id);
 				break;
 			case "handle_gone":
-				this.snapshot = null;
-				this.dialogs = [];
+				this.goOffline();
 				this.status = "history";
 				this.lastExit = msg.reason === "exit" ? msg.stderr || "pi stopped unexpectedly." : null;
 				break;
@@ -91,6 +89,19 @@ export class SessionStore extends EventTarget {
 				this.dispatchEvent(new CustomEvent<StreamMessage>("notice", { detail: msg }));
 		}
 		this.changed();
+	}
+
+	// The process is gone (idle reap, crash, hub restart), so nothing will finish
+	// the in-flight reply or running tools. Keep completed messages and finished
+	// tool results; the "offline" event tells the view to refetch the file history.
+	private goOffline(): void {
+		const wasLive = this.snapshot !== null;
+		this.snapshot = null;
+		this.dialogs = [];
+		if (!wasLive) return;
+		const tools = Object.fromEntries(Object.entries(this.conv.tools).filter(([, t]) => !t.running));
+		this.conv = { ...createConversation(), messages: this.conv.messages, tools };
+		this.dispatchEvent(new Event("offline"));
 	}
 
 	private changed(): void {

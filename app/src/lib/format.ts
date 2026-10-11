@@ -28,7 +28,11 @@ export function relativeTime(ts: number, now = Date.now()): string {
 	return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function abbreviateCwd(cwd: string, home: string): string {
+export const UNKNOWN_FOLDER = "unknown folder";
+
+// Session files are untrusted input, so cwd may be missing or not a string.
+export function abbreviateCwd(cwd: unknown, home: string): string {
+	if (typeof cwd !== "string" || !cwd) return UNKNOWN_FOLDER;
 	if (home && (cwd === home || cwd.startsWith(`${home}/`))) return `~${cwd.slice(home.length)}`;
 	return cwd;
 }
@@ -48,11 +52,12 @@ export function groupSessions(sessions: SessionSummary[], query: string, home: s
 	const q = query.trim().toLowerCase();
 	const groups = new Map<string, SessionGroup>();
 	for (const s of sessions) {
-		if (q && ![s.name, s.firstPrompt, s.cwd].some((v) => v?.toLowerCase().includes(q))) continue;
-		let g = groups.get(s.cwd);
+		const cwd = typeof s.cwd === "string" ? s.cwd : "";
+		if (q && ![s.name, s.firstPrompt, cwd].some((v) => typeof v === "string" && v.toLowerCase().includes(q))) continue;
+		let g = groups.get(cwd);
 		if (!g) {
-			g = { cwd: s.cwd, label: abbreviateCwd(s.cwd, home), sessions: [] };
-			groups.set(s.cwd, g);
+			g = { cwd, label: abbreviateCwd(cwd, home), sessions: [] };
+			groups.set(cwd, g);
 		}
 		g.sessions.push(s);
 	}

@@ -65,4 +65,32 @@ describe("SessionStore", () => {
 		s.apply({ type: "notify", message: "picked blue", level: "info" });
 		expect(notices).toEqual([{ type: "notify", message: "picked blue", level: "info" }]);
 	});
+	for (const gone of [{ type: "detached" }, { type: "handle_gone", reason: "closed" }] as StreamMessage[]) {
+		it(`clears the in-flight run and asks for history when a live session gets ${gone.type}`, () => {
+			const s = new SessionStore("s1");
+			let offline = 0;
+			s.addEventListener("offline", () => offline++);
+			s.apply({ type: "snapshot", snapshot: snap() });
+			s.apply({ type: "event", event: { type: "agent_start" } });
+			s.apply({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hal" } } });
+			s.apply({ type: "event", event: { type: "tool_execution_start", toolCallId: "t1", toolName: "bash", args: { command: "sleep 9" } } });
+			s.apply({ type: "event", event: { type: "tool_execution_start", toolCallId: "t0", toolName: "bash", args: { command: "ls" } } });
+			s.apply({ type: "event", event: { type: "tool_execution_end", toolCallId: "t0", toolName: "bash", result: { content: "a" }, isError: false } });
+			s.apply({ type: "event", event: { type: "compaction_start" } });
+			s.apply({ type: "event", event: { type: "auto_retry_start", attempt: 1, maxAttempts: 3 } });
+			s.apply(gone);
+			expect(s.status).toBe("history");
+			expect(s.conv.streaming).toBe(false);
+			expect(s.conv.partial).toBe(null);
+			expect(s.conv.compacting).toBe(false);
+			expect(s.conv.retry).toBe(null);
+			expect(Object.keys(s.conv.tools)).toEqual(["t0"]);
+			expect(s.conv.messages).toHaveLength(1);
+			expect(offline).toBe(1);
+			s.setHistory({ messages: [{ role: "user", content: "hi" }, { role: "assistant", content: [{ type: "text", text: "Hal" }] }], live: false, cwd: "/w" });
+			expect(s.conv.messages).toHaveLength(2);
+			s.apply({ type: "detached" }); // not live any more: nothing to reset or refetch
+			expect(offline).toBe(1);
+		});
+	}
 });
