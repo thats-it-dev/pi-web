@@ -25,8 +25,11 @@ self.addEventListener("fetch", (event) => {
 		event.respondWith(
 			fetch(req)
 				.then((res) => {
-					const copy = res.clone();
-					caches.open(CACHE).then((c) => c.put("/", copy));
+					// Never let an error page (a 502 from a proxy, say) replace the cached shell.
+					if (res.ok) {
+						const copy = res.clone();
+						caches.open(CACHE).then((c) => c.put("/", copy));
+					}
 					return res;
 				})
 				.catch(() => caches.match("/")),

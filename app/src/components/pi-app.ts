@@ -55,6 +55,11 @@ export class PiApp extends LitElement {
 	private onOpenNav = () => {
 		this.navOpen = true;
 	};
+	// Following a link closes the drawer. hashchange covers most links, but
+	// tapping the current session's link changes nothing, so catch the click.
+	private onSidebarClick = (e: Event) => {
+		if (e.composedPath().some((el) => el instanceof HTMLAnchorElement)) this.navOpen = false;
+	};
 	private onRouteReplaced = (e: Event) => {
 		this.route = (e as CustomEvent<Route>).detail;
 	};
@@ -93,7 +98,7 @@ export class PiApp extends LitElement {
 		const r = this.route;
 		return html`
 			<div class="layout ${this.navOpen ? "nav-open" : ""}">
-				<aside class="sidebar" aria-label="Sessions">
+				<aside class="sidebar" aria-label="Sessions" @click=${this.onSidebarClick}>
 					<pi-sidebar .list=${this.list} .currentId=${r.name === "session" ? r.id : null}></pi-sidebar>
 				</aside>
 				<div class="overlay" @click=${() => (this.navOpen = false)}></div>

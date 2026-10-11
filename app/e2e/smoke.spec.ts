@@ -11,7 +11,7 @@ async function startSession(page: import("@playwright/test").Page) {
 	await expect(page).toHaveURL(/#\/s\//);
 }
 
-test("desktop: start a session, stream a reply, switch model, rename with a slash command", async ({ page, isMobile }) => {
+test("desktop: start a session, stream a reply, switch model, rename and compact with slash commands", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
 	await startSession(page);
 	const input = page.getByLabel("Message");
@@ -32,6 +32,14 @@ test("desktop: start a session, stream a reply, switch model, rename with a slas
 	await input.press("Enter");
 	await expect(page.locator("pi-header h1")).toHaveText("e2e run");
 	await expect(page.locator("pi-sidebar")).toContainText("e2e run");
+
+	await input.fill("again");
+	await input.press("Enter");
+	await expect(page.locator("pi-messages").getByText("Hello world")).toHaveCount(2);
+	await input.fill("/compact ");
+	await input.press("Enter");
+	await expect(page.locator("pi-messages details.marker")).toContainText("compacted");
+	await expect(page.locator("pi-messages .user").first()).not.toHaveText("hi"); // the first turn was summarized away
 });
 
 test("phone: send with the button, then find the session from the menu", async ({ page, isMobile }) => {
@@ -42,4 +50,8 @@ test("phone: send with the button, then find the session from the menu", async (
 	await expect(page.locator("pi-messages")).toContainText("Hello world");
 	await page.locator("pi-header").getByRole("button", { name: "Open sessions" }).click();
 	await expect(page.locator("pi-sidebar")).toContainText("hello from the phone");
+	const layout = page.locator("pi-app .layout");
+	await expect(layout).toHaveClass(/nav-open/);
+	await page.locator("pi-sidebar a.row.cur").click(); // the session already open: no hash change
+	await expect(layout).not.toHaveClass(/nav-open/);
 });

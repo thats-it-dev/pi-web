@@ -8,7 +8,8 @@ const PORT = 7898; // keep in sync with playwright.config.ts
 const WORKDIR = join(tmpdir(), "pi-web-e2e-work"); // keep in sync with smoke.spec.ts
 
 const model = await startFakeModel();
-const pi = makePiEnv({ modelUrl: model.url });
+// Manual /compact needs older turns to summarize; auto-compaction stays off so only the test compacts.
+const pi = makePiEnv({ modelUrl: model.url, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
 rmSync(WORKDIR, { recursive: true, force: true });
 mkdirSync(WORKDIR, { recursive: true });
 
