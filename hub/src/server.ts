@@ -70,9 +70,25 @@ export function createHubServer(deps: HubDeps): Server {
 		const ex = p.match(/^\/api\/exports\/([\w.-]+\.html)$/);
 		if (m === "GET" && ex) {
 			const file = join(cfg.dataDir, "exports", ex[1]);
-			if (!existsSync(file)) throw new HttpError(404, "Export not found");
-			res.writeHead(200, { ...cors, "content-type": "text/html; charset=utf-8", "content-disposition": `attachment; filename="${ex[1]}"` });
-			createReadStream(file).pipe(res);
+		if (!existsSync(file) || !statSync(file).isFile()) throw new HttpError(404, "Export not found");
+		await new Promise<void>((resolve) => {
+			const stream = createReadStream(file);
+			// Headers go out only once the file opened, so an unreadable file can still get a clean 500.
+			stream.once("open", () => {
+				res.writeHead(200, { ...cors, "content-type": "text/html; charset=utf-8", "content-disposition": `attachment; filename="${ex[1]}"` });
+				stream.pipe(res);
+			});
+			stream.on("error", (err) => {
+				log(`error reading export ${file}: ${err.message}`);
+				if (!res.headersSent) sendJson(res, 500, { error: "Could not read export" }, cors);
+				else res.destroy();
+				resolve();
+			});
+			res.on("close", () => {
+				stream.destroy();
+				resolve();
+			});
+		});
 			return;
 		}
 		throw new HttpError(404, "Not found");

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { get as httpGet } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,6 +87,7 @@ test("health reports the caller's login and the hub version", async () => {
 });
 
 test("lists sessions from disk and new live sessions without files", async () => {
+	registry.close("disk-1");
 	let r = await call(port, "GET", "/api/sessions", GOOD);
 	const disk = r.body.sessions.find((s: { id: string }) => s.id === "disk-1");
 	assert.equal(disk.firstPrompt, "from the cli");
@@ -164,6 +166,29 @@ test("the events stream relays session state changes", async () => {
 	const m = await sse.next((x) => x.type === "session_state" && x.sessionId === created.body.sessionId);
 	assert.equal(m.live, true);
 	sse.close();
+});
+
+test("an unreadable export is an error response and the hub keeps serving", async () => {
+	mkdirSync(join(root, "exports", "dir.html"), { recursive: true });
+	const r = await call(port, "GET", "/api/exports/dir.html", GOOD);
+	assert.equal(r.status, 404);
+	assert.equal((await call(port, "GET", "/api/health", GOOD)).status, 200);
+});
+
+test("a readable export downloads as an attachment", async () => {
+	mkdirSync(join(root, "exports"), { recursive: true });
+	writeFileSync(join(root, "exports", "ok.html"), "<p>hi</p>");
+	const res = await new Promise<{ status: number; disposition: string | undefined; text: string }>((resolve, reject) => {
+		httpGet({ host: "127.0.0.1", port, path: "/api/exports/ok.html", headers: GOOD }, (r) => {
+			let text = "";
+			r.setEncoding("utf8");
+			r.on("data", (c) => (text += c));
+			r.on("end", () => resolve({ status: r.statusCode ?? 0, disposition: r.headers["content-disposition"], text }));
+		}).on("error", reject);
+	});
+	assert.equal(res.status, 200);
+	assert.match(res.disposition ?? "", /attachment/);
+	assert.equal(res.text, "<p>hi</p>");
 });
 
 test("unknown routes are 404 JSON", async () => {
