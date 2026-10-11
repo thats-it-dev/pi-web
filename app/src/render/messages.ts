@@ -2,10 +2,26 @@ import { type TemplateResult, css, html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AgentMessage, ContentBlock, Conversation, ToolRun } from "../../../shared/src/protocol.ts";
 import { blocksText, formatTokens, parseArgsRaw, summarizeToolArgs, truncateOutput, wordCount } from "../lib/format.ts";
-import { renderMarkdown } from "../lib/markdown.ts";
+import { renderMarkdown, renderMarkdownUncached } from "../lib/markdown.ts";
 
 type ToolCall = Extract<ContentBlock, { type: "toolCall" }>;
 type Results = Map<string, AgentMessage>;
+
+// The whole conversation re-renders on every streaming delta, so work on
+// completed messages is memoized per object: they are never mutated once they
+// land in conv.messages (and tool runs are replaced, not mutated). The
+// streaming partial is mutated in place, so it is never memoized.
+const memos = new WeakMap<object, Map<string, unknown>>();
+function memo<T>(key: object, slot: string, compute: () => T): T {
+	let m = memos.get(key);
+	if (!m) memos.set(key, (m = new Map()));
+	if (!m.has(slot)) m.set(slot, compute());
+	return m.get(slot) as T;
+}
+
+function markdown(text: string, key: object | null) {
+	return unsafeHTML(key ? memo(key, "md", () => renderMarkdown(text)) : renderMarkdownUncached(text));
+}
 
 export function renderConversation(conv: Conversation): TemplateResult {
 	const results: Results = new Map();
@@ -22,9 +38,9 @@ function renderMessage(m: AgentMessage, results: Results, tools: Record<string, 
 		case "bashExecution":
 			return renderBash(m);
 		case "compactionSummary":
-			return html`<details class="marker"><summary>compacted · ${formatTokens(Number(m.tokensBefore ?? 0))} tokens summarized</summary><div class="md">${unsafeHTML(renderMarkdown(String(m.summary ?? "")))}</div></details>`;
+			return html`<details class="marker"><summary>compacted · ${formatTokens(Number(m.tokensBefore ?? 0))} tokens summarized</summary><div class="md">${markdown(String(m.summary ?? ""), m)}</div></details>`;
 		case "branchSummary":
-			return html`<details class="marker"><summary>summary of another branch</summary><div class="md">${unsafeHTML(renderMarkdown(String(m.summary ?? "")))}</div></details>`;
+			return html`<details class="marker"><summary>summary of another branch</summary><div class="md">${markdown(String(m.summary ?? ""), m)}</div></details>`;
 		case "custom":
 			return m.display === false ? nothing : html`<div class="custom"><span class="label">${String(m.customType ?? "extension")}</span> ${blocksText(m.content)}</div>`;
 		default:
@@ -45,11 +61,18 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 		${blocks.map((b) => {
 			if (!b) return nothing;
 			if (b.type === "thinking") {
-				if (b.thinking.trim()) return html`<details class="think"><summary>thinking · ${wordCount(b.thinking)} words</summary><div class="think-body">${b.thinking}</div></details>`;
+				const thinking = String(b.thinking ?? "");
+				if (thinking.trim()) {
+					const words = streaming ? wordCount(thinking) : memo(b, "words", () => wordCount(thinking));
+					return html`<details class="think"><summary>thinking · ${words} words</summary><div class="think-body">${thinking}</div></details>`;
+				}
 				return b.redacted ? html`<div class="note">thinking (redacted)</div>` : nothing;
 			}
-			if (b.type === "text") return b.text.trim() ? html`<div class="md">${unsafeHTML(renderMarkdown(b.text))}</div>` : nothing;
-			if (b.type === "toolCall") return renderTool(b, results.get(b.id), tools[b.id]);
+			if (b.type === "text") {
+				const text = String(b.text ?? "");
+				return text.trim() ? html`<div class="md">${markdown(text, streaming ? null : b)}</div>` : nothing;
+			}
+			if (b.type === "toolCall") return renderTool(b, results.get(b.id), tools[b.id], streaming);
 			return nothing;
 		})}
 		${m.stopReason === "error" ? html`<div class="err" role="alert">${String(m.errorMessage ?? "The model returned an error.")}</div>` : nothing}
@@ -58,20 +81,26 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 	</div>`;
 }
 
-function renderTool(call: ToolCall, result?: AgentMessage, run?: ToolRun) {
+function toolArgs(call: ToolCall): { summary: string; json: string } {
 	const args = call.arguments && Object.keys(call.arguments).length ? call.arguments : parseArgsRaw(call.argsRaw);
+	return { summary: summarizeToolArgs(call.name, args), json: Object.keys(args).length ? JSON.stringify(args, null, 2) : "" };
+}
+
+function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolRun | undefined, streaming: boolean) {
+	const args = streaming ? toolArgs(call) : memo(call, "args", () => toolArgs(call));
 	const done = Boolean(result) || run?.running === false;
 	const isError = result ? Boolean(result.isError) : Boolean(run?.isError);
 	const status = !done ? "running" : isError ? "error" : "ok";
-	const output = blocksText(result?.content ?? run?.result?.content ?? run?.partialResult?.content);
+	const source = result ?? run;
+	const output = source ? memo(source, "out", () => truncateOutput(blocksText(result?.content ?? run?.result?.content ?? run?.partialResult?.content))) : "";
 	return html`<details class="tool ${status}">
 		<summary>
 			<span class="st" aria-label=${status}>${status === "ok" ? "✓" : status === "error" ? "✗" : html`<span class="spin"></span>`}</span>
 			<span class="name">${call.name}</span>
-			<code>${summarizeToolArgs(call.name, args)}</code>
+			<code>${args.summary}</code>
 		</summary>
-		${Object.keys(args).length ? html`<pre class="args">${JSON.stringify(args, null, 2)}</pre>` : nothing}
-		${output ? html`<pre class="out">${truncateOutput(output)}</pre>` : nothing}
+		${args.json ? html`<pre class="args">${args.json}</pre>` : nothing}
+		${output ? html`<pre class="out">${output}</pre>` : nothing}
 	</details>`;
 }
 

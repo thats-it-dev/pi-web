@@ -27,13 +27,25 @@ const md = new Marked({
 	},
 });
 
-const cache = new Map<string, string>();
+// Renders without caching: for text that is still streaming, where every
+// delta is a new string that will never be asked for again.
+export function renderMarkdownUncached(src: string): string {
+	return md.parse(src, { async: false }) as string;
+}
 
+const CACHE_SIZE = 500;
+const cache = new Map<string, string>(); // insertion order = recency, oldest first
+
+// Text-keyed LRU for completed text.
 export function renderMarkdown(src: string): string {
 	const hit = cache.get(src);
-	if (hit !== undefined) return hit;
-	const out = md.parse(src, { async: false }) as string;
-	if (cache.size >= 500) cache.delete(cache.keys().next().value as string);
+	if (hit !== undefined) {
+		cache.delete(src);
+		cache.set(src, hit);
+		return hit;
+	}
+	const out = renderMarkdownUncached(src);
+	if (cache.size >= CACHE_SIZE) cache.delete(cache.keys().next().value as string);
 	cache.set(src, out);
 	return out;
 }
