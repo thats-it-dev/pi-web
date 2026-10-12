@@ -50,3 +50,31 @@ self.addEventListener("fetch", (event) => {
 		),
 	);
 });
+
+// Push (spec §5.5). The payload is { sessionId, title, kind } and nothing else.
+const PUSH_BODY = { finished: "Finished.", needs_you: "Needs you.", error: "Stopped with an error." };
+
+self.addEventListener("push", (event) => {
+	let p = {};
+	try {
+		p = (event.data && event.data.json()) || {};
+	} catch {}
+	const sessionId = typeof p.sessionId === "string" ? p.sessionId : "";
+	const title = typeof p.title === "string" && p.title ? p.title : "pi";
+	const body = typeof p.kind === "string" && Object.hasOwn(PUSH_BODY, p.kind) ? PUSH_BODY[p.kind] : "Something happened.";
+	event.waitUntil(self.registration.showNotification(title, { body, tag: sessionId || "pi-web", data: { sessionId }, icon: "/icons/icon-192.png" }));
+});
+
+// A tap opens the session: an open window is told where to go (and focused), else a new one opens there.
+self.addEventListener("notificationclick", (event) => {
+	event.notification.close();
+	const sessionId = (event.notification.data && event.notification.data.sessionId) || "";
+	event.waitUntil(
+		self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+			const win = wins[0];
+			if (!win) return self.clients.openWindow(sessionId ? `/#/s/${encodeURIComponent(sessionId)}` : "/");
+			if (sessionId) win.postMessage({ type: "pi-open", sessionId });
+			return win.focus();
+		}),
+	);
+});
