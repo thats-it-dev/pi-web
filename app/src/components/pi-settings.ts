@@ -22,13 +22,13 @@ export class PiSettings extends LitElement {
 			h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 2rem; margin: 0; }
 			h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.08em; font-size: 1.2rem; margin: 18px 0 0; }
 			label { font-family: var(--font-display); letter-spacing: 0.06em; }
-			.hint { color: var(--text-2); font-size: 0.85rem; margin: 0; }
+			.hint { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
 			code { font-family: var(--font-mono); font-size: 0.85em; }
 			form { display: grid; gap: 8px; }
 			.row { display: flex; gap: 8px; }
 			.row input { flex: 1; min-width: 0; }
 			.status.ok { color: var(--success); }
-			.status.bad { color: var(--primary); }
+			.status.bad { color: var(--accent); }
 			a.back { font-family: var(--font-quote); }
 		`,
 	];

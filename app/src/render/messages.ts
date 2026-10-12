@@ -114,7 +114,7 @@ function renderBash(m: AgentMessage) {
 
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
-	.user { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.user { border-left: 3px solid var(--primary); padding: 2px 0 2px 12px; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 	.imgs img { max-width: 160px; max-height: 160px; border-radius: var(--radius); }
 	.assistant { display: grid; gap: 8px; min-width: 0; }
@@ -126,26 +126,26 @@ export const messageStyles = css`
 	.md pre { background: var(--code-bg); padding: 10px 12px; border-radius: 6px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.85em; }
 	.md code { font-family: var(--font-mono); font-size: 0.9em; background: var(--code-bg); padding: 1px 4px; border-radius: 2px; }
 	.md pre code { background: none; padding: 0; }
-	.md blockquote { border-left: 3px solid var(--line); margin: 0 0 0.7em; padding-left: 12px; color: var(--text-2); }
+	.md blockquote { border-left: 3px solid var(--line); margin: 0 0 0.7em; padding-left: 12px; color: var(--text-secondary); }
 	.md table { border-collapse: collapse; display: block; overflow-x: auto; margin-bottom: 0.7em; }
 	.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
 	details > summary { cursor: pointer; list-style: none; }
 	details > summary::-webkit-details-marker { display: none; }
-	.think summary { font-size: 0.82em; color: var(--muted); font-style: italic; }
-	.think-body { white-space: pre-wrap; font-size: 0.85em; color: var(--text-2); border-left: 2px solid var(--line); padding-left: 10px; margin-top: 4px; }
+	.think summary { font-size: 0.82em; color: var(--text-muted); font-style: italic; }
+	.think-body { white-space: pre-wrap; font-size: 0.85em; color: var(--text-secondary); border-left: 2px solid var(--line); padding-left: 10px; margin-top: 4px; }
 	.tool { border: 1px solid var(--line); border-radius: var(--radius); font-size: 0.82em; min-width: 0; }
 	.tool summary { display: flex; gap: 8px; align-items: center; padding: 5px 9px; background: var(--panel); min-width: 0; }
 	.tool .name { font-weight: 600; flex: none; }
-	.tool code { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; color: var(--text-2); }
+	.tool code { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; color: var(--text-secondary); }
 	.tool.ok .st { color: var(--success); font-weight: 700; }
-	.tool.error .st { color: var(--primary); font-weight: 700; }
-	.tool pre { margin: 0; padding: 8px 9px; font-family: var(--font-mono); font-size: 0.92em; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; color: var(--text-2); }
+	.tool.error .st { color: var(--accent); font-weight: 700; }
+	.tool pre { margin: 0; padding: 8px 9px; font-family: var(--font-mono); font-size: 0.92em; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; color: var(--text-secondary); }
 	.tool pre.args { border-bottom: 1px solid var(--line); }
-	.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; }
+	.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; }
 	@keyframes spin { to { transform: rotate(360deg); } }
-	.err { color: var(--primary); font-size: 0.9em; border-left: 3px solid var(--primary); padding-left: 10px; overflow-wrap: anywhere; }
-	.note { font-size: 0.8em; color: var(--muted); font-style: italic; }
+	.err { color: var(--accent); font-size: 0.9em; border-left: 3px solid var(--accent); padding-left: 10px; overflow-wrap: anywhere; }
+	.note { font-size: 0.8em; color: var(--text-muted); font-style: italic; }
 	.marker { border-top: 1px dashed var(--line); padding-top: 6px; }
-	.marker summary, .custom { font-size: 0.8em; color: var(--muted); }
+	.marker summary, .custom { font-size: 0.8em; color: var(--text-muted); }
 	.marker summary { font-family: var(--font-display); letter-spacing: 0.06em; }
 `;

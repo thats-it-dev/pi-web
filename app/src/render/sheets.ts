@@ -88,15 +88,15 @@ export const sheetStyles = css`
 	.models { display: grid; gap: 2px; margin-bottom: 14px; }
 	.model { display: grid; text-align: left; padding: 8px 10px; border-left: 2px solid transparent; border-radius: var(--radius); }
 	.model:hover { background: var(--panel); }
-	.model.on { border-left-color: var(--accent); background: var(--panel); }
+	.model.on { border-left-color: var(--primary); background: var(--panel); }
 	.model .name { font-weight: 500; }
-	.model .meta { font-size: 0.75rem; color: var(--text-2); }
+	.model .meta { font-size: 0.75rem; color: var(--text-secondary); }
 	h3.label { margin: 6px 0; font-weight: 400; }
 	.seg { flex-wrap: wrap; }
 	.seg button { padding: 5px 12px; font-size: 0.85rem; }
-	.hint { color: var(--text-2); font-size: 0.85rem; }
+	.hint { color: var(--text-secondary); font-size: 0.85rem; }
 	dl.stats { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 0.85rem; }
-	dl.stats dt { font-family: var(--font-display); color: var(--muted); letter-spacing: 0.04em; }
+	dl.stats dt { font-family: var(--font-display); color: var(--text-muted); letter-spacing: 0.04em; }
 	dl.stats dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 	.msg { white-space: pre-wrap; margin-top: 0; }
 	.opts { display: grid; gap: 6px; }
@@ -105,7 +105,7 @@ export const sheetStyles = css`
 	form.answer { display: grid; gap: 8px; }
 	form.answer textarea { width: 100%; font-family: var(--font-mono); }
 	.foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
-	.dismiss { color: var(--muted); font-size: 0.85rem; }
+	.dismiss { color: var(--text-muted); font-size: 0.85rem; }
 	.forks { display: grid; gap: 6px; }
-	.fork { text-align: left; border-left: 3px solid var(--accent); padding: 6px 10px; font-family: var(--font-quote); background: var(--panel); border-radius: var(--radius); overflow-wrap: anywhere; }
+	.fork { text-align: left; border-left: 3px solid var(--primary); padding: 6px 10px; font-family: var(--font-quote); background: var(--panel); border-radius: var(--radius); overflow-wrap: anywhere; }
 `;

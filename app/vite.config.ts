@@ -1,3 +1,6 @@
+import { cpSync, existsSync, readFileSync } from "node:fs";
+import { dirname, extname, join, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 import { CSP } from "./src/lib/csp";
@@ -18,8 +21,37 @@ function csp(): Plugin {
 	};
 }
 
+// The shared theme (../theme) is also published as-is at /theme/ so other
+// thatsit.app apps can link https://pi.thatsit.app/theme/theme.css.
+// pi-web itself imports it from global.css, where Vite hashes the fonts.
+const THEME = dirname(fileURLToPath(import.meta.resolve("@thatsit/theme/theme.css")));
+const THEME_TYPES: Record<string, string> = { ".css": "text/css", ".ttf": "font/ttf", ".md": "text/markdown; charset=utf-8" };
+
+function publishTheme(): Plugin {
+	let outDir = "dist";
+	return {
+		name: "pi-web-theme",
+		configResolved(config) {
+			outDir = config.build.outDir;
+		},
+		configureServer(server) {
+			server.middlewares.use("/theme", (req, res, next) => {
+				const file = join(THEME, normalize(decodeURIComponent((req.url ?? "/").split("?")[0])));
+				const type = THEME_TYPES[extname(file)];
+				if (!file.startsWith(THEME + "/") || !type || !existsSync(file)) return next();
+				res.setHeader("content-type", type);
+				res.setHeader("access-control-allow-origin", "*");
+				res.end(readFileSync(file));
+			});
+		},
+		writeBundle() {
+			for (const f of ["theme.css", "README.md", "fonts"]) cpSync(join(THEME, f), join(outDir, "theme", f), { recursive: true });
+		},
+	};
+}
+
 export default defineConfig({
-	plugins: [csp()],
+	plugins: [csp(), publishTheme()],
 	server: {
 		port: 5173,
 		strictPort: true,

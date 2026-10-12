@@ -2,7 +2,7 @@
 	"name": "pi-web",
 	"private": true,
 	"type": "module",
-	"workspaces": ["shared", "hub", "bridge", "app"],
+	"workspaces": ["shared", "hub", "bridge", "app", "theme"],
 	"engines": { "node": ">=22.18" },
 	"scripts": {
 		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app",

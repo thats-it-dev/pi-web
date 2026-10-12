@@ -19,13 +19,13 @@ export class PiHeader extends LitElement {
 			.l1 { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 			.menu { display: none; font-size: 1.2rem; line-height: 1; align-self: center; }
 			h1 { font-family: var(--font-display); font-weight: 400; font-size: 1.15rem; letter-spacing: 0.02em; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-			.model { color: var(--accent); font-size: 0.8rem; white-space: nowrap; }
+			.model { color: var(--primary); font-size: 0.8rem; white-space: nowrap; }
 			.model b { font-weight: 500; }
-			.l2 { display: grid; grid-template-columns: minmax(40px, 1fr) auto; gap: 10px; align-items: center; width: 100%; text-align: left; font-size: 0.72rem; color: var(--text-2); font-variant-numeric: tabular-nums; }
+			.l2 { display: grid; grid-template-columns: minmax(40px, 1fr) auto; gap: 10px; align-items: center; width: 100%; text-align: left; font-size: 0.72rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 			.meter { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; display: block; }
-			.meter i { display: block; height: 100%; background: var(--accent); transition: width 0.4s ease; }
-			.meter.hot i { background: var(--primary); }
-			.state { font-size: 0.72rem; color: var(--muted); font-style: italic; }
+			.meter i { display: block; height: 100%; background: var(--primary); transition: width 0.4s ease; }
+			.meter.hot i { background: var(--accent); }
+			.state { font-size: 0.72rem; color: var(--text-muted); font-style: italic; }
 			@media (max-width: 899px) {
 				header { padding: 8px 14px; }
 				.menu { display: inline-block; }

@@ -30,21 +30,21 @@ export class PiSidebar extends LitElement {
 		css`
 			:host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 			.top { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 16px 10px; }
-			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text); }
+			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text-primary); }
 			nav { display: flex; gap: 14px; font-family: var(--font-quote); font-weight: 500; font-size: 0.9rem; }
 			.search { padding: 0 16px 8px; }
 			.search input { width: 100%; border-color: var(--line); padding: 5px 9px; }
-			.offline { margin: 4px 16px 8px; font-size: 0.8rem; color: var(--primary); }
-			.retry { color: var(--accent); margin-left: 6px; }
+			.offline { margin: 4px 16px 8px; font-size: 0.8rem; color: var(--accent); }
+			.retry { color: var(--primary); margin-left: 6px; }
 			.groups { overflow-y: auto; flex: 1; padding-bottom: calc(16px + var(--safe-bottom)); overscroll-behavior: contain; }
 			h2.label { margin: 0; padding: 12px 16px 4px; font-weight: 400; }
-			.row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 7px 16px 7px 14px; border-left: 2px solid transparent; color: var(--text); }
+			.row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 7px 16px 7px 14px; border-left: 2px solid transparent; color: var(--text-primary); }
 			.row:hover { background: var(--panel); }
-			.row.cur { background: var(--panel); border-left-color: var(--accent); }
+			.row.cur { background: var(--panel); border-left-color: var(--primary); }
 			.t { font-weight: 500; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-			.ago { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-			.d { grid-column: 2 / 4; font-size: 0.72rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-			.none { padding: 16px; color: var(--text-2); font-size: 0.9rem; }
+			.ago { font-size: 0.72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+			.d { grid-column: 2 / 4; font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			.none { padding: 16px; color: var(--text-secondary); font-size: 0.9rem; }
 		`,
 	];
 

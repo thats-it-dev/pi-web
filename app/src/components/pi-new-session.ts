@@ -23,11 +23,11 @@ export class PiNewSession extends LitElement {
 			h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 2rem; margin: 0 0 18px; }
 			form { display: grid; gap: 10px; }
 			.folders { display: flex; flex-wrap: wrap; gap: 6px; }
-			.folder { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-2); }
-			.folder.on { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent), transparent 85%); }
+			.folder { border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-secondary); }
+			.folder.on { border-color: var(--primary); color: var(--text-primary); background: color-mix(in srgb, var(--primary), transparent 85%); }
 			input { width: 100%; font-family: var(--font-mono); }
 			.btn { justify-self: start; }
-			.hint { color: var(--text-2); font-size: 0.85rem; margin: 0; }
+			.hint { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
 			@media (max-width: 899px) { .menu { display: inline-block; } }
 		`,
 	];

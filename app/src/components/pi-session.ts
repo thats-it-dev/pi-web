@@ -55,7 +55,7 @@ export class PiSession extends LitElement {
 			.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 			.tray { border-top: 1px solid var(--line); padding: 4px 14px; font-size: 0.75rem; }
 			.tray summary { cursor: pointer; font-weight: 400; }
-			.tray pre { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-2); white-space: pre-wrap; margin: 4px 0; max-height: 30vh; overflow: auto; }
+			.tray pre { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); white-space: pre-wrap; margin: 4px 0; max-height: 30vh; overflow: auto; }
 		`,
 	];
 

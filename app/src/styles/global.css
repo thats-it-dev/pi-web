@@ -1,42 +1,18 @@
-/* Tokens copied from thatsit.dev (website/src/styles/base.css). Direction "b · instrument". */
-@font-face { font-family: "Inter"; src: url("/fonts/Inter.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
-@font-face { font-family: "Nunito"; src: url("/fonts/Nunito.ttf") format("truetype"); font-weight: 200 1000; font-style: normal; font-display: swap; }
-@font-face { font-family: "Work Sans"; src: url("/fonts/WorkSans.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
-@font-face { font-family: "Work Sans"; src: url("/fonts/WorkSans-Italic.ttf") format("truetype"); font-weight: 100 900; font-style: italic; font-display: swap; }
+/* Fonts and colors come from the shared That's it theme (/theme); only app-specific tokens live here. */
+@import "@thatsit/theme/theme.css";
 
 :root {
-	--primary: #e4002b;
-	--accent: #ffaa00;
-	--success: #00843d;
-	--bg: #f1f1f1;
 	--panel: #e7e7e7;
-	--text: #000000;
-	--text-2: #555555;
-	--muted: #64748b;
-	--border: #555555;
 	--line: #cfcfcf;
-	--code-bg: #e2e8f0;
 	--overlay: rgba(0, 0, 0, 0.45);
 	--radius: 0.15rem;
-	--font-display: "Nunito", ui-rounded, system-ui, sans-serif;
-	--font-body: "Inter", system-ui, -apple-system, sans-serif;
-	--font-quote: "Work Sans", system-ui, sans-serif;
-	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 	--sidebar-w: 280px;
-	color-scheme: light;
 }
 
-[data-theme="dark"] {
-	--bg: #171717;
-	--panel: #1f1f1f;
-	--text: #ffffff;
-	--text-2: #a1a1aa;
-	--muted: #94a3b8;
-	--line: #333333;
-	--code-bg: #1e293b;
-	--overlay: rgba(0, 0, 0, 0.6);
-	color-scheme: dark;
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
 }
+:root[data-theme="dark"] { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
 
 *, *::before, *::after { box-sizing: border-box; }
 /* The document never scrolls or bounces (iOS would drag the header with it); only the
@@ -48,7 +24,7 @@ html { background: var(--bg); }
 body {
 	margin: 0;
 	background: var(--bg);
-	color: var(--text);
+	color: var(--text-primary);
 	font-family: var(--font-body);
 	font-size: 15px;
 	line-height: 1.55;

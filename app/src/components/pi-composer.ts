@@ -48,20 +48,20 @@ export class PiComposer extends LitElement {
 			:host { display: block; border-top: 1px solid var(--line); background: var(--bg); padding: 8px 14px calc(10px + var(--safe-bottom)); position: relative; }
 			.inner { max-width: 760px; margin: 0 auto; display: grid; gap: 6px; }
 			.queue { display: flex; flex-wrap: wrap; gap: 6px; }
-			.chip { font-size: 0.75rem; border: 1px dashed var(--border); border-radius: var(--radius); padding: 2px 8px; color: var(--text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-			.menu { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); font-size: 0.82rem; overflow: hidden; max-height: 40vh; overflow-y: auto; }
+			.chip { font-size: 0.75rem; border: 1px dashed var(--border-color); border-radius: var(--radius); padding: 2px 8px; color: var(--text-secondary); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.menu { border: 1px solid var(--border-color); border-radius: var(--radius); background: var(--bg); font-size: 0.82rem; overflow: hidden; max-height: 40vh; overflow-y: auto; }
 			.opt { display: flex; gap: 10px; padding: 6px 10px; cursor: pointer; align-items: baseline; }
-			.opt.on { background: color-mix(in srgb, var(--accent), transparent 82%); }
+			.opt.on { background: color-mix(in srgb, var(--primary), transparent 82%); }
 			.opt.off { opacity: 0.5; }
 			.opt code { font-family: var(--font-mono); flex: none; }
-			.opt span { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+			.opt span { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 			.thumbs { display: flex; gap: 6px; }
 			.thumb img { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); }
-			.box { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 6px 6px 10px; background: var(--bg); }
+			.box { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--border-color); border-radius: var(--radius); padding: 6px 6px 6px 10px; background: var(--bg); }
 			textarea { flex: 1; min-width: 0; border: 0; padding: 4px 0; resize: none; background: transparent; line-height: 1.45; max-height: 40vh; outline: none; }
 			.actions { display: flex; gap: 6px; align-items: center; }
-			.icon { width: 30px; height: 30px; border-radius: var(--radius); color: var(--text-2); font-size: 1.1rem; }
-			.status { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.7rem; color: var(--muted); }
+			.icon { width: 30px; height: 30px; border-radius: var(--radius); color: var(--text-secondary); font-size: 1.1rem; }
+			.status { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.7rem; color: var(--text-muted); }
 		`,
 	];
 

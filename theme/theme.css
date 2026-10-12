@@ -1,0 +1,67 @@
+/* That's it — shared style: fonts and color tokens for thatsit.app apps.
+   Cloned from @thatsit/ui (src/styles/root.css). Plain CSS, no build step;
+   font URLs are relative, so the folder works wherever it's served or copied.
+   Dark mode follows the system unless <html data-theme="light|dark"> says otherwise. */
+
+@font-face { font-family: "Inter"; src: url("./fonts/Inter.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("./fonts/Inter-Italic.ttf") format("truetype"); font-weight: 100 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Nunito"; src: url("./fonts/Nunito.ttf") format("truetype"); font-weight: 200 1000; font-style: normal; font-display: swap; }
+@font-face { font-family: "Nunito"; src: url("./fonts/Nunito-Italic.ttf") format("truetype"); font-weight: 200 1000; font-style: italic; font-display: swap; }
+@font-face { font-family: "Work Sans"; src: url("./fonts/WorkSans.ttf") format("truetype"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Work Sans"; src: url("./fonts/WorkSans-Italic.ttf") format("truetype"); font-weight: 100 900; font-style: italic; font-display: swap; }
+
+:root {
+	/* Brand colors (same in both themes) */
+	--primary: #ffaa00;
+	--secondary: #0032a0;
+	--accent: #e4002b;
+	--success: #00843d;
+
+	--font-display: "Nunito", ui-rounded, system-ui, sans-serif;
+	--font-body: "Inter", system-ui, -apple-system, sans-serif;
+	--font-quote: "Work Sans", system-ui, sans-serif;
+	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+	/* Light theme */
+	--bg: #f1f1f1;
+	--surface: #aaaaaa;
+	--text-primary: #000000;
+	--text-secondary: #555555;
+	--text-muted: #64748b;
+	--border-color: #555555;
+	--underline-color: #646464;
+	--shadow-color: rgba(0, 0, 0, 0.1);
+	--code-bg: #f1f5f9;
+	--ring: rgba(255, 170, 0, 0.3);
+	color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #171717;
+		--surface: #555555;
+		--text-primary: #ffffff;
+		--text-secondary: #a1a1aa;
+		--text-muted: #94a3b8;
+		--border-color: #555555;
+		--underline-color: #646464;
+		--shadow-color: rgba(0, 0, 0, 0.3);
+		--code-bg: #1e293b;
+		--ring: rgba(255, 170, 0, 0.4);
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme="dark"] {
+	--bg: #171717;
+	--surface: #555555;
+	--text-primary: #ffffff;
+	--text-secondary: #a1a1aa;
+	--text-muted: #94a3b8;
+	--border-color: #555555;
+	--underline-color: #646464;
+	--shadow-color: rgba(0, 0, 0, 0.3);
+	--code-bg: #1e293b;
+	--ring: rgba(255, 170, 0, 0.4);
+	color-scheme: dark;
+}

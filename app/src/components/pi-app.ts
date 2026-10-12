@@ -27,8 +27,8 @@ export class PiApp extends LitElement {
 			.main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 			.main > * { flex: 1; min-height: 0; }
 			.overlay { display: none; }
-			.empty { margin: auto; flex: none; text-align: center; padding: 24px; color: var(--text-2); }
-			.empty h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 3rem; color: var(--text); margin: 0 0 10px; }
+			.empty { margin: auto; flex: none; text-align: center; padding: 24px; color: var(--text-secondary); }
+			.empty h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 3rem; color: var(--text-primary); margin: 0 0 10px; }
 			.empty .menu { display: none; }
 			@media (max-width: 899px) {
 				.layout { grid-template-columns: minmax(0, 1fr); }

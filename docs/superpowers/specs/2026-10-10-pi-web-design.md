@@ -55,7 +55,7 @@ A PWA for using the pi coding agent (pi 1.0.2, `@earendil-works/pi-coding-agent`
 
 There is one repository, `~/workspace/pi-web`, organized as npm workspaces:
 
-- `app/`: the PWA. Built with Vite, TypeScript and Lit web components (`pi-*` elements, matching the site's `ti-*` web-component idiom), and deployed to Cloudflare Pages (project `pi-web`, built from GitHub `thats-it-dev/pi-web`: `npm run build -w app` → `app/dist`). Design tokens and fonts (Inter, Nunito, Work Sans) come from `website/src/styles/base.css` and `website/public/fonts`.
+- `app/`: the PWA. Built with Vite, TypeScript and Lit web components (`pi-*` elements, matching the site's `ti-*` web-component idiom), and deployed to Cloudflare Pages (project `pi-web`, built from GitHub `thats-it-dev/pi-web`: `npm run build -w app` → `app/dist`). Fonts (Inter, Nunito, Work Sans) and color tokens come from the shared `theme/` package (`@thatsit/theme`, cloned from `@thatsit/ui`), which the build also publishes at `/theme/theme.css` for other thatsit.app apps.
 - `hub/`: the Node (≥22) server. Its only runtime dependency is a Web Push library (`web-push`). Everything else uses Node built-ins.
 - `bridge/`: the pi extension, a single TypeScript file loaded by pi (pi loads TS extensions through jiti) with no dependencies.
 - `shared/`: TypeScript types for the wire protocols, plus the conversation reducer used by both `app/` and `hub/`.

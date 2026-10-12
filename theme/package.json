@@ -1,0 +1,7 @@
+{
+	"name": "@thatsit/theme",
+	"private": true,
+	"description": "Fonts and color tokens shared by thatsit.app apps (cloned from @thatsit/ui).",
+	"exports": { "./theme.css": "./theme.css", "./fonts/*": "./fonts/*" },
+	"files": ["theme.css", "fonts", "README.md"]
+}

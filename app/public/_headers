@@ -1,0 +1,4 @@
+# Cloudflare Pages headers. The shared theme is linked from other origins,
+# and fonts need CORS to load cross-origin.
+/theme/*
+  Access-Control-Allow-Origin: *
