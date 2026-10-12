@@ -1,14 +1,18 @@
 import { LitElement, css, html, nothing } from "lit";
 import { HubApi } from "../lib/api.ts";
 import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
+import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import { sharedStyles } from "../styles/shared.ts";
 
 export class PiSettings extends LitElement {
-	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true } };
+	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true } };
 	declare url: string;
 	declare status: { ok: boolean; text: string } | null;
 	declare checking: boolean;
 	declare theme: ThemePref;
+	declare push: PushStatus | null;
+	declare pushBusy: boolean;
+	declare pushError: string | null;
 
 	static styles = [
 		sharedStyles,
@@ -35,6 +39,49 @@ export class PiSettings extends LitElement {
 		this.status = null;
 		this.checking = false;
 		this.theme = getTheme();
+		this.push = null;
+		this.pushBusy = false;
+		this.pushError = null;
+	}
+
+	connectedCallback(): void {
+		super.connectedCallback();
+		void this.refreshPush();
+	}
+
+	private async refreshPush(): Promise<void> {
+		this.push = await pushStatus(browserPushEnv()).catch(() => "unsupported" as const);
+	}
+
+	private async setPush(on: boolean): Promise<void> {
+		const url = getHubUrl();
+		if (!url || this.pushBusy) return;
+		this.pushBusy = true;
+		this.pushError = null;
+		try {
+			const api = new HubApi(url);
+			if (on) await enablePush(api, browserPushEnv());
+			else await disablePush(api, browserPushEnv());
+		} catch (err) {
+			this.pushError = (err as Error).message;
+		} finally {
+			this.pushBusy = false;
+			await this.refreshPush();
+		}
+	}
+
+	private renderPush() {
+		if (!getHubUrl()) return html`<p class="hint">${PUSH_COPY.noHub}</p>`;
+		if (this.push === "install-first") return html`<p class="hint">${PUSH_COPY.installFirst}</p>`;
+		if (this.push === "unsupported") return html`<p class="hint">${PUSH_COPY.unsupported}</p>`;
+		if (this.push === "denied") return html`<p class="hint">${PUSH_COPY.denied}</p>`;
+		if (this.push === null) return nothing;
+		return html`<div class="seg" role="radiogroup" aria-label="Notifications">
+				${(["off", "on"] as const).map(
+					(v) => html`<button role="radio" aria-checked=${this.push === v ? "true" : "false"} class=${this.push === v ? "on" : ""} ?disabled=${this.pushBusy} @click=${() => this.setPush(v === "on")}>${v}</button>`,
+				)}
+			</div>
+			${this.pushError ? html`<p class="status bad" role="status">${this.pushError}</p>` : nothing}`;
 	}
 
 	private async connect(e: Event): Promise<void> {
@@ -83,6 +130,9 @@ export class PiSettings extends LitElement {
 					}}>${t}</button>`,
 				)}
 			</div>
+			<h2>notifications</h2>
+			<p class="hint">${PUSH_COPY.hint}</p>
+			${this.renderPush()}
 			<h2>install</h2>
 			<p class="hint">On iPhone or iPad, open this page in Safari and choose Share → Add to Home Screen.</p>
 		</div>`;

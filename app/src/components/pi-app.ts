@@ -1,6 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { HubApi } from "../lib/api.ts";
 import { ListStore } from "../lib/list-store.ts";
+import { browserPushEnv, resyncPush } from "../lib/push.ts";
 import { type Route, hrefFor, parseRoute } from "../lib/route.ts";
 import { getHubUrl } from "../lib/settings.ts";
 import { sharedStyles } from "../styles/shared.ts";
@@ -92,6 +93,7 @@ export class PiApp extends LitElement {
 		this.api = new HubApi(url);
 		this.list = new ListStore(this.api);
 		this.list.start();
+		void resyncPush(this.api, browserPushEnv());
 	};
 
 	render() {
