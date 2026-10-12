@@ -67,6 +67,7 @@ export class BridgeClient {
 		sock.on(
 			"data",
 			lineSplitter((line) => {
+				if (this.sock !== sock) return; // stopped, or replaced by a newer connection
 				let msg: HubToBridge;
 				try {
 					msg = JSON.parse(line);

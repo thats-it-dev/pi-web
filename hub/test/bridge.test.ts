@@ -147,7 +147,7 @@ test("the hub's own headless children load the bridge but never attach as termin
 	assert.equal(registry.all().filter((h) => h.kind === "bridge").length, 0);
 });
 
-test("a terminal resuming a session a busy headless pi holds is told to wait, then takes over once it settles", async (t) => {
+test("a terminal resuming a session a busy headless pi holds waits, is told when it is free, and takes over on /resume with the latest messages", async (t) => {
 	const { env, registry, terminal } = await setup(t);
 	// A session with a file on disk, held by a headless pi.
 	const rpc = await registry.create(env.workDir);
@@ -165,10 +165,18 @@ test("a terminal resuming a session a busy headless pi holds is told to wait, th
 	await term.records.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && /running in pi-web/.test(r.message));
 	assert.equal(registry.get(id), rpc);
 
-	// Once it settles, the terminal takes over and the headless pi is closed.
-	await until(() => registry.get(id)?.kind === "bridge", 30_000);
-	assert.equal(registry.get(id)?.pid, term.pid);
-	assert.equal(registry.all().filter((h) => h.kind === "rpc").length, 0);
+	// Once it settles, the terminal is told the session is free; the settled headless pi keeps it.
+	await term.records.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && /free now/.test(r.message), 30_000);
+	assert.equal(registry.get(id), rpc);
+	assert.equal(rpc.isBusy(), false);
+
+	// The terminal's /resume of the same session (RPC switch_session runs the TUI /resume path) re-reads the file and takes over.
+	assert.equal((await term.call({ type: "switch_session", sessionPath: file })).success, true);
+	await until(() => registry.get(id)?.kind === "bridge");
+	const h = registry.get(id) as SessionHandle;
+	assert.equal(h.pid, term.pid);
+	await until(() => registry.all().filter((x) => x.kind === "rpc").length === 0);
+	assert.ok(h.snapshot().conv.messages.some((m) => m.role === "assistant" && /a slow reply in many small pieces/.test(text(m))));
 });
 
 test("a terminal resuming a session an idle headless pi holds takes it over, and the app's open stream follows without reconnecting", async (t) => {

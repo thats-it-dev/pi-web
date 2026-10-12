@@ -19,6 +19,7 @@ export const FORWARDED_EVENTS = [
 	"session_before_compact",
 	"session_compact",
 	"session_compact_failed",
+	"session_tree",
 	"ui_prompt_start",
 	"ui_prompt_end",
 	"model_select",

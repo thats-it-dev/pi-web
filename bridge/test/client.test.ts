@@ -66,3 +66,15 @@ test("a dropped connection reconnects and opens again; stop() ends retrying", as
 	assert.equal(opened.length, 2);
 	assert.equal(hub.connections(), 2);
 });
+
+test("data that arrives after stop() never reaches onMessage", async (t) => {
+	const { path, client, opened, received } = setup(t);
+	const hub = await fakeHub(path);
+	t.after(() => hub.close());
+	client.start();
+	for (let i = 0; i < 50 && opened.length === 0; i++) await sleep(10);
+	hub.send({ type: "notice", text: "too late" }); // still in flight when the client stops
+	client.stop();
+	await sleep(100);
+	assert.deepEqual(received.items, []);
+});

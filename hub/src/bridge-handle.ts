@@ -23,6 +23,7 @@ import type { HandleEvent, SessionHandle } from "./handle.ts";
 
 export const UNAVAILABLE_IN_TERMINAL = "Not available while open in the terminal.";
 const COMMAND_TIMEOUT_MS = 30 * 60_000;
+const SWITCHING = "pi is switching sessions in the terminal. Try again in a moment.";
 
 export interface BridgeConn {
 	send(msg: HubToBridge): void;
@@ -169,11 +170,13 @@ export class BridgeHandle implements SessionHandle {
 	// The terminal pi is replacing its extension runtime (TUI /new, /resume, /fork, reload).
 	detach(): void {
 		this.conn = null;
-		this.failPending("pi is switching sessions in the terminal. Try again in a moment.");
+		this.failPending(SWITCHING);
 	}
 
 	rebind(conn: BridgeConn, hello: BridgeHello): void {
 		const from = this.sessionId;
+		// The new runtime said hello before the old one's bye: nothing will answer on the old connection.
+		if (this.conn !== conn) this.failPending(SWITCHING);
 		this.conn = conn;
 		this.load(hello);
 		this.broadcast({ type: "snapshot", snapshot: this.snapshot() });
@@ -228,7 +231,7 @@ export class BridgeHandle implements SessionHandle {
 
 	private forward(command: BridgeCommand): Promise<CommandResult> {
 		const conn = this.conn;
-		if (!conn) return Promise.resolve({ ok: false, error: this.left ? "pi is no longer open in the terminal." : "pi is switching sessions in the terminal. Try again in a moment." });
+		if (!conn) return Promise.resolve({ ok: false, error: this.left ? "pi is no longer open in the terminal." : SWITCHING });
 		const id = String(++this.seq);
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {

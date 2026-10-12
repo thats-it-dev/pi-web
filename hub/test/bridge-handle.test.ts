@@ -143,3 +143,17 @@ test("notice goes to the terminal; close() leaves the terminal pi alone", () => 
 	h.close();
 	assert.equal(stream.some((m) => m.type === "handle_gone"), false);
 });
+
+test("a hello from the new runtime before the old one's bye fails commands sent on the old connection", async () => {
+	const { h, sent } = setup();
+	const inFlight = h.command({ type: "abort" });
+	assert.equal(sent.length, 1);
+	const sent2: HubToBridge[] = [];
+	h.rebind({ send: (m) => void sent2.push(m), close: () => {} }, hello("t-2"));
+	const settled = await Promise.race([inFlight, new Promise<null>((r) => setTimeout(() => r(null), 100))]);
+	assert.match(settled?.error ?? "still pending", /switching sessions/);
+	const next = h.command({ type: "abort" });
+	const cmd = sent2.at(-1) as Extract<HubToBridge, { type: "cmd" }>;
+	h.receive({ type: "result", id: cmd.id, ok: true });
+	assert.equal((await next).ok, true);
+});

@@ -65,8 +65,14 @@ export class BridgeSession {
 			path: env.socketPath,
 			minDelayMs: env.minDelayMs,
 			maxDelayMs: env.maxDelayMs,
-			onOpen: () => this.hello(),
-			onMessage: (m) => void this.onHubMessage(m),
+			// Socket callbacks run outside pi's handler try/catch, and interactive pi exits on
+			// any uncaught error. Once pi makes this runtime's ctx stale, its getters throw.
+			onOpen: () => {
+				try {
+					this.hello();
+				} catch {}
+			},
+			onMessage: (m) => void this.onHubMessage(m).catch(() => {}),
 		});
 	}
 
@@ -95,6 +101,7 @@ export class BridgeSession {
 				this.client.send({ type: "prompt_state", prompt: this.prompts.at(-1) ?? null });
 				return;
 			case "session_compact":
+			case "session_tree": // a TUI /tree moved the leaf in place
 				this.client.send({ type: "sync", sync: this.fullSync() });
 				return;
 			case "agent_settled":

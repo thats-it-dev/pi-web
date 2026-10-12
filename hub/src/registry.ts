@@ -9,6 +9,7 @@ import type { SessionHandle } from "./handle.ts";
 
 export const BUSY_NOTICE = "This session is running in pi-web. Wait for it to finish, or /quit.";
 export const ELSEWHERE_NOTICE = "This session is open in another terminal; pi-web follows that one.";
+export const FREE_NOTICE = "This session is free now. /resume it to continue here with the latest messages.";
 
 export interface HandleFactory {
 	startRpc(opts: { cwd: string; sessionFile?: string }): Promise<SessionHandle>;
@@ -118,8 +119,11 @@ export class Registry {
 		}
 	}
 
-	// A terminal pi announced itself over the bridge socket.
+	// A terminal pi announced itself over the bridge socket. The bridge server calls this
+	// again on every hello from the same terminal, so a handle already tracked stays as it is.
 	attachBridge(h: SessionHandle): "attached" | "waiting" | "ignored" {
+		if (this.unsubscribers.has(h)) return "attached";
+		if (this.waiting.has(h)) return "waiting";
 		if (this.all().some((x) => x.kind === "rpc" && x.pid === h.pid)) return "ignored"; // our own headless child
 		return this.claim(h);
 	}
@@ -149,17 +153,16 @@ export class Registry {
 		this.waiting.set(h, off);
 	}
 
-	private hasWaiter(id: string): boolean {
-		return [...this.waiting.keys()].some((h) => h.sessionId === id);
-	}
-
-	// The session is free: the longest-waiting terminal for it takes over.
-	private promote(id: string): void {
-		const next = [...this.waiting.keys()].find((h) => h.sessionId === id);
-		if (!next) return;
-		this.waiting.get(next)?.();
-		this.waiting.delete(next);
-		this.claim(next);
+	// The holder let go. A waiting terminal loaded the session file before the holder's
+	// latest turns and pi never re-reads it, so it is not promoted (spec §3.2): each waiter
+	// is told, and its /resume (a fresh hello) claims the session with the latest messages.
+	private freeWaiters(id: string): void {
+		for (const [h, off] of [...this.waiting]) {
+			if (h.sessionId !== id) continue;
+			off();
+			this.waiting.delete(h);
+			h.notice?.(FREE_NOTICE);
+		}
 	}
 
 	private isIdle(h: SessionHandle): boolean {
@@ -171,6 +174,12 @@ export class Registry {
 		this.pending++;
 		try {
 			const h = await this.opts.factory.startRpc(o);
+			const holder = this.handles.get(h.sessionId);
+			if (holder) {
+				// A terminal attached while this pi was starting: the terminal wins (spec §3.2).
+				h.close();
+				return holder;
+			}
 			this.adopt(h);
 			return h;
 		} finally {
@@ -194,10 +203,7 @@ export class Registry {
 			switch (e.type) {
 				case "state_changed":
 					this.emitState(h.sessionId);
-					if (h.kind === "rpc" && !h.isBusy() && this.hasWaiter(h.sessionId)) {
-						this.forget(h);
-						h.close();
-					}
+					if (h.kind === "rpc" && !h.isBusy()) this.freeWaiters(h.sessionId);
 					break;
 				case "renamed":
 					this.emit({ type: "session_list_changed" });
@@ -215,7 +221,7 @@ export class Registry {
 					this.emitState(e.from);
 					this.emitState(e.to);
 					this.emit({ type: "session_list_changed" });
-					this.promote(e.from);
+					this.freeWaiters(e.from);
 					break;
 				}
 				case "exit":
@@ -231,7 +237,7 @@ export class Registry {
 		this.emitState(h.sessionId);
 	}
 
-	private forget(h: SessionHandle, promote = true): void {
+	private forget(h: SessionHandle, freeWaiters = true): void {
 		this.unsubscribers.get(h)?.();
 		this.unsubscribers.delete(h);
 		const freed: string[] = [];
@@ -241,7 +247,7 @@ export class Registry {
 			this.emitState(id);
 			freed.push(id);
 		}
-		if (promote) for (const id of freed) this.promote(id);
+		if (freeWaiters) for (const id of freed) this.freeWaiters(id);
 	}
 
 	private emitState(id: string): void {

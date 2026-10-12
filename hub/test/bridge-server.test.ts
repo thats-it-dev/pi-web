@@ -29,13 +29,19 @@ const hello = (id: string, pid = 500, protocol = 1): BridgeHello => ({
 async function setup(t: TestContext, verdict: "attached" | "waiting" | "ignored" = "attached") {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-bsrv-"));
 	const socketPath = join(dir, "data", "bridge.sock");
-	const attached: BridgeHandle[] = [];
-	const server = await startBridgeServer({ socketPath, switchGraceMs: 150, helloTimeoutMs: 150, registry: { attachBridge: (h) => (attached.push(h), verdict) } });
+	const attached: BridgeHandle[] = []; // each handle once
+	const calls: BridgeHandle[] = []; // every attachBridge call
+	const attachBridge = (h: BridgeHandle) => {
+		calls.push(h);
+		if (!attached.includes(h)) attached.push(h);
+		return verdict;
+	};
+	const server = await startBridgeServer({ socketPath, switchGraceMs: 150, helloTimeoutMs: 150, registry: { attachBridge } });
 	t.after(async () => {
 		await server.close();
 		rmSync(dir, { recursive: true, force: true });
 	});
-	return { dir, socketPath, attached, server };
+	return { dir, socketPath, attached, calls, server };
 }
 
 async function client(path: string) {
@@ -144,6 +150,22 @@ test("the new runtime's hello can arrive before the old runtime's bye", async (t
 	b.send({ type: "event", event: { type: "agent_start" } });
 	await stream.next((m) => m.type === "event");
 	assert.equal(attached.length, 1);
+	b.sock.destroy();
+});
+
+test("every hello from a terminal goes to the registry, so a terminal it let go can claim again with /resume", async (t) => {
+	const { socketPath, attached, calls } = await setup(t, "waiting");
+	const a = await client(socketPath);
+	a.send(hello("s-1"));
+	await until(() => calls.length === 1);
+	const { stream } = watch(attached[0]);
+	a.send({ type: "bye", reason: "resume" });
+	a.sock.end();
+	const b = await client(socketPath);
+	b.send(hello("s-1")); // the same session, re-read from disk
+	await stream.next((m) => m.type === "snapshot");
+	await until(() => calls.length === 2);
+	assert.equal(calls[1], calls[0]); // the same handle, rebound first
 	b.sock.destroy();
 });
 

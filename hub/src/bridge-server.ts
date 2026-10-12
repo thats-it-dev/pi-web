@@ -13,7 +13,7 @@ import { type BridgeConn, BridgeHandle } from "./bridge-handle.ts";
 
 export interface BridgeServerOptions {
 	socketPath: string;
-	registry: { attachBridge(h: BridgeHandle): "attached" | "waiting" | "ignored" };
+	registry: { attachBridge(h: BridgeHandle): "attached" | "waiting" | "ignored" }; // idempotent per handle
 	switchGraceMs?: number;
 	helloTimeoutMs?: number;
 	log?: (msg: string) => void;
@@ -84,6 +84,9 @@ export async function startBridgeServer(opts: BridgeServerOptions): Promise<Brid
 				e.sock = sock;
 				if (old && old !== sock) old.destroy();
 				e.handle.rebind(conn, hello);
+				// A terminal the registry let go (it waited, then was told the session is free)
+				// claims the session again here; for a handle it already tracks this is a no-op.
+				opts.registry.attachBridge(e.handle);
 				return;
 			}
 			const handle = new BridgeHandle(conn, hello);

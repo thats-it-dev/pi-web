@@ -58,12 +58,22 @@ function fakes() {
 	return { pi, ctx, calls, world };
 }
 
-async function setup(t: TestContext) {
+// pi 1.0.2 invalidates an extension ctx after session_shutdown: every getter throws from then on.
+function staleAfter(ctx: CtxLike, flag: { stale: boolean }): CtxLike {
+	return new Proxy(ctx, {
+		get(target, key, receiver) {
+			if (flag.stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+			return Reflect.get(target, key, receiver);
+		},
+	});
+}
+
+async function setup(t: TestContext, wrap: (ctx: CtxLike) => CtxLike = (ctx) => ctx) {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-session-"));
 	const path = join(dir, "bridge.sock");
 	const hub = await fakeHub(path);
 	const f = fakes();
-	const session = new BridgeSession(f.pi, f.ctx, {
+	const session = new BridgeSession(f.pi, wrap(f.ctx), {
 		socketPath: path,
 		piVersion: "1.0.2",
 		pid: 4321,
@@ -202,6 +212,53 @@ test("commands from the hub are answered with a result; notices go to the termin
 		calls.find((c) => c[0] === "notify"),
 		["notify", "hello terminal", "info"],
 	);
+});
+
+test("a TUI /tree move resyncs the hub in full, like a compaction", async (t) => {
+	const { hub, session, ctx } = await setup(t);
+	session.onPiEvent({ type: "session_tree", newLeafId: "leaf", oldLeafId: "older" }, ctx);
+	const full = await hub.messages.next((m) => m.type === "sync" || m.type === "event");
+	assert.equal(full.type, "sync");
+	assert.equal(full.sync.messages.length, 2);
+});
+
+// Socket callbacks run outside pi's handler try/catch, and interactive pi exits on any uncaught error.
+function trapUncaught(t: TestContext): unknown[] {
+	const caught: unknown[] = [];
+	const onErr = (err: unknown) => void caught.push(err);
+	process.on("uncaughtException", onErr);
+	process.on("unhandledRejection", onErr);
+	t.after(() => {
+		process.off("uncaughtException", onErr);
+		process.off("unhandledRejection", onErr);
+	});
+	return caught;
+}
+
+test("a notice that arrives after pi made the ctx stale is dropped without throwing", async (t) => {
+	const caught = trapUncaught(t);
+	const flag = { stale: false };
+	const { hub, calls } = await setup(t, (ctx) => staleAfter(ctx, flag));
+	flag.stale = true;
+	hub.send({ type: "notice", text: "too late" });
+	hub.send({ type: "cmd", id: "8", command: { type: "abort" } });
+	assert.deepEqual(await hub.messages.next((m) => m.type === "result"), { type: "result", id: "8", ok: false, error: "This extension ctx is stale after session replacement or reload." });
+	await new Promise((r) => setTimeout(r, 50));
+	assert.deepEqual(caught, []);
+	assert.equal(calls.some((c) => c[0] === "notify"), false);
+});
+
+test("a reconnect after pi made the ctx stale sends no hello and throws nothing", async (t) => {
+	const caught = trapUncaught(t);
+	const flag = { stale: false };
+	const { hub } = await setup(t, (ctx) => staleAfter(ctx, flag));
+	flag.stale = true;
+	hub.dropClients();
+	for (let i = 0; i < 50 && hub.connections() < 2; i++) await new Promise((r) => setTimeout(r, 10));
+	await new Promise((r) => setTimeout(r, 50));
+	assert.equal(hub.connections(), 2);
+	assert.equal(hub.messages.items.filter((m) => m.type === "hello").length, 1);
+	assert.deepEqual(caught, []);
 });
 
 test("after the hub restarts, the bridge reconnects and introduces itself again in full", async (t) => {

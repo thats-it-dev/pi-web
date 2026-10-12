@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ListMessage } from "../../shared/src/protocol.ts";
 import { HttpError } from "../src/errors.ts";
-import { BUSY_NOTICE, ELSEWHERE_NOTICE, Registry, type RegistryOptions } from "../src/registry.ts";
+import { BUSY_NOTICE, ELSEWHERE_NOTICE, FREE_NOTICE, Registry, type RegistryOptions } from "../src/registry.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
 function setup(opts: Partial<RegistryOptions> = {}) {
@@ -186,7 +186,10 @@ test("an idle headless pi gives way to the terminal", async () => {
 	assert.deepEqual(b.notices, []);
 });
 
-test("a busy headless pi keeps the session; the terminal is told and takes over once it settles", async () => {
+// A waiting terminal loaded the session file before the holder's latest turns, and pi never
+// re-reads it. So a waiter is never promoted: it is told the session is free, and its /resume
+// (a fresh hello from the same terminal) claims the session like any terminal would.
+test("a busy headless pi keeps the session; once it settles the terminal is told it is free, and its /resume takes over", async () => {
 	const { registry, started } = setup();
 	const rpc = (await registry.ensure("disk-1")) as FakeHandle;
 	rpc.busy = true;
@@ -196,15 +199,32 @@ test("a busy headless pi keeps the session; the terminal is told and takes over 
 	assert.equal(registry.get("disk-1"), rpc);
 	rpc.state = "running";
 	rpc.fire({ type: "state_changed" }); // still busy: nothing changes
-	assert.equal(registry.get("disk-1"), rpc);
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
 	rpc.busy = false;
 	rpc.state = "idle";
 	rpc.fire({ type: "state_changed" });
+	assert.deepEqual(b.notices, [BUSY_NOTICE, FREE_NOTICE]);
+	assert.equal(started[0].closed, false);
+	assert.equal(registry.get("disk-1"), rpc); // the settled headless pi still holds it
+	rpc.fire({ type: "state_changed" });
+	assert.equal(b.notices.length, 2); // told once
+	assert.equal(registry.attachBridge(b), "attached"); // the terminal's /resume: an idle headless pi gives way
 	assert.equal(started[0].closed, true);
 	assert.equal(registry.get("disk-1"), b);
 });
 
-test("a second terminal on the same session waits until the first one leaves", async () => {
+test("a waiting terminal is told when a busy headless pi exits", async () => {
+	const { registry } = setup();
+	const rpc = (await registry.ensure("disk-1")) as FakeHandle;
+	rpc.busy = true;
+	const b = bridge("disk-1");
+	registry.attachBridge(b);
+	rpc.fire({ type: "exit", code: 1, stderr: "boom", closedByHub: false });
+	assert.deepEqual(b.notices, [BUSY_NOTICE, FREE_NOTICE]);
+	assert.equal(registry.get("disk-1"), undefined);
+});
+
+test("a second terminal on the same session waits until the first one leaves, then is told to /resume", async () => {
 	const { registry } = setup();
 	const first = bridge("disk-1", 901);
 	const second = bridge("disk-1", 902);
@@ -212,7 +232,23 @@ test("a second terminal on the same session waits until the first one leaves", a
 	assert.equal(registry.attachBridge(second), "waiting");
 	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE]);
 	first.leave();
+	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE, FREE_NOTICE]);
+	assert.equal(registry.get("disk-1"), undefined);
+	assert.equal(registry.attachBridge(second), "attached");
 	assert.equal(registry.get("disk-1"), second);
+});
+
+test("a waiting terminal is told when the terminal holding the session moves to another one", async () => {
+	const { registry } = setup();
+	const first = bridge("disk-1", 901);
+	const second = bridge("disk-1", 902);
+	registry.attachBridge(first);
+	registry.attachBridge(second);
+	first.sessionId = "disk-2";
+	first.fire({ type: "session_changed", from: "disk-1", to: "disk-2" });
+	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE, FREE_NOTICE]);
+	assert.equal(registry.get("disk-1"), undefined);
+	assert.equal(registry.get("disk-2"), first);
 });
 
 test("a waiting terminal that quits is forgotten", async () => {
@@ -224,6 +260,33 @@ test("a waiting terminal that quits is forgotten", async () => {
 	second.leave();
 	first.leave();
 	assert.equal(registry.get("disk-1"), undefined);
+	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE]);
+});
+
+test("a repeated hello from a terminal the registry already tracks changes nothing", async () => {
+	const { registry, changes } = setup();
+	const first = bridge("disk-1", 901);
+	const second = bridge("disk-1", 902);
+	assert.equal(registry.attachBridge(first), "attached");
+	assert.equal(registry.attachBridge(first), "attached");
+	assert.equal(registry.attachBridge(second), "waiting");
+	assert.equal(registry.attachBridge(second), "waiting");
+	assert.deepEqual(second.notices, [ELSEWHERE_NOTICE]);
+	const before = changes.length;
+	first.fire({ type: "state_changed" });
+	assert.equal(changes.length - before, 1); // subscribed once
+});
+
+test("a terminal that attaches while a headless pi is still starting for the session keeps it", async () => {
+	const { registry, started } = setup();
+	const starting = registry.ensure("disk-1");
+	await sleep(1); // the lookup is done; the headless pi is starting
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "attached");
+	assert.equal(await starting, b);
+	assert.equal(started.length, 1);
+	assert.equal(started[0].closed, true);
+	assert.equal(registry.get("disk-1"), b);
 });
 
 test("the hub's own headless child is never taken for a terminal", async () => {

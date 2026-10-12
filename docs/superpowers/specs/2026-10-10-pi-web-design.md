@@ -124,7 +124,7 @@ Capabilities by handle:
 
 ### 2.4 Bridge limitations
 
-pi's extension API has no `queue_update`, `auto_retry_*`, or view of other extensions' UI calls. On a bridge session the app therefore shows no queue chips, no "retrying (n/max)", and no other extensions' statuses, widgets or toasts. Extension dialogs are shown as "waiting for you in the terminal: <title>". Extension commands can't be run from the app, because `sendUserMessage` never dispatches them; the slash menu shows them disabled. Prompt templates and skills work (`expandPromptTemplates: true`). A manual compaction that another extension cancels leaves "compacting…" showing until the next run settles.
+pi's extension API has no `queue_update`, `auto_retry_*`, or view of other extensions' UI calls. On a bridge session the app therefore shows no queue chips, no "retrying (n/max)", and no other extensions' statuses, widgets or toasts. Extension dialogs are shown as "waiting for you in the terminal: <title>". Extension commands can't be run from the app, because `sendUserMessage` never dispatches them; the slash menu shows them disabled. Prompt templates and skills work (`expandPromptTemplates: true`).
 
 ## 3. Behaviour
 
@@ -143,7 +143,10 @@ pi's extension API has no `queue_update`, `auto_retry_*`, or view of other exten
 - **New session:** a folder picker (known cwds, or typed with `~` expansion and validated as a directory), with optional model and thinking level. `POST /api/sessions` runs, then the first prompt is sent.
 - **Terminal attaches to a session held by an RpcHandle** (a bridge `hello` with a `sessionId` that already has a handle that isn't the hub's own child):
   - If the RpcHandle is idle, the hub closes it and registers the BridgeHandle in its place. Subscribers receive a fresh snapshot.
-  - If it is busy, the hub sends `notice` to the bridge ("this session is running in pi-web; wait for it to finish or /quit") and keeps the RpcHandle. The bridge registers as a pending duplicate and takes over when the RpcHandle settles and closes.
+  - If it is busy, the hub sends `notice` to the bridge ("this session is running in pi-web; wait for it to finish or /quit") and keeps the RpcHandle. The bridge waits.
+- **Terminal attaches to a session another terminal holds:** the hub sends `notice` ("open in another terminal; pi-web follows that one") and the bridge waits.
+- **A waiting terminal is never promoted.** It loaded the session file when it started, and pi never re-reads it, so taking over later would leave the terminal and the app on a stale conversation, and its next prompt would branch silently. When the holder lets go (a busy RpcHandle settles or exits, or the holding terminal quits or moves to another session), the hub sends each waiter `notice` ("This session is free now. /resume it to continue here with the latest messages.") and stops tracking it. A settled RpcHandle stays the holder. The terminal's `/resume` of the session re-reads the file and sends a fresh `hello` from the same pid, which the hub handles like any terminal attaching: an idle RpcHandle gives way.
+- **A terminal attaches while the hub is still starting an RpcHandle for the session:** the terminal wins. The new RpcHandle is closed and the command that started it goes to the BridgeHandle.
 - **The hub's own children:** a bridge `hello` whose `pid` matches an RpcHandle child is ignored, because that child is already driven over RPC.
 - **Bridge disconnects:** the BridgeHandle is removed. Subscribers receive `handle_gone`, the app falls back to `/history`, and the composer reads "continue here".
 - **Session changes inside a handle** (RPC fork, clone or new, or TUI `/new`, `/resume` or `/fork` through `hello`): the hub re-keys the handle, and subscribers receive `snapshot` with the new `sessionId`. The app replaces its URL.

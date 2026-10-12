@@ -70,7 +70,7 @@ pi install ~/workspace/pi-web/bridge
 
 The bridge connects to the hub at `~/.config/pi-web/bridge.sock`. Set `PI_WEB_BRIDGE_SOCKET` to use another socket, for example `.dev-data/bridge.sock` for `npm run dev -w hub`. If the hub isn't running, the bridge waits quietly and connects when it starts.
 
-From the app you can watch the terminal session stream, prompt, steer and queue follow-ups, switch the model and thinking level, compact, and rename. Fork, clone, `!bash`, export and extension commands stay in the terminal, and extension dialogs show as "waiting for you in the terminal". If the app is running a reply in headless pi when you resume that session in a terminal, the terminal is told to wait and takes over once the reply finishes.
+From the app you can watch the terminal session stream, prompt, steer and queue follow-ups, switch the model and thinking level, compact, and rename. Fork, clone, `!bash`, export and extension commands stay in the terminal, and extension dialogs show as "waiting for you in the terminal". If the app is running a reply in headless pi when you resume that session in a terminal, the terminal is told to wait. When the reply finishes, the terminal is told the session is free: `/resume` it there to continue with the latest messages. The same goes for a session open in another terminal, once that terminal quits or moves on.
 
 ## Deploy
 
@@ -81,5 +81,5 @@ https://pi.thatsit.app; other branches get preview deployments.
 Starting a new session with a preselected model is not in Plan 1: start the
 session, then switch via the model sheet.
 
-Hub deployment (tailscale serve, systemd), terminal sync (the bridge
-extension) and push notifications are Plans 2–4.
+Hub deployment (tailscale serve, systemd) and push notifications are
+Plans 3–4.
