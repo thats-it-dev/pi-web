@@ -11,6 +11,7 @@ import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
+import { type PushStore, isSubscription } from "./push.ts";
 import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 
 export interface HubDeps {
@@ -20,6 +21,7 @@ export interface HubDeps {
 	version: string;
 	home?: string;
 	log?: (msg: string) => void;
+	push?: PushStore;
 }
 
 type Cors = Record<string, string>;
@@ -36,7 +38,7 @@ export function createHubServer(deps: HubDeps): Server {
 		const m = req.method;
 
 		if (m === "GET" && p === "/api/health") {
-			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: null };
+			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: deps.push?.publicKey ?? null };
 			return sendJson(res, 200, body, cors);
 		}
 		if (m === "GET" && p === "/api/sessions") return sendJson(res, 200, { sessions: await listSessions(), home }, cors);
@@ -50,6 +52,19 @@ export function createHubServer(deps: HubDeps): Server {
 			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
 			const h = await registry.create(cwd);
 			return sendJson(res, 200, { sessionId: h.sessionId }, cors);
+		}
+		if (m === "POST" && (p === "/api/push/subscribe" || p === "/api/push/unsubscribe")) {
+			if (!deps.push) throw new HttpError(503, "Push isn't set up on this hub");
+			const body = await readJson(req);
+			if (p === "/api/push/subscribe") {
+				if (!isSubscription(body)) throw new HttpError(400, "Not a push subscription");
+				deps.push.subscribe(body);
+			} else {
+				const endpoint = (body as { endpoint?: unknown }).endpoint;
+				if (typeof endpoint !== "string") throw new HttpError(400, "An endpoint is required");
+				deps.push.unsubscribe(endpoint);
+			}
+			return sendJson(res, 200, { ok: true }, cors);
 		}
 
 		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close)$/);
