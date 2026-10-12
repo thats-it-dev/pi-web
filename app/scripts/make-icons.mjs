@@ -50,6 +50,10 @@ for (const [name, size, frac] of [
 	["icon-512.png", 512, 0.31],
 	["icon-maskable-512.png", 512, 0.24],
 	["apple-touch-icon.png", 180, 0.31],
+	// iOS also probes these at the site root; without them a static host answers
+	// with the HTML shell and the Home Screen gets a letter instead of the icon.
+	["../apple-touch-icon.png", 180, 0.31],
+	["../apple-touch-icon-precomposed.png", 180, 0.31],
 ]) {
 	writeFileSync(new URL(name, out), png(size, frac));
 }
