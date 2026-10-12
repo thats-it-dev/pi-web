@@ -64,6 +64,7 @@ test("subscribe stores the browser; unsubscribe removes it", async () => {
 test("bad bodies are refused", async () => {
 	assert.equal((await call(port, "POST", "/api/push/subscribe", GOOD, { endpoint: "https://x" })).status, 400);
 	assert.equal((await call(port, "POST", "/api/push/unsubscribe", GOOD, {})).status, 400);
+	assert.equal((await call(port, "POST", "/api/push/unsubscribe", GOOD, null)).status, 400);
 	assert.deepEqual(push.list(), []);
 });
 

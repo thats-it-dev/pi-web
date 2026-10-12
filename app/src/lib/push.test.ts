@@ -56,7 +56,7 @@ test("status covers iOS outside the home screen, no support, denied, off and on"
 });
 
 test("enable asks permission, subscribes with the hub's key and registers with the hub", async () => {
-	const { e, pm } = env();
+	const { e, pm } = env({ permission: () => "default" });
 	const a = api();
 	await enablePush(a, e);
 	expect(e.requestPermission).toHaveBeenCalled();
@@ -78,7 +78,7 @@ test("enable reuses a subscription made with the same key, and replaces one made
 
 test("enable explains what stops it", async () => {
 	await expect(enablePush(api(null), env().e)).rejects.toThrow(PUSH_COPY.noKey);
-	await expect(enablePush(api(), env({ requestPermission: async () => "denied" }).e)).rejects.toThrow(PUSH_COPY.denied);
+	await expect(enablePush(api(), env({ permission: () => "default", requestPermission: async () => "denied" }).e)).rejects.toThrow(PUSH_COPY.denied);
 	await expect(enablePush(api(), env({ pushManager: async () => null }).e)).rejects.toThrow(PUSH_COPY.unsupported);
 });
 
@@ -117,4 +117,22 @@ test("a service-worker message routes to the session", () => {
 	expect(openHashFromMessage({ type: "pi-open" })).toBeNull();
 	expect(openHashFromMessage({ type: "other", sessionId: "x" })).toBeNull();
 	expect(openHashFromMessage(null)).toBeNull();
+});
+
+test("permission is never requested when already granted, on enable or resync", async () => {
+	const a = env({}, sub(KEY));
+	await enablePush(api(), a.e);
+	await resyncPush(api(), a.e);
+	expect(a.e.requestPermission).not.toHaveBeenCalled();
+});
+
+test("permission is requested synchronously, inside the user's gesture", async () => {
+	let release!: () => void;
+	const gate = new Promise<void>((r) => (release = r));
+	const { e } = env({ permission: () => "default" });
+	const a = { ...api(), health: vi.fn(async () => { await gate; return { ok: true as const, login: "me", hubVersion: "0.1.0", vapidPublicKey: KEY }; }) };
+	const done = enablePush(a, e);
+	expect(e.requestPermission).toHaveBeenCalledTimes(1); // before pushManager()/health() could resolve
+	release();
+	await done;
 });

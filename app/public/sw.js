@@ -62,7 +62,7 @@ self.addEventListener("push", (event) => {
 	const sessionId = typeof p.sessionId === "string" ? p.sessionId : "";
 	const title = typeof p.title === "string" && p.title ? p.title : "pi";
 	const body = typeof p.kind === "string" && Object.hasOwn(PUSH_BODY, p.kind) ? PUSH_BODY[p.kind] : "Something happened.";
-	event.waitUntil(self.registration.showNotification(title, { body, tag: sessionId || "pi-web", data: { sessionId }, icon: "/icons/icon-192.png" }));
+	event.waitUntil(self.registration.showNotification(title, { body, tag: sessionId || "pi-web", renotify: true, data: { sessionId }, icon: "/icons/icon-192.png" }));
 });
 
 // A tap opens the session: an open window is told where to go (and focused), else a new one opens there.

@@ -60,7 +60,7 @@ export function createHubServer(deps: HubDeps): Server {
 				if (!isSubscription(body)) throw new HttpError(400, "Not a push subscription");
 				deps.push.subscribe(body);
 			} else {
-				const endpoint = (body as { endpoint?: unknown }).endpoint;
+				const endpoint = (body as { endpoint?: unknown } | null)?.endpoint;
 				if (typeof endpoint !== "string") throw new HttpError(400, "An endpoint is required");
 				deps.push.unsubscribe(endpoint);
 			}

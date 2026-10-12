@@ -56,11 +56,15 @@ export async function pushStatus(env: PushEnv): Promise<PushStatus> {
 }
 
 export async function enablePush(api: PushApi, env: PushEnv): Promise<void> {
+	// The prompt must start inside the user's gesture (WebKit, Firefox), so before any await.
+	// Already granted (a resync, or a repeat enable) never asks.
+	const perm = env.permission() === "granted" ? Promise.resolve<NotificationPermission>("granted") : env.requestPermission();
+	perm.catch(() => {}); // an earlier throw below must not leave this unhandled
 	const pm = await env.pushManager();
 	if (!pm) throw new Error(PUSH_COPY.unsupported);
 	const { vapidPublicKey } = await api.health();
 	if (!vapidPublicKey) throw new Error(PUSH_COPY.noKey);
-	if ((await env.requestPermission()) !== "granted") throw new Error(PUSH_COPY.denied);
+	if ((await perm) !== "granted") throw new Error(PUSH_COPY.denied);
 	const key = base64UrlToBytes(vapidPublicKey);
 	const sub = (await current(pm, key)) ?? (await pm.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
 	await api.pushSubscribe(toInfo(sub));

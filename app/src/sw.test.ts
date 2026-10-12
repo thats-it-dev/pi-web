@@ -28,6 +28,7 @@ test("a push shows a notification named for the session", async () => {
 	expect(self.registration.showNotification).toHaveBeenCalledWith("fix the parser", {
 		body: "Needs you.",
 		tag: "s-1",
+		renotify: true,
 		data: { sessionId: "s-1" },
 		icon: "/icons/icon-192.png",
 	});
