@@ -248,3 +248,18 @@ export interface HealthInfo {
 	hubVersion: string;
 	vapidPublicKey: string | null;
 }
+
+// Web Push (spec §5.5). The payload names the session and why, and nothing more.
+export type PushKind = "finished" | "needs_you" | "error";
+
+export interface PushPayload {
+	sessionId: string;
+	title: string;
+	kind: PushKind;
+}
+
+// A browser PushSubscription as JSON (PushSubscription.toJSON()).
+export interface PushSubscriptionInfo {
+	endpoint: string;
+	keys: { p256dh: string; auth: string };
+}

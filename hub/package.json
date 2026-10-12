@@ -9,5 +9,12 @@
 		"test": "node --test --test-concurrency=1 test/*.test.ts",
 		"typecheck": "tsc -p tsconfig.json"
 	},
-	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+	"devDependencies": {
+		"@types/node": "26.6.5",
+		"@types/web-push": "3.6.4",
+		"typescript": "5.9.3"
+	},
+	"dependencies": {
+		"web-push": "3.6.7"
+	}
 }
