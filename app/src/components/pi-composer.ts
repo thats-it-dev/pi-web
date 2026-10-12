@@ -14,9 +14,9 @@ export interface SubmitDetail {
 
 const LONG_PRESS_MS = 500;
 
-// Lucide icons (ISC): send-horizontal and square.
-const SEND_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" /><path d="M6 12h16" /></svg>`;
-const STOP_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /></svg>`;
+// Lucide icons (ISC): arrow-up and square.
+const SEND_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>`;
+const STOP_ICON = html`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect width="14" height="14" x="5" y="5" rx="2" /></svg>`;
 
 export class PiComposer extends LitElement {
 	static properties = {
@@ -65,14 +65,17 @@ export class PiComposer extends LitElement {
 			.opt span { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 			.thumbs { display: flex; gap: 6px; }
 			.thumb img { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); }
-			.box { display: grid; gap: 2px; border: 1px solid var(--border-color); border-radius: var(--radius); padding: 6px 6px 4px 10px; background: var(--bg); }
+			.box { display: grid; gap: 2px; padding: 4px 0 0; }
 			textarea { width: 100%; min-width: 0; border: 0; padding: 4px 0; resize: none; background: transparent; line-height: 1.45; max-height: 40vh; outline: none; }
+			textarea:focus-visible { outline: none; }
 			.row { display: flex; gap: 6px; align-items: center; }
 			.model { color: var(--primary); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: auto; }
 			.model b { font-weight: 500; }
 			.icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius); color: var(--text-secondary); font-size: 1.1rem; cursor: pointer; flex: none; }
 			.icon svg { width: 20px; height: 20px; }
-			.icon.send { color: #000; background: var(--primary); }
+			.icon.send { color: #000; background: var(--primary); border-radius: 50%; }
+			.icon.stop { color: #fff; background: var(--accent); border-radius: 50%; }
+			.icon.stop svg { width: 16px; height: 16px; }
 			.icon:disabled { opacity: 0.45; cursor: default; }
 			.status { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.7rem; color: var(--text-muted); }
 		`,
@@ -249,8 +252,9 @@ export class PiComposer extends LitElement {
 						${this.model ? html`<b>${this.model.name}</b> · ${this.thinking}` : "model"}
 					</button>
 					${this.canImages ? html`<label class="icon" aria-label="Attach image">＋<input class="sr-only" type="file" accept="image/*" multiple @change=${this.onFiles} /></label>` : nothing}
-					${this.streaming ? html`<button class="icon" aria-label="stop" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>${STOP_ICON}</button>` : nothing}
-					<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>
+					${this.streaming && !this.text.trim() && !this.images.length
+						? html`<button class="icon stop" aria-label="stop" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>${STOP_ICON}</button>`
+						: html`<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>`}
 				</div>
 			</div>
 			${this.statuses.length ? html`<div class="status">${this.statuses.map((s) => html`<span>${s}</span>`)}</div>` : nothing}
