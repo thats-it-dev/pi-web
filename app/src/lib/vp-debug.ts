@@ -70,7 +70,7 @@ export function startVpDebug(): void {
 			`scrollY ${scrollY} body.scrollTop ${document.body.scrollTop}`,
 			`safe t ${cs.paddingTop} b ${cs.paddingBottom} l ${cs.paddingLeft} r ${cs.paddingRight}`,
 			units.map(([u, d]) => `${u} ${d.getBoundingClientRect().height}`).join("  "),
-			`--app-h ${root.style.getPropertyValue("--app-h") || "unset"} --app-top ${root.style.getPropertyValue("--app-top") || "unset"}`,
+			`missing ${Math.round(units[3][1].getBoundingClientRect().height - innerHeight)}  --app-h ${root.style.getPropertyValue("--app-h") || "unset"} --app-top ${root.style.getPropertyValue("--app-top") || "unset"}`,
 			`app    ${r(app)}  (red)`,
 			`header ${r(deep(document, "pi-header"))}  (green)`,
 			`compos ${r(deep(document, "pi-composer"))}  (cyan)`,
