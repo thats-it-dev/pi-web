@@ -381,8 +381,11 @@ export class PiSession extends LitElement {
 				.rpcOnlyDisabled=${snap?.handleKind === "bridge"}
 				.queue=${s.conv.queue}
 				.statuses=${statuses}
+				.model=${snap?.state.model ?? null}
+				.thinking=${snap?.state.thinkingLevel ?? null}
 				@pi-submit=${this.onSubmit}
 				@pi-abort=${this.onAbort}
+				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
 			></pi-composer>
 			${dialog
 				? html`<pi-sheet open heading=${dialog.title || "pi needs an answer"} @pi-close=${() => this.answer(dialog.id, { cancelled: true })}>
