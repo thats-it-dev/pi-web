@@ -56,6 +56,7 @@ export function startVpDebug(): void {
 		const cs = getComputedStyle(safe);
 		const root = document.documentElement;
 		const app = document.querySelector("pi-app");
+		box.style.top = `${Math.round((vv?.offsetTop ?? 0) + (vv?.height ?? innerHeight) * 0.3)}px`; // stays in view while iOS pans for the keyboard
 		for (const [tag, color] of [["pi-header", "lime"], ["pi-composer", "cyan"]] as const) {
 			const el = deep(document, tag) as HTMLElement | null;
 			if (el) el.style.outline = `2px dashed ${color}`;
@@ -67,10 +68,11 @@ export function startVpDebug(): void {
 			`inner ${innerWidth}x${innerHeight} outer ${outerWidth}x${outerHeight}`,
 			`client ${root.clientWidth}x${root.clientHeight}`,
 			`vv h ${vv?.height.toFixed(1)} top ${vv?.offsetTop.toFixed(1)} pageTop ${vv?.pageTop.toFixed(1)} s ${vv?.scale.toFixed(2)}`,
-			`scrollY ${scrollY} body.scrollTop ${document.body.scrollTop}`,
+			`scrollY ${scrollY} root.scrollTop ${root.scrollTop} body.scrollTop ${document.body.scrollTop} focus ${document.activeElement?.tagName}`,
+			`status-bar ${document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.getAttribute("content")}`,
 			`safe t ${cs.paddingTop} b ${cs.paddingBottom} l ${cs.paddingLeft} r ${cs.paddingRight}`,
 			units.map(([u, d]) => `${u} ${d.getBoundingClientRect().height}`).join("  "),
-			`missing ${Math.round(units[3][1].getBoundingClientRect().height - innerHeight)}  --app-h ${root.style.getPropertyValue("--app-h") || "unset"} --app-top ${root.style.getPropertyValue("--app-top") || "unset"}`,
+			`lvh-inner ${Math.round(units[3][1].getBoundingClientRect().height - innerHeight)}  --app-h ${root.style.getPropertyValue("--app-h") || "unset"} --app-top ${root.style.getPropertyValue("--app-top") || "unset"}`,
 			`app    ${r(app)}  (red)`,
 			`header ${r(deep(document, "pi-header"))}  (green)`,
 			`compos ${r(deep(document, "pi-composer"))}  (cyan)`,
