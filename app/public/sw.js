@@ -1,6 +1,10 @@
 // App-shell service worker. Navigations: network first, cached shell offline.
-// Hashed assets and fonts: cache first. The hub API is never cached.
-const CACHE = "pi-web-v1";
+// Hashed assets (/assets/*, which includes the fonts): cache first, since their
+// URL changes with their content. Everything else (icons, the manifest, the
+// published theme): network first, cached copy offline, so a changed file
+// reaches installed clients. The hub API is never cached.
+// Bumping CACHE drops every older cache on activation.
+const CACHE = "pi-web-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/theme-init.js", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -36,19 +40,19 @@ self.addEventListener("fetch", (event) => {
 		);
 		return;
 	}
-	event.respondWith(
-		caches.match(req).then(
-			(hit) =>
-				hit ||
-				fetch(req).then((res) => {
-					if (res.ok) {
-						const copy = res.clone();
-						caches.open(CACHE).then((c) => c.put(req, copy));
-					}
-					return res;
-				}),
-		),
-	);
+	const fromNetwork = () =>
+		fetch(req).then((res) => {
+			if (res.ok) {
+				const copy = res.clone();
+				caches.open(CACHE).then((c) => c.put(req, copy));
+			}
+			return res;
+		});
+	if (url.pathname.startsWith("/assets/")) {
+		event.respondWith(caches.match(req).then((hit) => hit || fromNetwork()));
+		return;
+	}
+	event.respondWith(fromNetwork().catch(() => caches.match(req).then((hit) => hit || Response.error())));
 });
 
 // Push (spec §5.5). The payload is { sessionId, title, kind } and nothing else.
