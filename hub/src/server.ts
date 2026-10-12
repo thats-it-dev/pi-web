@@ -12,6 +12,7 @@ import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
 import { type PushStore, isSubscription } from "./push.ts";
+import type { Viewers } from "./push-watch.ts";
 import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 
 export interface HubDeps {
@@ -22,6 +23,7 @@ export interface HubDeps {
 	home?: string;
 	log?: (msg: string) => void;
 	push?: PushStore;
+	viewers?: Viewers; // open apps; holds back push while there are any
 }
 
 type Cors = Record<string, string>;
@@ -171,8 +173,10 @@ export function createHubServer(deps: HubDeps): Server {
 	function listStream(req: IncomingMessage, res: ServerResponse, cors: Cors): void {
 		const sse = openSse(res, cors);
 		const stop = registry.onChange((m) => sse.send(m));
+		const leave = deps.viewers?.add();
 		req.on("close", () => {
 			stop();
+			leave?.();
 			sse.close();
 		});
 	}

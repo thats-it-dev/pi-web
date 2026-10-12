@@ -1,6 +1,6 @@
-// Decides when a session deserves a push (spec §5.5): a run finished while no
-// app was watching, a dialog is waiting, or a run ended in an error. Headless
-// sessions only: someone running a terminal session is at the terminal.
+// Decides when a session deserves a push (spec §5.5): a run finished, a dialog
+// is waiting, or a run ended in an error, and no app is open anywhere to see
+// it. Headless sessions only: someone running a terminal session is at the terminal.
 
 import { basename } from "node:path";
 import type { AgentMessage, LiveState, PushKind, PushPayload, Snapshot } from "../../shared/src/protocol.ts";
@@ -15,7 +15,27 @@ interface Track {
 	lastBefore: AgentMessage | undefined; // the conversation's last message when the run started
 }
 
-export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p: PushPayload) => void): () => void {
+// Apps currently open and in front of someone. Each holds the events stream
+// only while it's visible, so a stream counts as a viewer.
+export class Viewers {
+	private count = 0;
+
+	add(): () => void {
+		this.count++;
+		let left = false;
+		return () => {
+			if (left) return;
+			left = true;
+			this.count--;
+		};
+	}
+
+	watching(): boolean {
+		return this.count > 0;
+	}
+}
+
+export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p: PushPayload) => void, viewers?: Pick<Viewers, "watching">): () => void {
 	const tracks = new Map<string, Track>();
 	return registry.onChange((m) => {
 		if (m.type !== "session_state") return;
@@ -32,7 +52,9 @@ export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p
 		if (m.state === t.state) return;
 		t.state = m.state;
 		const snap = h.snapshot();
-		const push = (kind: PushKind) => send({ sessionId: m.sessionId, title: sessionTitle(snap), kind });
+		const push = (kind: PushKind) => {
+			if (!viewers?.watching()) send({ sessionId: m.sessionId, title: sessionTitle(snap), kind });
+		};
 
 		if (m.state === "running" && !t.running) {
 			t.running = true;
@@ -44,7 +66,7 @@ export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p
 			const last = snap.conv.messages.at(-1);
 			if (!last || last === t.lastBefore || last.role !== "assistant") return;
 			if (last.stopReason === "error") push("error");
-			else if (last.stopReason !== "aborted" && h.subscriberCount() === 0) push("finished");
+			else if (last.stopReason !== "aborted") push("finished");
 		}
 	});
 }

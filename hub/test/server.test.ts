@@ -8,6 +8,7 @@ import { after, before, test } from "node:test";
 import { applyEvent } from "../../shared/src/reducer.ts";
 import type { HubConfig } from "../src/config.ts";
 import { Registry } from "../src/registry.ts";
+import { Viewers } from "../src/push-watch.ts";
 import { createHubServer } from "../src/server.ts";
 import { SessionIndex } from "../src/sessions.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
@@ -56,7 +57,8 @@ const registry = new Registry({
 	idleMs: 60_000,
 });
 const logs: string[] = [];
-const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m) });
+const viewers = new Viewers();
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers });
 let port = 0;
 before(async () => {
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -217,12 +219,16 @@ test("reconnecting mid-reply gets the partial message and running tools in the s
 	sse.close();
 });
 
-test("the events stream relays session state changes", async () => {
+test("the events stream relays session state changes, and counts as the app being open", async () => {
+	assert.equal(viewers.watching(), false);
 	const sse = await openSse(port, "/api/events", GOOD);
+	assert.equal(viewers.watching(), true);
 	const created = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
 	const m = await sse.next((x) => x.type === "session_state" && x.sessionId === created.body.sessionId);
 	assert.equal(m.live, true);
 	sse.close();
+	for (let i = 0; i < 100 && viewers.watching(); i++) await new Promise((r) => setTimeout(r, 10));
+	assert.equal(viewers.watching(), false);
 });
 
 test("an unreadable export is an error response and the hub keeps serving", async () => {

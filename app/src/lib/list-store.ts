@@ -28,8 +28,13 @@ export class ListStore extends EventTarget {
 	private stream: { close(): void } | null = null;
 	private refreshSeq = 0;
 	private timer: ReturnType<typeof setInterval> | undefined;
+	// The events stream is held only while the app is visible: the hub treats an
+	// open stream as someone looking at the app and holds back push notifications.
 	private onVisible = () => {
-		if (document.visibilityState === "visible") void this.refresh();
+		if (document.visibilityState !== "visible") return this.closeEvents();
+		if (this.stream) return;
+		this.openEvents();
+		void this.refresh(); // events were missed while hidden
 	};
 
 	constructor(api: Pick<HubApi, "sessions" | "eventsUrl">, open: typeof openStream = openStream) {
@@ -45,6 +50,18 @@ export class ListStore extends EventTarget {
 
 	start(): void {
 		void this.refresh();
+		if (typeof document === "undefined" || document.visibilityState === "visible") this.openEvents();
+		this.timer = setInterval(() => void this.refresh(), 30_000);
+		if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisible);
+	}
+
+	stop(): void {
+		this.closeEvents();
+		clearInterval(this.timer);
+		if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
+	}
+
+	private openEvents(): void {
 		let wasDown = false;
 		this.stream = this.open<ListMessage>(
 			this.api.eventsUrl(),
@@ -57,14 +74,11 @@ export class ListStore extends EventTarget {
 				}
 			},
 		);
-		this.timer = setInterval(() => void this.refresh(), 30_000);
-		if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisible);
 	}
 
-	stop(): void {
+	private closeEvents(): void {
 		this.stream?.close();
-		clearInterval(this.timer);
-		if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
+		this.stream = null;
 	}
 
 	async refresh(): Promise<void> {

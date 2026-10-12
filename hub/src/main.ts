@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { PushStore } from "./push.ts";
-import { watchPush } from "./push-watch.ts";
+import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
@@ -35,7 +35,8 @@ const registry = new Registry({
 });
 setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
-watchPush(registry, (p) => void push.send(p));
+const viewers = new Viewers();
+watchPush(registry, (p) => void push.send(p), viewers);
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
 	bridge = await startBridgeServer({ socketPath: join(cfg.dataDir, "bridge.sock"), registry, log: (m) => console.log(m) });
@@ -44,7 +45,7 @@ try {
 	process.exit(1);
 }
 
-const server = createHubServer({ cfg, registry, index, version, push });
+const server = createHubServer({ cfg, registry, index, version, push, viewers });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });

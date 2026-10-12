@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentMessage, LiveState, PushPayload } from "../../shared/src/protocol.ts";
-import { watchPush } from "../src/push-watch.ts";
+import { Viewers, watchPush } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
@@ -14,8 +14,9 @@ function setup() {
 		idleMs: 60_000,
 	});
 	const sent: PushPayload[] = [];
-	const stop = watchPush(registry, (p) => sent.push(p));
-	return { registry, sent, stop };
+	const viewers = new Viewers();
+	const stop = watchPush(registry, (p) => sent.push(p), viewers);
+	return { registry, sent, stop, viewers };
 }
 
 const user = (text: string): AgentMessage => ({ role: "user", content: [{ type: "text", text }] });
@@ -40,24 +41,47 @@ test("a run that finishes with nobody watching sends 'finished', titled by the f
 	assert.deepEqual(sent, [{ sessionId: "s-1", title: "fix the parser", kind: "finished" }]);
 });
 
-test("no 'finished' while an app stream is attached", async () => {
+test("nothing is sent while the app is open somewhere, and everything is once it's gone", async () => {
+	const { registry, sent, viewers } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	const leave = viewers.add();
+	await run(h);
+	await run(h, reply("error"));
+	to(h, "needs_you");
+	to(h, "idle");
+	assert.equal(sent.length, 0);
+	leave();
+	await run(h);
+	await run(h, reply("error"));
+	to(h, "needs_you");
+	assert.deepEqual(sent.map((p) => p.kind), ["finished", "error", "needs_you"]);
+});
+
+test("a session stream left attached (a hidden tab) doesn't hold back 'finished'", async () => {
 	const { registry, sent } = setup();
 	const h = (await registry.create("/work/proj")) as FakeHandle;
 	const off = h.subscribe(() => {});
 	await run(h);
-	assert.deepEqual(sent, []);
+	assert.deepEqual(sent.map((p) => p.kind), ["finished"]);
 	off();
 });
 
-test("a run that ends in an error sends 'error' even while watched; an aborted run sends nothing", async () => {
+test("viewers count each open app; leaving twice counts once", () => {
+	const v = new Viewers();
+	const a = v.add();
+	const b = v.add();
+	a();
+	a();
+	assert.equal(v.watching(), true);
+	b();
+	assert.equal(v.watching(), false);
+});
+
+test("an aborted run sends nothing", async () => {
 	const { registry, sent } = setup();
 	const h = (await registry.create("/work/proj")) as FakeHandle;
-	const off = h.subscribe(() => {});
-	await run(h, reply("error"));
-	assert.deepEqual(sent.map((p) => p.kind), ["error"]);
-	off();
 	await run(h, reply("aborted"));
-	assert.deepEqual(sent.map((p) => p.kind), ["error"]);
+	assert.deepEqual(sent, []);
 });
 
 test("a dialog during a run sends 'needs_you', and the run still reports when it ends", async () => {

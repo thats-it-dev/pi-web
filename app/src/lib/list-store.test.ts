@@ -70,4 +70,42 @@ describe("ListStore", () => {
 		await vi.waitFor(() => expect(api.sessions).toHaveBeenCalledTimes(2));
 		store.stop();
 	});
+	it("holds the events stream only while the app is visible, so the hub knows not to push", async () => {
+		const doc = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+		vi.stubGlobal("document", doc);
+		const api = { sessions: vi.fn(async () => ({ sessions: [s("a")], home: "/h" })), eventsUrl: () => "events" };
+		const streams: Array<{ closed: boolean }> = [];
+		const open = vi.fn(() => {
+			const st = { closed: false };
+			streams.push(st);
+			return { close: () => void (st.closed = true) };
+		});
+		const store = new ListStore(api, open as never);
+		store.start();
+		await vi.waitFor(() => expect(api.sessions).toHaveBeenCalledTimes(1));
+		expect(streams).toHaveLength(1);
+
+		doc.visibilityState = "hidden";
+		doc.dispatchEvent(new Event("visibilitychange"));
+		expect(streams[0].closed).toBe(true);
+
+		doc.visibilityState = "visible";
+		doc.dispatchEvent(new Event("visibilitychange"));
+		expect(streams).toHaveLength(2);
+		expect(streams[1].closed).toBe(false);
+		await vi.waitFor(() => expect(api.sessions).toHaveBeenCalledTimes(2)); // catches up on what it missed
+		doc.dispatchEvent(new Event("visibilitychange")); // visible again: no second stream
+		expect(streams).toHaveLength(2);
+
+		store.stop();
+		expect(streams[1].closed).toBe(true);
+	});
+	it("doesn't open the events stream when it starts in the background", () => {
+		vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "hidden" }));
+		const open = vi.fn(() => ({ close() {} }));
+		const store = new ListStore({ sessions: vi.fn(async () => ({ sessions: [], home: "/h" })), eventsUrl: () => "events" }, open as never);
+		store.start();
+		expect(open).not.toHaveBeenCalled();
+		store.stop();
+	});
 });
