@@ -6,19 +6,18 @@
 // keyboard (innerHeight drops, no pan). Either way the app is sized to
 // visualViewport and moved with it, and <html data-keyboard> drops the bottom
 // safe-area padding while typing.
-// iOS home-screen apps add one more wrinkle: the page draws over the whole
-// screen, but innerHeight, 100dvh and visualViewport all leave out the status
-// bar (844 of 912pt on an iPhone). Only 100lvh is right, so the tallest height
-// ever measured is remembered as the screen and used while the keyboard is
-// down, or the app stops a status bar's height short.
-// Everything is measured against that full height, not innerHeight, so a
-// keyboard is recognised whether iOS pans the page or shrinks the window.
+// A keyboard is measured against the tallest height seen at this width (not
+// innerHeight, which the shrink case lowers), so it's recognised either way.
+// The app never grows past the reported viewport: with the black-translucent
+// status bar, iOS 26 reports a home-screen app a status bar short (WebKit bug
+// 301108) and never paints that strip, so laying out into it only clips the
+// bottom of the composer. index.html asks for the default status bar instead,
+// which keeps the reported height honest.
 
 const KEYBOARD_MIN = 120; // px of height lost before it counts as a keyboard, not browser chrome
 
 export interface ViewportInput {
 	full: number; // the height the page draws over: see fullHeight
-	standalone: boolean; // a home-screen app fills the screen; a browser tab only what's visible
 	height: number; // visualViewport.height
 	offsetTop: number; // visualViewport.offsetTop
 	scale: number; // visualViewport.scale
@@ -33,16 +32,15 @@ export interface ViewportState {
 export function viewportState(v: ViewportInput): ViewportState | null {
 	if (Math.abs(v.scale - 1) > 0.01) return null; // pinch-zoomed: panning is the person's doing
 	const keyboard = v.full - v.height > KEYBOARD_MIN;
-	const height = keyboard || !v.standalone ? v.height : Math.max(v.height, v.full);
-	return { height: Math.round(height), top: Math.round(v.offsetTop), keyboard };
+	return { height: Math.round(v.height), top: Math.round(v.offsetTop), keyboard };
 }
 
 // The height the page draws over. In a browser that's innerHeight (the
-// toolbars aren't ours). A home-screen app covers the whole screen, which iOS
-// under-reports with the keyboard down and shrinks or pans with it up, so the
-// tallest height seen at this width (rotation changes the width) is the screen.
-export function fullHeight(m: { standalone: boolean; lvh: number; innerHeight: number; tallest: number }): number {
-	return m.standalone ? Math.max(m.lvh, m.innerHeight, m.tallest) : m.innerHeight;
+// toolbars aren't ours). A home-screen app covers a fixed area that iOS may
+// shrink while the keyboard is up, so the tallest height seen at this width
+// (rotation changes the width) is the one to measure against.
+export function fullHeight(m: { standalone: boolean; innerHeight: number; tallest: number }): number {
+	return m.standalone ? Math.max(m.innerHeight, m.tallest) : m.innerHeight;
 }
 
 export function trackViewport(win: Window = window): void {
@@ -50,15 +48,12 @@ export function trackViewport(win: Window = window): void {
 	if (!vv) return;
 	const root = win.document.documentElement;
 	const standalone = win.matchMedia("(display-mode: standalone)");
-	const lvh = win.document.createElement("div");
-	lvh.style.cssText = "position:fixed;top:0;left:-9999px;width:1px;height:100lvh;visibility:hidden;pointer-events:none";
-	win.document.body.append(lvh);
 	const tallest = new Map<number, number>(); // by innerWidth, so each orientation remembers its own
 	const update = () => {
 		const width = win.innerWidth;
-		const full = fullHeight({ standalone: standalone.matches, lvh: lvh.getBoundingClientRect().height, innerHeight: win.innerHeight, tallest: tallest.get(width) ?? 0 });
+		const full = fullHeight({ standalone: standalone.matches, innerHeight: win.innerHeight, tallest: tallest.get(width) ?? 0 });
 		tallest.set(width, full);
-		const s = viewportState({ full, standalone: standalone.matches, height: vv.height, offsetTop: vv.offsetTop, scale: vv.scale });
+		const s = viewportState({ full, height: vv.height, offsetTop: vv.offsetTop, scale: vv.scale });
 		if (!s) return;
 		root.style.setProperty("--app-h", `${s.height}px`);
 		root.style.setProperty("--app-top", `${s.top}px`);
