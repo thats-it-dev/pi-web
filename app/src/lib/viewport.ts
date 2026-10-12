@@ -8,6 +8,7 @@
 // screen, but innerHeight, 100dvh and visualViewport all leave out the status
 // bar (844 of 912pt on an iPhone). Only 100lvh is right, so the difference is
 // measured and added back, or the app stops a status bar's height short.
+// With the keyboard up, visualViewport is accurate and nothing is added.
 
 const KEYBOARD_MIN = 120; // px of height lost before it counts as a keyboard, not browser chrome
 
@@ -27,7 +28,8 @@ export interface ViewportState {
 
 export function viewportState(v: ViewportInput): ViewportState | null {
 	if (Math.abs(v.scale - 1) > 0.01) return null; // pinch-zoomed: panning is the person's doing
-	return { height: Math.round(v.height + v.missing), top: Math.round(v.offsetTop), keyboard: v.innerHeight - v.height > KEYBOARD_MIN };
+	const keyboard = v.innerHeight - v.height > KEYBOARD_MIN;
+	return { height: Math.round(v.height + (keyboard ? 0 : v.missing)), top: Math.round(v.offsetTop), keyboard };
 }
 
 // How much taller the screen is than the viewport iOS reports to a home-screen app.

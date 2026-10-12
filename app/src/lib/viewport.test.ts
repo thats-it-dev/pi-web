@@ -22,11 +22,13 @@ test("fractional sizes round to whole pixels", () => {
 	expect(viewportState({ innerHeight: 844, height: 507.6, offsetTop: 335.5, scale: 1, missing: 0 })).toEqual({ height: 508, top: 336, keyboard: true });
 });
 
-test("iOS home-screen app: heights come up short by the status bar, so the app adds it back", () => {
+test("iOS home-screen app: heights come up short by the status bar, so the app adds it back while the keyboard is down", () => {
 	// iPhone in standalone mode: the page draws over all 912pt, but innerHeight,
 	// 100dvh and visualViewport all say 844 (the screen minus the 68pt status bar).
 	expect(viewportState({ innerHeight: 844, height: 844, offsetTop: 0, scale: 1, missing: 68 })).toEqual({ height: 912, top: 0, keyboard: false });
-	expect(viewportState({ innerHeight: 844, height: 508, offsetTop: 0, scale: 1, missing: 68 })).toEqual({ height: 576, top: 0, keyboard: true });
+	// With the keyboard up, visualViewport is right (measured: 497 visible above a
+	// 347pt pan), so nothing is added or the composer ends up under the keyboard.
+	expect(viewportState({ innerHeight: 844, height: 497, offsetTop: 347, scale: 1, missing: 68 })).toEqual({ height: 497, top: 347, keyboard: true });
 });
 
 test("missingStrip: only a home-screen app with a short viewport has one", () => {
