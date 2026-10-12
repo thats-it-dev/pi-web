@@ -2,8 +2,10 @@ import "./styles/global.css";
 import "./components/pi-app.ts";
 import { openHashFromMessage } from "./lib/push.ts";
 import { trackViewport } from "./lib/viewport.ts";
+import { startVpDebug } from "./lib/vp-debug.ts";
 
 trackViewport();
+startVpDebug();
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
 	navigator.serviceWorker.register("/sw.js").catch(() => {});

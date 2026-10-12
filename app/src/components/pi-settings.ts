@@ -3,6 +3,7 @@ import { HubApi } from "../lib/api.ts";
 import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import { sharedStyles } from "../styles/shared.ts";
+import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
 
 export class PiSettings extends LitElement {
 	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true } };
@@ -133,6 +134,13 @@ export class PiSettings extends LitElement {
 			<h2>notifications</h2>
 			<p class="hint">${PUSH_COPY.hint}</p>
 			${this.renderPush()}
+			<h2>display diagnostics</h2>
+			<p class="hint">Temporary: shows the screen measurements on top of the app, for fixing the iPhone layout.</p>
+			<div class="seg" role="radiogroup" aria-label="Display diagnostics">
+				${(["off", "on"] as const).map(
+					(v) => html`<button role="radio" aria-checked=${vpDebugOn() === (v === "on") ? "true" : "false"} class=${vpDebugOn() === (v === "on") ? "on" : ""} @click=${() => setVpDebug(v === "on")}>${v}</button>`,
+				)}
+			</div>
 			<h2>install</h2>
 			<p class="hint">On iPhone or iPad, open this page in Safari and choose Share → Add to Home Screen.</p>
 		</div>`;
