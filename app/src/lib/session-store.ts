@@ -4,6 +4,7 @@
 import type { Conversation, Dialog, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { applyEvent, createConversation } from "../../../shared/src/reducer.ts";
 import type { HistoryResponse } from "./api.ts";
+import { LiveStats } from "./live-stats.ts";
 import type { StreamStatus } from "./stream.ts";
 
 export type SessionStatus = "loading" | "history" | "starting" | "live" | "reconnecting";
@@ -18,6 +19,7 @@ export class SessionStore extends EventTarget {
 	cwdHint: string | null = null;
 	nameHint: string | null = null;
 	lastExit: string | null = null;
+	live = new LiveStats(); // context and speed between the hub's per-turn stats
 
 	constructor(id: string) {
 		super();
@@ -56,6 +58,7 @@ export class SessionStore extends EventTarget {
 				this.snapshot = msg.snapshot;
 				this.id = msg.snapshot.sessionId;
 				this.conv = msg.snapshot.conv;
+				this.live.reset(msg.snapshot.stats, msg.snapshot.conv.partial !== null);
 				this.dialogs = [...msg.snapshot.dialogs];
 				for (const d of this.dialogs) if (!this.dialogSeenAt.has(d.id)) this.dialogSeenAt.set(d.id, Date.now());
 				this.cwdHint = msg.snapshot.cwd;
@@ -69,8 +72,10 @@ export class SessionStore extends EventTarget {
 				break;
 			case "event":
 				applyEvent(this.conv, msg.event);
+				this.live.onEvent(msg.event);
 				break;
 			case "meta":
+				this.live.onStats(msg.stats);
 				if (this.snapshot) Object.assign(this.snapshot, { state: msg.state, stats: msg.stats, statuses: msg.statuses, widgets: msg.widgets, thinkingLevels: msg.thinkingLevels, terminalPrompt: msg.terminalPrompt });
 				break;
 			case "dialog":

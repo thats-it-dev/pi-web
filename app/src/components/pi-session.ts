@@ -401,7 +401,7 @@ export class PiSession extends LitElement {
 				void this.run({ type: "fork", entryId: p.entryId });
 			});
 		if (!snap) return html`<p class="hint">starting pi…</p>`;
-		if (sheet === "stats") return statsSheet(snap, this.home);
+		if (sheet === "stats") return statsSheet(snap, this.home, this.store?.live.speed() ?? null);
 		return modelSheet(snap, {
 			pickModel: (m) => {
 				this.sheet = null;

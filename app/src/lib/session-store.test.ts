@@ -93,4 +93,16 @@ describe("SessionStore", () => {
 			expect(offline).toBe(1);
 		});
 	}
+	it("keeps live context moving between the hub's stats", () => {
+		const s = new SessionStore("s1");
+		const st = { userMessages: 1, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 1, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0, contextUsage: { tokens: 1_000, contextWindow: 10_000, percent: 10 } };
+		s.apply({ type: "snapshot", snapshot: { ...snap(), stats: st } });
+		expect(s.live.context()).toMatchObject({ tokens: 1_000, estimated: false });
+		s.apply({ type: "event", event: { type: "message_start", message: { role: "assistant", content: [] } } });
+		s.apply({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x".repeat(400) } } });
+		expect(s.live.context()).toMatchObject({ tokens: 1_100, estimated: true });
+		const m = snap();
+		s.apply({ type: "meta", state: m.state, stats: { ...st, contextUsage: { tokens: 1_050, contextWindow: 10_000, percent: 10.5 } }, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null });
+		expect(s.live.context()).toMatchObject({ tokens: 1_150 }); // the new base, plus the reply still streaming
+	});
 });

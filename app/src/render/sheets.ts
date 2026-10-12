@@ -1,6 +1,7 @@
 import { css, html, nothing } from "lit";
 import type { Dialog, ForkPoint, ModelInfo, Snapshot, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { abbreviateCwd, formatCost, formatTokens } from "../lib/format.ts";
+import { type Speed, speedLabel } from "../lib/live-stats.ts";
 
 export const UNAVAILABLE_IN_TERMINAL = "Not available while open in the terminal.";
 
@@ -29,7 +30,7 @@ export function modelSheet(snap: Snapshot, on: { pickModel(m: ModelInfo): void; 
 	`;
 }
 
-export function statsSheet(snap: Snapshot, home: string) {
+export function statsSheet(snap: Snapshot, home: string, speed: Speed | null) {
 	const st = snap.stats;
 	const ctx = st?.contextUsage;
 	const t = st?.tokens;
@@ -43,6 +44,7 @@ export function statsSheet(snap: Snapshot, home: string) {
 		["cache write", t ? formatTokens(t.cacheWrite) : "—"],
 		["total", t ? formatTokens(t.total) : "—"],
 		["cost", st?.cost ? formatCost(st.cost) : "$0"],
+		["speed", speed ? speedLabel(speed) : "—"],
 		["folder", abbreviateCwd(snap.cwd, home)],
 		["session file", snap.sessionFile ?? "not written yet"],
 		["session id", snap.sessionId],

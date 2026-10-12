@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from "lit";
 import { formatCost, formatTokens } from "../lib/format.ts";
+import { contextLabel, speedLabel } from "../lib/live-stats.ts";
 import type { SessionStore } from "../lib/session-store.ts";
 import { headerStatus } from "../lib/status.ts";
 import { sharedStyles } from "../styles/shared.ts";
@@ -50,14 +51,17 @@ export class PiHeader extends LitElement {
 		const snap = s.snapshot;
 		const model = snap?.state.model ?? null;
 		const stats = snap?.stats ?? null;
-		const ctx = stats?.contextUsage;
+		const ctx = s.live.context();
+		const known = stats?.contextUsage; // pi can't always count it (just after a compaction)
 		const pct = ctx?.percent ?? null;
+		const speed = s.live.speed();
 		const t = stats?.tokens;
 		const status = headerStatus(s);
 		const nums = [
-			ctx ? `${ctx.tokens == null ? "—" : formatTokens(ctx.tokens)} / ${formatTokens(ctx.contextWindow)}` : "—",
+			ctx ? contextLabel(ctx) : known ? `— / ${formatTokens(known.contextWindow)}` : "—",
 			t ? `↑${formatTokens(t.input + t.cacheRead)} ↓${formatTokens(t.output)}` : null,
 			stats?.cost ? formatCost(stats.cost) : null,
+			speed ? speedLabel(speed) : null,
 		]
 			.filter(Boolean)
 			.join(" · ");
