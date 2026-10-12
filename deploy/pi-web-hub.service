@@ -1,0 +1,23 @@
+# systemd user unit for the pi-web hub (spec §9 step 4).
+# Install: systemctl --user link ~/workspace/pi-web/deploy/pi-web-hub.service
+#          systemctl --user enable --now pi-web-hub.service
+# Needs lingering (loginctl enable-linger) to run without a login session.
+
+[Unit]
+Description=pi-web hub
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/workspace/pi-web/hub
+ExecStart=%h/.local/bin/node src/main.ts
+# Headless pi agents inherit this PATH for their tools.
+Environment="PATH=%h/.local/bin:/usr/local/cuda/bin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+Restart=always
+RestartSec=5
+# The hub closes its headless pi children on SIGTERM; anything left is killed after the timeout.
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

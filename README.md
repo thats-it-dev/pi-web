@@ -89,4 +89,16 @@ https://pi.thatsit.app; other branches get preview deployments.
 Starting a new session with a preselected model is not in Plan 1: start the
 session, then switch via the model sheet.
 
-Hub deployment (tailscale serve, systemd) is Plan 4.
+The hub runs as a systemd user unit, exposed on the tailnet by `tailscale serve`:
+
+```bash
+npm install                     # once, and after pulling new dependencies
+systemctl --user link ~/workspace/pi-web/deploy/pi-web-hub.service
+systemctl --user enable --now pi-web-hub.service
+sudo loginctl enable-linger $USER   # keep it running without a login session
+tailscale serve --bg --https=7878 http://127.0.0.1:7878
+```
+
+After pulling hub changes, `systemctl --user restart pi-web-hub`. Restarting
+closes any running app-started pi sessions (their history is kept). Logs:
+`journalctl --user -u pi-web-hub`.
