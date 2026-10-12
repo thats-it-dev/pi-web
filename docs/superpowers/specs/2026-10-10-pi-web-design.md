@@ -242,10 +242,10 @@ The header shows the summary from §4. The stats sheet shows user, assistant and
 
 ### 5.5 Push notifications
 - The hub generates VAPID keys once and stores them in `~/.config/pi-web/vapid.json`. Subscriptions are stored in `~/.config/pi-web/push.json`.
-- Triggers:
-  - `agent_settled` after a run, when no stream subscriber is attached to that session ("finished")
-  - a new dialog on an RpcHandle ("needs you")
-  - a run whose final assistant `stopReason` is `"error"` ("error")
+- Triggers, for headless (RpcHandle) sessions only, since someone running a terminal session is at the terminal:
+  - a run ends with a new assistant message and no stream subscriber is attached to that session ("finished"). A run the person aborted sends nothing.
+  - the session starts waiting on a dialog ("needs you")
+  - a run's final assistant `stopReason` is `"error"` ("error"), whether or not anyone is watching
 - Payload: `{ sessionId, title, kind }` only. No message content.
 - The service worker shows the notification, and tapping it opens `/#/s/<sessionId>`.
 - If the push service returns 404 or 410, the subscription is removed.
