@@ -114,8 +114,8 @@ function renderBash(m: AgentMessage) {
 
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
-	.user { border-left: 3px solid var(--primary); padding: 2px 0 2px 12px; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
-	.imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
 	.imgs img { max-width: 160px; max-height: 160px; border-radius: var(--radius); }
 	.assistant { display: grid; gap: 8px; min-width: 0; }
 	.md { overflow-wrap: anywhere; line-height: 1.6; min-width: 0; }
