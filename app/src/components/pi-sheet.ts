@@ -22,7 +22,7 @@ export class PiSheet extends LitElement {
 			header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px 8px; }
 			h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.04em; font-size: 1.2rem; margin: 0; overflow-wrap: anywhere; }
 			.x { color: var(--muted); font-size: 1rem; }
-			.body { overflow-y: auto; padding: 4px 16px calc(16px + env(safe-area-inset-bottom)); }
+			.body { overflow-y: auto; padding: 4px 16px calc(16px + var(--safe-bottom)); }
 			@media (max-width: 899px) {
 				.panel { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; max-height: 85dvh; border-radius: 12px 12px 0 0; border-width: 1px 0 0; }
 			}

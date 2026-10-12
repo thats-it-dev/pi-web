@@ -45,7 +45,7 @@ export class PiComposer extends LitElement {
 	static styles = [
 		sharedStyles,
 		css`
-			:host { display: block; border-top: 1px solid var(--line); background: var(--bg); padding: 8px 14px calc(10px + env(safe-area-inset-bottom)); position: relative; }
+			:host { display: block; border-top: 1px solid var(--line); background: var(--bg); padding: 8px 14px calc(10px + var(--safe-bottom)); position: relative; }
 			.inner { max-width: 760px; margin: 0 auto; display: grid; gap: 6px; }
 			.queue { display: flex; flex-wrap: wrap; gap: 6px; }
 			.chip { font-size: 0.75rem; border: 1px dashed var(--border); border-radius: var(--radius); padding: 2px 8px; color: var(--text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

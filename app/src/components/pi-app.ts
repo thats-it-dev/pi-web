@@ -22,7 +22,7 @@ export class PiApp extends LitElement {
 		sharedStyles,
 		css`
 			:host { display: block; height: 100%; }
-			.layout { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100vh; height: 100dvh; }
+			.layout { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); height: 100%; }
 			.sidebar { border-right: 1px solid var(--line); min-width: 0; min-height: 0; background: var(--bg); padding-top: env(safe-area-inset-top); }
 			.main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 			.main > * { flex: 1; min-height: 0; }

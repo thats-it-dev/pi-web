@@ -36,7 +36,7 @@ export class PiSidebar extends LitElement {
 			.search input { width: 100%; border-color: var(--line); padding: 5px 9px; }
 			.offline { margin: 4px 16px 8px; font-size: 0.8rem; color: var(--primary); }
 			.retry { color: var(--accent); margin-left: 6px; }
-			.groups { overflow-y: auto; flex: 1; padding-bottom: calc(16px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
+			.groups { overflow-y: auto; flex: 1; padding-bottom: calc(16px + var(--safe-bottom)); overscroll-behavior: contain; }
 			h2.label { margin: 0; padding: 12px 16px 4px; font-weight: 400; }
 			.row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 7px 16px 7px 14px; border-left: 2px solid transparent; color: var(--text); }
 			.row:hover { background: var(--panel); }

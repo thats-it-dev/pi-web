@@ -39,7 +39,11 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html, body { height: 100%; }
+/* The document never scrolls or bounces (iOS would drag the header with it); only the
+   app's own panes scroll. lib/viewport.ts sizes pi-app to the visible area. */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+:root { --safe-bottom: env(safe-area-inset-bottom); }
+:root[data-keyboard] { --safe-bottom: 0px; } /* the keyboard covers the home indicator */
 html { background: var(--bg); }
 body {
 	margin: 0;
@@ -51,4 +55,4 @@ body {
 	-webkit-text-size-adjust: 100%;
 	transition: background-color 0.3s ease, color 0.3s ease;
 }
-pi-app { display: block; height: 100%; }
+pi-app { display: block; position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-h, 100dvh); }
