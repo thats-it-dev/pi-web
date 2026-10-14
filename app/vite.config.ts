@@ -21,6 +21,20 @@ function csp(): Plugin {
 	};
 }
 
+// iOS 27's Add to Home Screen sheet fetches the apple-touch-icon with its own
+// loader, which fails on a network URL and leaves a letter tile; an icon
+// embedded as a data: URI works. The 180px PNG (2 KB) is inlined from the
+// same file the icon script writes, so there is one source of truth.
+function inlineTouchIcon(): Plugin {
+	return {
+		name: "pi-web-touch-icon",
+		transformIndexHtml: (html) => {
+			const png = readFileSync(new URL("./public/apple-touch-icon.png", import.meta.url));
+			return html.replace("__APPLE_TOUCH_ICON__", `data:image/png;base64,${png.toString("base64")}`);
+		},
+	};
+}
+
 // The shared theme (../theme) is also published as-is at /theme/ so other
 // thatsit.app apps can link https://pi.thatsit.app/theme/theme.css.
 // pi-web itself imports it from global.css, where Vite hashes the fonts.
@@ -51,7 +65,7 @@ function publishTheme(): Plugin {
 }
 
 export default defineConfig({
-	plugins: [csp(), publishTheme()],
+	plugins: [csp(), inlineTouchIcon(), publishTheme()],
 	server: {
 		port: 5173,
 		strictPort: true,
