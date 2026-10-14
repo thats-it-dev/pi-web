@@ -61,6 +61,7 @@ export class FakeHandle implements SessionHandle {
 			statuses: {},
 			widgets: {},
 			terminalPrompt: null,
+			approvalMode: "manual",
 		};
 	}
 	async command(cmd: AppCommand): Promise<CommandResult> {

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { APPROVAL_MODES, type ApprovalMode } from "../../shared/src/protocol.ts";
 
 export interface HubConfig {
 	port: number;
@@ -10,6 +11,7 @@ export interface HubConfig {
 	idleMinutes: number;
 	maxHeadless: number;
 	piBin: string;
+	approvalMode: ApprovalMode; // the default for app-started sessions (see auto-approve.ts)
 	dev: boolean;
 	dataDir: string;
 }
@@ -22,6 +24,7 @@ export const DEFAULTS = {
 	idleMinutes: 20,
 	maxHeadless: 6,
 	piBin: "pi",
+	approvalMode: "auto" as ApprovalMode,
 	dev: false,
 };
 
@@ -37,7 +40,10 @@ export function loadConfig(dataDir = defaultDataDir()): HubConfig {
 	mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 	const file = join(dataDir, "config.json");
 	if (!existsSync(file)) writeFileSync(file, `${JSON.stringify(DEFAULTS, null, 2)}\n`, { mode: 0o600 });
-	const cfg: HubConfig = { ...DEFAULTS, ...JSON.parse(readFileSync(file, "utf8")), dataDir };
+	const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+	const cfg: HubConfig = { ...DEFAULTS, ...raw, dataDir };
+	if (raw.autoApprove === false && raw.approvalMode === undefined) cfg.approvalMode = "manual"; // the setting's earlier, boolean form
+	if (!APPROVAL_MODES.includes(cfg.approvalMode)) throw new ConfigError(`approvalMode in ${file} must be one of ${APPROVAL_MODES.join(", ")}`);
 	if (!cfg.hostname || !cfg.allowedLogin) {
 		throw new ConfigError(
 			`Set hostname and allowedLogin in ${file}.\n` +

@@ -76,7 +76,7 @@ export class SessionStore extends EventTarget {
 				break;
 			case "meta":
 				this.live.onStats(msg.stats);
-				if (this.snapshot) Object.assign(this.snapshot, { state: msg.state, stats: msg.stats, statuses: msg.statuses, widgets: msg.widgets, thinkingLevels: msg.thinkingLevels, terminalPrompt: msg.terminalPrompt });
+				if (this.snapshot) Object.assign(this.snapshot, { state: msg.state, stats: msg.stats, statuses: msg.statuses, widgets: msg.widgets, thinkingLevels: msg.thinkingLevels, terminalPrompt: msg.terminalPrompt, approvalMode: msg.approvalMode });
 				break;
 			case "dialog":
 				this.dialogs = [...this.dialogs.filter((d) => d.id !== msg.dialog.id), msg.dialog];

@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing } from "lit";
-import type { ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { ApprovalMode, ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { toast } from "../lib/toast.ts";
 import { checkImageFile } from "../lib/images.ts";
@@ -14,7 +14,8 @@ export interface SubmitDetail {
 
 const LONG_PRESS_MS = 500;
 
-// Lucide icons (ISC): arrow-up and square.
+// Lucide icons (ISC): sliders-horizontal, arrow-up and square.
+const SLIDERS_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4" /><line x1="10" x2="3" y1="4" y2="4" /><line x1="21" x2="12" y1="12" y2="12" /><line x1="8" x2="3" y1="12" y2="12" /><line x1="21" x2="16" y1="20" y2="20" /><line x1="12" x2="3" y1="20" y2="20" /><line x1="14" x2="14" y1="2" y2="6" /><line x1="8" x2="8" y1="10" y2="14" /><line x1="16" x2="16" y1="18" y2="22" /></svg>`;
 const SEND_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>`;
 const STOP_ICON = html`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect width="14" height="14" x="5" y="5" rx="2" /></svg>`;
 
@@ -29,6 +30,7 @@ export class PiComposer extends LitElement {
 		statuses: { attribute: false },
 		model: { attribute: false },
 		thinking: { attribute: false },
+		approvalMode: { attribute: false },
 		text: { state: true },
 		images: { state: true },
 		menuIndex: { state: true },
@@ -43,6 +45,7 @@ export class PiComposer extends LitElement {
 	declare statuses: string[];
 	declare model: ModelInfo | null;
 	declare thinking: ThinkingLevel | null;
+	declare approvalMode: ApprovalMode | null;
 	declare text: string;
 	declare images: ImageInput[];
 	declare menuIndex: number;
@@ -69,8 +72,10 @@ export class PiComposer extends LitElement {
 			textarea { width: 100%; min-width: 0; border: 0; padding: 4px 0; resize: none; background: transparent; line-height: 1.45; max-height: 40vh; outline: none; }
 			textarea:focus-visible { outline: none; }
 			.row { display: flex; gap: 6px; align-items: center; }
-			.model { color: var(--primary); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; margin-right: auto; }
+			.model { color: var(--primary); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 			.model b { font-weight: 500; }
+			.settings { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; margin-right: auto; padding: 4px 2px; }
+			.settings svg { width: 15px; height: 15px; }
 			.icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius); color: var(--text-secondary); font-size: 1.1rem; cursor: pointer; flex: none; }
 			.icon svg { width: 20px; height: 20px; }
 			.icon.send { color: #000; background: var(--primary); border-radius: 50%; }
@@ -92,6 +97,7 @@ export class PiComposer extends LitElement {
 		this.statuses = [];
 		this.model = null;
 		this.thinking = null;
+		this.approvalMode = null;
 		this.text = "";
 		this.images = [];
 		this.menuIndex = 0;
@@ -250,6 +256,9 @@ export class PiComposer extends LitElement {
 				<div class="row">
 					<button class="model u" aria-label=${`Model ${this.model?.name ?? "not loaded"}`} @click=${() => this.dispatchEvent(new CustomEvent("pi-open-sheet", { detail: "model", bubbles: true, composed: true }))}>
 						${this.model ? html`<b>${this.model.name}</b> · ${this.thinking}` : "model"}
+					</button>
+					<button class="settings u" aria-label=${`Session settings${this.approvalMode ? ` (${this.approvalMode})` : ""}`} @click=${() => this.dispatchEvent(new CustomEvent("pi-open-sheet", { detail: "settings", bubbles: true, composed: true }))}>
+						${SLIDERS_ICON}${this.approvalMode ?? nothing}
 					</button>
 					${this.canImages ? html`<label class="icon" aria-label="Attach image">＋<input class="sr-only" type="file" accept="image/*" multiple @change=${this.onFiles} /></label>` : nothing}
 					${this.streaming && !this.text.trim() && !this.images.length

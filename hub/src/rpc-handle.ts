@@ -3,11 +3,13 @@
 // snapshot, then relays live events to every subscriber.
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type PendingTool, autoAnswer } from "./auto-approve.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
+	ApprovalMode,
 	AgentMessage,
 	AppCommand,
 	Capabilities,
@@ -53,6 +55,7 @@ export interface RpcHandleOptions {
 	exportDir: string;
 	env?: Record<string, string>;
 	promptAckMs?: number; // how long a prompt waits for pi's ack before returning `pending`
+	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
 }
 
 export class RpcHandle implements SessionHandle {
@@ -75,6 +78,7 @@ export class RpcHandle implements SessionHandle {
 	private statuses: Record<string, string> = {};
 	private widgets: Record<string, Widget> = {};
 	private dialogs = new Map<string, Dialog>();
+	private approvalMode: ApprovalMode;
 	private stderr = "";
 	private closing = false;
 	private exited = false;
@@ -82,6 +86,7 @@ export class RpcHandle implements SessionHandle {
 
 	private constructor(opts: RpcHandleOptions) {
 		this.opts = opts;
+		this.approvalMode = opts.approvalMode ?? "manual";
 		this.cwd = opts.cwd && existsSync(opts.cwd) ? opts.cwd : homedir();
 	}
 
@@ -134,7 +139,27 @@ export class RpcHandle implements SessionHandle {
 			statuses: this.statuses,
 			widgets: this.widgets,
 			terminalPrompt: null,
+			approvalMode: this.approvalMode,
 		};
+	}
+
+	// The tool call a permission dialog is about: the latest one the model asked
+	// for that hasn't finished. pi reports tool_execution_start before the
+	// permission hook runs, so the call is usually already marked running.
+	private pendingTool(): PendingTool | null {
+		const messages = this.conv.partial ? [...this.conv.messages, this.conv.partial] : this.conv.messages;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+			for (let j = m.content.length - 1; j >= 0; j--) {
+				const b = m.content[j];
+				if (b?.type !== "toolCall") continue;
+				const run = this.conv.tools[b.id];
+				if (!run || run.running) return { name: run?.name ?? b.name, args: run?.args ?? b.arguments };
+			}
+			return null; // the latest assistant message has no unfinished call
+		}
+		return null;
 	}
 
 	subscribe(fn: (m: StreamMessage) => void): () => void {
@@ -168,6 +193,11 @@ export class RpcHandle implements SessionHandle {
 		switch (cmd.type) {
 			case "attach":
 				return { ok: true };
+			case "set_approval": {
+				this.approvalMode = cmd.mode;
+				this.broadcast(this.meta());
+				return { ok: true };
+			}
 			case "dialog_response": {
 				if (!this.dialogs.delete(cmd.id)) return { ok: false, error: "That dialog is no longer open." };
 				this.write(toRpc(cmd));
@@ -416,6 +446,11 @@ export class RpcHandle implements SessionHandle {
 					prefill: req.prefill,
 					timeout: req.timeout,
 				};
+				const auto = autoAnswer(dialog, { mode: this.approvalMode, running: this.conv.streaming, cwd: this.cwd, tool: this.pendingTool() });
+				if (auto) {
+					this.write(toRpc({ type: "dialog_response", id: dialog.id, ...auto }));
+					return;
+				}
 				this.dialogs.set(dialog.id, dialog);
 				if (dialog.timeout) {
 					setTimeout(() => {
@@ -434,7 +469,7 @@ export class RpcHandle implements SessionHandle {
 	}
 
 	private meta(): StreamMessage {
-		return { type: "meta", state: this.state as SessionStateInfo, stats: this.stats, statuses: this.statuses, widgets: this.widgets, thinkingLevels: this.thinkingLevels, terminalPrompt: null };
+		return { type: "meta", state: this.state as SessionStateInfo, stats: this.stats, statuses: this.statuses, widgets: this.widgets, thinkingLevels: this.thinkingLevels, terminalPrompt: null, approvalMode: this.approvalMode };
 	}
 
 	private onExit(code: number | null): void {

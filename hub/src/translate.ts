@@ -1,7 +1,7 @@
 import type { AppCommand } from "../../shared/src/protocol.ts";
 
 export type RpcCommand = { type: string; [key: string]: unknown };
-export type RpcTranslatable = Exclude<AppCommand, { type: "attach" } | { type: "export" }>;
+export type RpcTranslatable = Exclude<AppCommand, { type: "attach" } | { type: "export" } | { type: "set_approval" }>; // the hub handles these itself
 
 export function toRpc(cmd: RpcTranslatable): RpcCommand {
 	switch (cmd.type) {

@@ -50,9 +50,22 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "allowedOrigins": ["https://pi.thatsit.app"],
   "idleMinutes": 20,
   "maxHeadless": 6,
-  "piBin": "pi"
+  "piBin": "pi",
+  "approvalMode": "auto"
 }
 ```
+
+`approvalMode` is the approval mode new app-started sessions begin in; the session settings sheet in the app (the sliders next to the model) changes it per session. While a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed:
+
+- `auto`: for every tool call.
+- `semi`: only for obviously benign calls: reading, listing or searching inside the session folder, writing or editing a file inside it, or a read-only shell command (`ls`, `cat`, `grep`, `git status`, …). Everything else asks in the app.
+- `manual`: never; every flagged call asks in the app.
+
+Dialogs outside a running turn, inputs, and selects without an allow option always reach the app.
+
+## Updating the hub from the app
+
+Settings → hub → "check for updates" asks the hub where its checkout stands against `origin/master`; "update & restart" runs `git pull --ff-only origin master` and `npm install` in the checkout and exits, and the systemd unit (`Restart=always`) brings it back on the new code. The hub refuses while a session is mid-turn, unless you choose "update anyway", and when the checkout has local changes. Only the hub updates this way; the app itself deploys from Cloudflare Pages on every push to master.
 
 ## Terminal sync (bridge)
 

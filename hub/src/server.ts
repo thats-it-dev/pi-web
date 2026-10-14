@@ -5,7 +5,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage } from "../../shared/src/protocol.ts";
+import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
 import { checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
@@ -14,6 +14,7 @@ import type { Registry } from "./registry.ts";
 import { type PushStore, isSubscription } from "./push.ts";
 import type { Viewers } from "./push-watch.ts";
 import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
+import type { Updater } from "./update.ts";
 
 export interface HubDeps {
 	cfg: HubConfig;
@@ -24,6 +25,8 @@ export interface HubDeps {
 	log?: (msg: string) => void;
 	push?: PushStore;
 	viewers?: Viewers; // open apps; holds back push while there are any
+	updater?: Updater; // self-update from the app (update.ts); absent means the routes answer 501
+	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
 }
 
 type Cors = Record<string, string>;
@@ -42,6 +45,24 @@ export function createHubServer(deps: HubDeps): Server {
 		if (m === "GET" && p === "/api/health") {
 			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: deps.push?.publicKey ?? null };
 			return sendJson(res, 200, body, cors);
+		}
+		if (p === "/api/update") {
+			if (!deps.updater) throw new HttpError(501, "This hub can't update itself.");
+			if (m === "GET") return sendJson(res, 200, await deps.updater.status(), cors);
+			if (m === "POST") {
+				const body = (await readJson(req)) as { force?: unknown };
+				const busy = registry.all().filter((h) => h.isBusy()).length;
+				if (busy && body.force !== true) throw new HttpError(409, `${busy} session${busy === 1 ? " is" : "s are"} mid-turn; updating now would cut ${busy === 1 ? "it" : "them"} off.`);
+				const status = await deps.updater.status();
+				if (status.dirty) throw new HttpError(409, "The hub's checkout has local changes; pull by hand first.");
+				log("updating: git pull + npm install");
+				const r = await deps.updater.apply();
+				log(`updated to ${r.commit}; restarting`);
+				const out: UpdateResult = { ok: true, commit: r.commit, output: r.output, restarting: true };
+				sendJson(res, 200, out, cors);
+				setTimeout(() => (deps.restart ?? (() => process.exit(0)))(), 300).unref();
+				return;
+			}
 		}
 		if (m === "GET" && p === "/api/sessions") return sendJson(res, 200, { sessions: await listSessions(), home }, cors);
 		if (m === "GET" && p === "/api/cwds") return sendJson(res, 200, { cwds: knownCwds(await index.list(), home), home }, cors);
@@ -245,5 +266,6 @@ function parseCommand(body: unknown): AppCommand {
 	if (typeof type !== "string" || !(APP_COMMAND_TYPES as readonly string[]).includes(type)) throw new HttpError(400, `Unknown command: ${String(type)}`);
 	const cmd = body as AppCommand;
 	if (cmd.type === "prompt" && typeof cmd.text !== "string") throw new HttpError(400, "A prompt needs text");
+	if (cmd.type === "set_approval" && !APPROVAL_MODES.includes(cmd.mode)) throw new HttpError(400, `Approval mode must be one of ${APPROVAL_MODES.join(", ")}`);
 	return cmd;
 }

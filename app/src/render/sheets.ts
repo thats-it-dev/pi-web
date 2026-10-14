@@ -1,5 +1,5 @@
 import { css, html, nothing } from "lit";
-import type { Dialog, ForkPoint, ModelInfo, Snapshot, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import { APPROVAL_MODES, type ApprovalMode, type Dialog, type ForkPoint, type ModelInfo, type Snapshot, type ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { abbreviateCwd, formatCost, formatTokens } from "../lib/format.ts";
 import { type Speed, speedLabel } from "../lib/live-stats.ts";
 
@@ -27,6 +27,24 @@ export function modelSheet(snap: Snapshot, on: { pickModel(m: ModelInfo): void; 
 						)}
 					</div>`
 			: html`<p class="hint">${cur?.name ?? "This model"} doesn't support thinking levels.</p>`}
+	`;
+}
+
+const APPROVAL_HINTS: Record<ApprovalMode, string> = {
+	auto: "pi runs every tool call without asking.",
+	semi: "pi runs reads, searches, writes and edits inside this folder, and read-only shell commands, without asking. Everything else asks here.",
+	manual: "every tool call your permission extension flags asks here.",
+};
+
+export function settingsSheet(snap: Snapshot, pickApproval: (m: ApprovalMode) => void) {
+	if (snap.capabilities.dialogs === "terminal") return html`<p class="hint">This pi is open in a terminal, which answers its own permission prompts.</p>`;
+	const cur = snap.approvalMode;
+	return html`
+		<h3 class="label">approvals</h3>
+		<div class="seg" role="radiogroup" aria-label="Approval mode">
+			${APPROVAL_MODES.map((m) => html`<button role="radio" aria-checked=${cur === m ? "true" : "false"} class=${cur === m ? "on" : ""} @click=${() => pickApproval(m)}>${m}</button>`)}
+		</div>
+		<p class="hint">${APPROVAL_HINTS[cur]}</p>
 	`;
 }
 
