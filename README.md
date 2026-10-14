@@ -50,9 +50,12 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "allowedOrigins": ["https://pi.thatsit.app"],
   "idleMinutes": 20,
   "maxHeadless": 6,
-  "piBin": "pi"
+  "piBin": "pi",
+  "autoApprove": true
 }
 ```
+
+`autoApprove` is auto mode: while a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed. Set it to `false` to be asked in the app for every tool call. Dialogs outside a running turn, inputs, and selects without an allow option always reach the app.
 
 ## Terminal sync (bridge)
 

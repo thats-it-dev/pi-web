@@ -10,6 +10,7 @@ export interface HubConfig {
 	idleMinutes: number;
 	maxHeadless: number;
 	piBin: string;
+	autoApprove: boolean; // answer permission extensions' Allow/Deny dialogs during a turn (see auto-approve.ts)
 	dev: boolean;
 	dataDir: string;
 }
@@ -22,6 +23,7 @@ export const DEFAULTS = {
 	idleMinutes: 20,
 	maxHeadless: 6,
 	piBin: "pi",
+	autoApprove: true,
 	dev: false,
 };
 

@@ -3,6 +3,7 @@
 // snapshot, then relays live events to every subscriber.
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { autoAnswer } from "./auto-approve.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -53,6 +54,7 @@ export interface RpcHandleOptions {
 	exportDir: string;
 	env?: Record<string, string>;
 	promptAckMs?: number; // how long a prompt waits for pi's ack before returning `pending`
+	autoApprove?: boolean; // answer permission dialogs during a turn (auto-approve.ts)
 }
 
 export class RpcHandle implements SessionHandle {
@@ -416,6 +418,11 @@ export class RpcHandle implements SessionHandle {
 					prefill: req.prefill,
 					timeout: req.timeout,
 				};
+				const auto = this.opts.autoApprove ? autoAnswer(dialog, this.conv.streaming) : null;
+				if (auto) {
+					this.write(toRpc({ type: "dialog_response", id: dialog.id, ...auto }));
+					return;
+				}
 				this.dialogs.set(dialog.id, dialog);
 				if (dialog.timeout) {
 					setTimeout(() => {

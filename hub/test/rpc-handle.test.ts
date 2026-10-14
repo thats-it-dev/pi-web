@@ -15,9 +15,9 @@ before(async () => {
 });
 after(() => model.close());
 
-async function startHandle(t: TestContext, script: FakeScript = HELLO, sessionFile?: string, env = makePiEnv({ modelUrl: model.url })) {
+async function startHandle(t: TestContext, script: FakeScript = HELLO, sessionFile?: string, env = makePiEnv({ modelUrl: model.url }), autoApprove = false) {
 	model.setScript(script);
-	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, sessionFile, exportDir: join(env.root, "exports"), env: env.env, promptAckMs: 500 });
+	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, sessionFile, exportDir: join(env.root, "exports"), env: env.env, promptAckMs: 500, autoApprove });
 	t.after(() => {
 		h.close();
 		if (!sessionFile) env.cleanup();
@@ -115,6 +115,49 @@ test("switches model and thinking level", async (t) => {
 	await h.command({ type: "set_thinking", level: "high" });
 	assert.equal(h.snapshot().state.thinkingLevel, "high");
 	assert.equal((await h.command({ type: "set_model", provider: "fake", modelId: "nope" })).ok, false);
+});
+
+// A permission extension of the kind people install: every tool call asks Allow / Deny.
+const PERMISSION_EXTENSION = `
+export default function (pi) {
+	pi.on("tool_call", async (event, ctx) => {
+		const answer = await ctx.ui.select("Allow tool call?", ["Allow", "Deny"]);
+		if (answer !== "Allow") return { block: true, reason: event.toolName + " was not approved" };
+	});
+}
+`;
+const TOOL_THEN_DONE: FakeScript = (req) => (req.messages.at(-1)?.role === "tool" ? { text: "done" } : { toolCalls: [{ id: "call_1", name: "bash", args: { command: "echo approved" } }] });
+
+test("auto mode: a permission dialog during a turn is answered Allow by the hub, and never shown", async (t) => {
+	const env = makePiEnv({ modelUrl: model.url, extensions: { "permission.ts": PERMISSION_EXTENSION } });
+	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, true);
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "run it", mode: "send" });
+	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
+	assert.equal(w.seen.some((m) => m.type === "dialog"), false, "no dialog reached the app");
+	assert.equal(h.snapshot().dialogs.length, 0);
+	assert.match(textOf(h.snapshot().conv.messages.find((m) => m.role === "toolResult")), /approved/);
+	assert.equal(textOf(lastAssistant(h.snapshot().conv.messages)), "done");
+});
+
+test("auto mode off: the same permission dialog reaches the app", async (t) => {
+	const env = makePiEnv({ modelUrl: model.url, extensions: { "permission.ts": PERMISSION_EXTENSION } });
+	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, false);
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "run it", mode: "send" });
+	const d = await w.next((m) => m.type === "dialog");
+	assert.ok(d.type === "dialog" && d.dialog.title === "Allow tool call?");
+	assert.equal(h.liveState(), "needs_you");
+	assert.equal((await h.command({ type: "dialog_response", id: d.dialog.id, value: "Deny" })).ok, true);
+	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
+});
+
+test("auto mode leaves a slash command's own dialog to the person", async (t) => {
+	const { h } = await startHandle(t, HELLO, undefined, makePiEnv({ modelUrl: model.url }), true);
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "/ask", mode: "send" });
+	const d = await w.next((m) => m.type === "dialog");
+	assert.ok(d.type === "dialog" && d.dialog.title === "Pick one");
 });
 
 test("a prompt that opens a dialog returns pending quickly; the answer reaches the extension", async (t) => {

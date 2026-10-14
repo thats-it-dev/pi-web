@@ -28,7 +28,7 @@ const exportDir = join(cfg.dataDir, "exports");
 mkdirSync(exportDir, { recursive: true });
 const index = new SessionIndex(sessionsDir());
 const registry = new Registry({
-	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir }) },
+	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, autoApprove: cfg.autoApprove }) },
 	lookup: index,
 	maxHeadless: cfg.maxHeadless,
 	idleMs: cfg.idleMinutes * 60_000,
