@@ -96,6 +96,7 @@ export class BridgeHandle implements SessionHandle {
 			statuses: {},
 			widgets: {},
 			terminalPrompt: this.prompt,
+			approvalMode: "manual", // the terminal answers its own dialogs
 		};
 	}
 
@@ -254,7 +255,7 @@ export class BridgeHandle implements SessionHandle {
 	}
 
 	private meta(): StreamMessage {
-		return { type: "meta", state: this.state, stats: this.stats, statuses: {}, widgets: {}, thinkingLevels: this.thinkingLevels, terminalPrompt: this.prompt };
+		return { type: "meta", state: this.state, stats: this.stats, statuses: {}, widgets: {}, thinkingLevels: this.thinkingLevels, terminalPrompt: this.prompt, approvalMode: "manual" };
 	}
 
 	private broadcast(m: StreamMessage): void {

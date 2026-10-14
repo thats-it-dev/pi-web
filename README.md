@@ -51,11 +51,17 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "idleMinutes": 20,
   "maxHeadless": 6,
   "piBin": "pi",
-  "autoApprove": true
+  "approvalMode": "auto"
 }
 ```
 
-`autoApprove` is auto mode: while a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed. Set it to `false` to be asked in the app for every tool call. Dialogs outside a running turn, inputs, and selects without an allow option always reach the app.
+`approvalMode` is the approval mode new app-started sessions begin in; the session settings sheet in the app (the sliders next to the model) changes it per session. While a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed:
+
+- `auto`: for every tool call.
+- `semi`: only for obviously benign calls: reading, listing or searching inside the session folder, writing or editing a file inside it, or a read-only shell command (`ls`, `cat`, `grep`, `git status`, …). Everything else asks in the app.
+- `manual`: never; every flagged call asks in the app.
+
+Dialogs outside a running turn, inputs, and selects without an allow option always reach the app.
 
 ## Terminal sync (bridge)
 

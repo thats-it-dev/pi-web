@@ -8,7 +8,7 @@ const snap = (id = "s1"): Snapshot => ({
 	capabilities: { dialogs: "here", fork: true, clone: true, newSession: true, bash: true, export: true },
 	conv: createConversation([{ role: "user", content: "hi", timestamp: 1 }]),
 	state: { model: null, thinkingLevel: "medium", isStreaming: false, isCompacting: false, sessionId: id, messageCount: 1, pendingMessageCount: 0, autoCompactionEnabled: true },
-	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null,
+	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null, approvalMode: "auto",
 });
 
 describe("SessionStore", () => {
@@ -31,7 +31,7 @@ describe("SessionStore", () => {
 		s.apply({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Hi" } } });
 		expect(s.conv.partial?.content).toEqual([{ type: "text", text: "Hi" }]);
 		const m = snap();
-		s.apply({ type: "meta", state: { ...m.state, thinkingLevel: "high" }, stats: null, statuses: { lsp: "LSP Inactive" }, widgets: {}, thinkingLevels: ["off", "high"], terminalPrompt: null });
+		s.apply({ type: "meta", state: { ...m.state, thinkingLevel: "high" }, stats: null, statuses: { lsp: "LSP Inactive" }, widgets: {}, thinkingLevels: ["off", "high"], terminalPrompt: null, approvalMode: "auto" });
 		expect(s.snapshot?.state.thinkingLevel).toBe("high");
 		expect(s.snapshot?.statuses).toEqual({ lsp: "LSP Inactive" });
 		s.apply({ type: "dialog", dialog: { id: "d1", method: "confirm", title: "Allow rm?" } });
@@ -102,7 +102,7 @@ describe("SessionStore", () => {
 		s.apply({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x".repeat(400) } } });
 		expect(s.live.context()).toMatchObject({ tokens: 1_100, estimated: true });
 		const m = snap();
-		s.apply({ type: "meta", state: m.state, stats: { ...st, contextUsage: { tokens: 1_050, contextWindow: 10_000, percent: 10.5 } }, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null });
+		s.apply({ type: "meta", state: m.state, stats: { ...st, contextUsage: { tokens: 1_050, contextWindow: 10_000, percent: 10.5 } }, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null, approvalMode: "auto" });
 		expect(s.live.context()).toMatchObject({ tokens: 1_150 }); // the new base, plus the reply still streaming
 	});
 });

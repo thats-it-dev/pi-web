@@ -61,6 +61,12 @@ export interface Dialog {
 
 export type HandleKind = "rpc" | "bridge";
 
+// Who answers a permission extension's dialogs during a turn: the hub for every
+// tool call (auto), the hub for obviously benign calls only (semi), or the
+// person in the app (manual). See hub/src/auto-approve.ts.
+export type ApprovalMode = "auto" | "semi" | "manual";
+export const APPROVAL_MODES: readonly ApprovalMode[] = ["auto", "semi", "manual"];
+
 export interface Capabilities {
 	dialogs: "here" | "terminal";
 	fork: boolean;
@@ -143,6 +149,7 @@ export interface Snapshot {
 	statuses: Record<string, string>;
 	widgets: Record<string, Widget>;
 	terminalPrompt: TerminalPrompt | null;
+	approvalMode: ApprovalMode;
 }
 
 export type StreamMessage =
@@ -157,6 +164,7 @@ export type StreamMessage =
 			widgets: Record<string, Widget>;
 			thinkingLevels: ThinkingLevel[];
 			terminalPrompt: TerminalPrompt | null;
+			approvalMode: ApprovalMode;
 	  }
 	| { type: "dialog"; dialog: Dialog }
 	| { type: "dialog_closed"; id: string }
@@ -188,7 +196,8 @@ export type AppCommand =
 	| { type: "bash"; command: string; excludeFromContext: boolean }
 	| { type: "export" }
 	| { type: "dialog_response"; id: string; value?: string; confirmed?: boolean; cancelled?: boolean }
-	| { type: "clear_queue" };
+	| { type: "clear_queue" }
+	| { type: "set_approval"; mode: ApprovalMode };
 
 export const APP_COMMAND_TYPES: readonly AppCommand["type"][] = [
 	"attach",
@@ -206,6 +215,7 @@ export const APP_COMMAND_TYPES: readonly AppCommand["type"][] = [
 	"export",
 	"dialog_response",
 	"clear_queue",
+	"set_approval",
 ];
 
 export interface CommandResult {

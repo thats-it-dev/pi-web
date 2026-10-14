@@ -8,7 +8,7 @@ import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
 import { toast } from "../lib/toast.ts";
-import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
+import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
 import { sharedStyles } from "../styles/shared.ts";
 import type { PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
@@ -16,8 +16,8 @@ import "./pi-header.ts";
 import "./pi-messages.ts";
 import "./pi-sheet.ts";
 
-type Sheet = "model" | "stats" | "fork";
-const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…" };
+type Sheet = "model" | "stats" | "fork" | "settings";
+const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", settings: "session settings" };
 const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])";
 
 export class PiSession extends LitElement {
@@ -383,6 +383,7 @@ export class PiSession extends LitElement {
 				.statuses=${statuses}
 				.model=${snap?.state.model ?? null}
 				.thinking=${snap?.state.thinkingLevel ?? null}
+				.approvalMode=${snap?.approvalMode ?? null}
 				@pi-submit=${this.onSubmit}
 				@pi-abort=${this.onAbort}
 				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
@@ -405,6 +406,7 @@ export class PiSession extends LitElement {
 			});
 		if (!snap) return html`<p class="hint">starting pi…</p>`;
 		if (sheet === "stats") return statsSheet(snap, this.home, this.store?.live.speed() ?? null);
+		if (sheet === "settings") return settingsSheet(snap, (mode) => void this.run({ type: "set_approval", mode }));
 		return modelSheet(snap, {
 			pickModel: (m) => {
 				this.sheet = null;

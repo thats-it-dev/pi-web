@@ -22,7 +22,7 @@ const cfg: HubConfig = {
 	maxHeadless: 6,
 	piBin: "pi",
 	dev: false,
-	autoApprove: false,
+	approvalMode: "manual",
 	dataDir: root,
 };
 const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };

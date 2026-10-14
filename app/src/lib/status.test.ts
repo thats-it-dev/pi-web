@@ -9,7 +9,7 @@ const snap = (extra: Partial<Snapshot> = {}): Snapshot => ({
 	capabilities: { dialogs: "terminal", fork: false, clone: false, newSession: false, bash: false, export: false },
 	conv: createConversation(),
 	state: { model: null, thinkingLevel: "off", isStreaming: false, isCompacting: false, sessionId: "s1", messageCount: 0, pendingMessageCount: 0, autoCompactionEnabled: true },
-	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null,
+	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null, approvalMode: "auto",
 	...extra,
 });
 
@@ -24,9 +24,9 @@ describe("headerStatus", () => {
 		s.apply({ type: "snapshot", snapshot: snap({ terminalPrompt: { kind: "select", title: "Pick one" } }) });
 		expect(headerStatus(s)).toBe("waiting for you in the terminal: Pick one");
 		const m = snap();
-		s.apply({ type: "meta", state: m.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null });
+		s.apply({ type: "meta", state: m.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null, approvalMode: "auto" });
 		expect(headerStatus(s)).toBe("open in terminal");
-		s.apply({ type: "meta", state: m.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: { kind: "custom", title: "" } });
+		s.apply({ type: "meta", state: m.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: { kind: "custom", title: "" }, approvalMode: "auto" });
 		expect(headerStatus(s)).toBe("waiting for you in the terminal");
 	});
 	it("says nothing extra for a headless session", () => {

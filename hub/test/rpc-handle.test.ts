@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test, type TestContext } from "node:test";
-import type { AgentMessage, StreamMessage } from "../../shared/src/protocol.ts";
+import type { AgentMessage, ApprovalMode, StreamMessage } from "../../shared/src/protocol.ts";
 import { HttpError } from "../src/errors.ts";
 import type { HandleEvent } from "../src/handle.ts";
 import { RpcHandle } from "../src/rpc-handle.ts";
@@ -15,9 +15,9 @@ before(async () => {
 });
 after(() => model.close());
 
-async function startHandle(t: TestContext, script: FakeScript = HELLO, sessionFile?: string, env = makePiEnv({ modelUrl: model.url }), autoApprove = false) {
+async function startHandle(t: TestContext, script: FakeScript = HELLO, sessionFile?: string, env = makePiEnv({ modelUrl: model.url }), approvalMode: ApprovalMode = "manual") {
 	model.setScript(script);
-	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, sessionFile, exportDir: join(env.root, "exports"), env: env.env, promptAckMs: 500, autoApprove });
+	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, sessionFile, exportDir: join(env.root, "exports"), env: env.env, promptAckMs: 500, approvalMode });
 	t.after(() => {
 		h.close();
 		if (!sessionFile) env.cleanup();
@@ -130,7 +130,7 @@ const TOOL_THEN_DONE: FakeScript = (req) => (req.messages.at(-1)?.role === "tool
 
 test("auto mode: a permission dialog during a turn is answered Allow by the hub, and never shown", async (t) => {
 	const env = makePiEnv({ modelUrl: model.url, extensions: { "permission.ts": PERMISSION_EXTENSION } });
-	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, true);
+	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, "auto");
 	const w = watch(h);
 	await h.command({ type: "prompt", text: "run it", mode: "send" });
 	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
@@ -142,7 +142,7 @@ test("auto mode: a permission dialog during a turn is answered Allow by the hub,
 
 test("auto mode off: the same permission dialog reaches the app", async (t) => {
 	const env = makePiEnv({ modelUrl: model.url, extensions: { "permission.ts": PERMISSION_EXTENSION } });
-	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, false);
+	const { h } = await startHandle(t, TOOL_THEN_DONE, undefined, env, "manual");
 	const w = watch(h);
 	await h.command({ type: "prompt", text: "run it", mode: "send" });
 	const d = await w.next((m) => m.type === "dialog");
@@ -152,8 +152,40 @@ test("auto mode off: the same permission dialog reaches the app", async (t) => {
 	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
 });
 
+test("semi mode: a read-only shell command is approved by the hub, a destructive one asks", async (t) => {
+	const env = makePiEnv({ modelUrl: model.url, extensions: { "permission.ts": PERMISSION_EXTENSION } });
+	const script: FakeScript = (req) => {
+		const last = req.messages.at(-1);
+		if (last?.role === "tool") return { text: "done" };
+		const destructive = JSON.stringify(last?.content).includes("wipe");
+		return { toolCalls: [{ id: destructive ? "call_rm" : "call_ls", name: "bash", args: { command: destructive ? "rm -rf /tmp/pi-web-nope" : "echo approved" } }] };
+	};
+	const { h } = await startHandle(t, script, undefined, env, "semi");
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "look around", mode: "send" });
+	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
+	assert.equal(w.seen.some((m) => m.type === "dialog"), false, "echo was approved without a dialog");
+	assert.match(textOf(h.snapshot().conv.messages.find((m) => m.role === "toolResult")), /approved/);
+
+	await h.command({ type: "prompt", text: "wipe it", mode: "send" });
+	const d = await w.next((m) => m.type === "dialog");
+	assert.ok(d.type === "dialog" && d.dialog.title === "Allow tool call?", "rm asks");
+	assert.equal((await h.command({ type: "dialog_response", id: d.dialog.id, value: "Deny" })).ok, true);
+	await w.next((m) => m.type === "event" && m.event.type === "agent_end");
+});
+
+test("set_approval switches the mode mid-session and shows in meta and snapshots", async (t) => {
+	const { h } = await startHandle(t, HELLO, undefined, makePiEnv({ modelUrl: model.url }), "auto");
+	assert.equal(h.snapshot().approvalMode, "auto");
+	const w = watch(h);
+	assert.equal((await h.command({ type: "set_approval", mode: "semi" })).ok, true);
+	const meta = await w.next((m) => m.type === "meta");
+	assert.ok(meta.type === "meta" && meta.approvalMode === "semi");
+	assert.equal(h.snapshot().approvalMode, "semi");
+});
+
 test("auto mode leaves a slash command's own dialog to the person", async (t) => {
-	const { h } = await startHandle(t, HELLO, undefined, makePiEnv({ modelUrl: model.url }), true);
+	const { h } = await startHandle(t, HELLO, undefined, makePiEnv({ modelUrl: model.url }), "auto");
 	const w = watch(h);
 	await h.command({ type: "prompt", text: "/ask", mode: "send" });
 	const d = await w.next((m) => m.type === "dialog");

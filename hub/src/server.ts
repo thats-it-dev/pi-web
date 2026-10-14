@@ -5,7 +5,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage } from "../../shared/src/protocol.ts";
+import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage } from "../../shared/src/protocol.ts";
 import { checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
@@ -245,5 +245,6 @@ function parseCommand(body: unknown): AppCommand {
 	if (typeof type !== "string" || !(APP_COMMAND_TYPES as readonly string[]).includes(type)) throw new HttpError(400, `Unknown command: ${String(type)}`);
 	const cmd = body as AppCommand;
 	if (cmd.type === "prompt" && typeof cmd.text !== "string") throw new HttpError(400, "A prompt needs text");
+	if (cmd.type === "set_approval" && !APPROVAL_MODES.includes(cmd.mode)) throw new HttpError(400, `Approval mode must be one of ${APPROVAL_MODES.join(", ")}`);
 	return cmd;
 }
