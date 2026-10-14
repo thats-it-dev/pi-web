@@ -63,6 +63,10 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
 
 Dialogs outside a running turn, inputs, and selects without an allow option always reach the app.
 
+## Updating the hub from the app
+
+Settings → hub → "check for updates" asks the hub where its checkout stands against `origin/master`; "update & restart" runs `git pull --ff-only origin master` and `npm install` in the checkout and exits, and the systemd unit (`Restart=always`) brings it back on the new code. The hub refuses while a session is mid-turn, unless you choose "update anyway", and when the checkout has local changes. Only the hub updates this way; the app itself deploys from Cloudflare Pages on every push to master.
+
 ## Terminal sync (bridge)
 
 A pi started in a terminal shows up live in pi-web when it loads the bridge extension in `bridge/`. Load it for one run:

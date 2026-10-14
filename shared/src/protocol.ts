@@ -259,6 +259,24 @@ export interface HealthInfo {
 	vapidPublicKey: string | null;
 }
 
+// GET /api/update: where the hub's checkout stands against origin/master.
+export interface UpdateStatus {
+	version: string; // hub/package.json
+	commit: string; // short HEAD
+	behind: number; // commits on origin/master not in HEAD
+	latest: string | null; // "<short> <subject>" of origin/master
+	dirty: boolean; // local changes that would stop a fast-forward pull
+	fetchError: string | null; // git fetch failed (offline?); behind/latest are then stale
+}
+
+// POST /api/update: the hub pulled and installed, and exits right after answering.
+export interface UpdateResult {
+	ok: true;
+	commit: string;
+	output: string;
+	restarting: boolean;
+}
+
 // Web Push (spec §5.5). The payload names the session and why, and nothing more.
 export type PushKind = "finished" | "needs_you" | "error";
 

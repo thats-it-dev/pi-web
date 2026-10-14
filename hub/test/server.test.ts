@@ -59,7 +59,13 @@ const registry = new Registry({
 });
 const logs: string[] = [];
 const viewers = new Viewers();
-const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers });
+let updateStatus = { version: "0.1.0-test", commit: "abc1234", behind: 2, latest: "def5678 feat: x", dirty: false, fetchError: null as string | null };
+let restarts = 0;
+const updater = {
+	status: async () => ({ ...updateStatus }),
+	apply: async () => ({ output: "Updating abc1234..def5678", commit: "def5678" }),
+};
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers, updater, restart: () => restarts++ });
 let port = 0;
 before(async () => {
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -259,4 +265,37 @@ test("unknown routes are 404 JSON", async () => {
 	const r = await call(port, "GET", "/api/nope", GOOD);
 	assert.equal(r.status, 404);
 	assert.equal(r.body.error, "Not found");
+});
+
+test("GET /api/update reports the checkout against master", async () => {
+	const r = await call(port, "GET", "/api/update", GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, updateStatus);
+});
+
+test("POST /api/update pulls, installs and restarts; refuses mid-turn unless forced, and with local changes", async () => {
+	nextId = "upd-1";
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const h = handles.get("upd-1")!;
+	h.busy = true;
+	const refused = await call(port, "POST", "/api/update", GOOD, {});
+	assert.equal(refused.status, 409);
+	assert.match(refused.body.error, /1 session is mid-turn/);
+	assert.equal(restarts, 0);
+
+	updateStatus = { ...updateStatus, dirty: true };
+	h.busy = false;
+	const dirty = await call(port, "POST", "/api/update", GOOD, {});
+	assert.equal(dirty.status, 409);
+	assert.match(dirty.body.error, /local changes/);
+	updateStatus = { ...updateStatus, dirty: false };
+
+	h.busy = true;
+	const forced = await call(port, "POST", "/api/update", GOOD, { force: true });
+	assert.equal(forced.status, 200);
+	assert.deepEqual(forced.body, { ok: true, commit: "def5678", output: "Updating abc1234..def5678", restarting: true });
+	await new Promise((r) => setTimeout(r, 400));
+	assert.equal(restarts, 1);
+	assert.ok(logs.some((l) => l.includes("updated to def5678")));
+	h.busy = false;
 });

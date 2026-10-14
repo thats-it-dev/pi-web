@@ -1,4 +1,4 @@
-import type { AgentMessage, AppCommand, CommandResult, HealthInfo, PushSubscriptionInfo, SessionSummary } from "../../../shared/src/protocol.ts";
+import type { AgentMessage, AppCommand, CommandResult, HealthInfo, PushSubscriptionInfo, SessionSummary, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
 export class HubError extends Error {
 	status: number;
@@ -37,6 +37,12 @@ export class HubApi {
 
 	health() {
 		return this.req<HealthInfo>("GET", "/api/health");
+	}
+	updateStatus() {
+		return this.req<UpdateStatus>("GET", "/api/update");
+	}
+	update(force = false) {
+		return this.req<UpdateResult>("POST", "/api/update", { force });
 	}
 	sessions() {
 		return this.req<{ sessions: SessionSummary[]; home: string }>("GET", "/api/sessions");

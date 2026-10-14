@@ -2,6 +2,7 @@
 
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { PushStore } from "./push.ts";
@@ -9,6 +10,7 @@ import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
+import { gitUpdater } from "./update.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
 
 const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -45,7 +47,9 @@ try {
 	process.exit(1);
 }
 
-const server = createHubServer({ cfg, registry, index, version, push, viewers });
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+const updater = gitUpdater(repoRoot, version);
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });

@@ -3,10 +3,12 @@ import { HubApi } from "../lib/api.ts";
 import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import { sharedStyles } from "../styles/shared.ts";
+import type { UpdateStatus } from "../../../shared/src/protocol.ts";
+import { toast } from "../lib/toast.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
 
 export class PiSettings extends LitElement {
-	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true } };
+	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true } };
 	declare url: string;
 	declare status: { ok: boolean; text: string } | null;
 	declare checking: boolean;
@@ -14,6 +16,9 @@ export class PiSettings extends LitElement {
 	declare push: PushStatus | null;
 	declare pushBusy: boolean;
 	declare pushError: string | null;
+	declare updateInfo: UpdateStatus | null; // the last check
+	declare updateBusy: "checking" | "updating" | "restarting" | null;
+	declare updateNote: { ok: boolean; text: string; force?: boolean } | null;
 
 	static styles = [
 		sharedStyles,
@@ -43,6 +48,81 @@ export class PiSettings extends LitElement {
 		this.push = null;
 		this.pushBusy = false;
 		this.pushError = null;
+		this.updateInfo = null;
+		this.updateBusy = null;
+		this.updateNote = null;
+	}
+
+	// ---- hub self-update ------------------------------------------------------
+
+	private async checkUpdate(): Promise<void> {
+		const url = getHubUrl();
+		if (!url || this.updateBusy) return;
+		this.updateBusy = "checking";
+		this.updateNote = null;
+		try {
+			this.updateInfo = await new HubApi(url).updateStatus();
+		} catch (err) {
+			this.updateNote = { ok: false, text: (err as Error).message };
+		} finally {
+			this.updateBusy = null;
+		}
+	}
+
+	private async applyUpdate(force = false): Promise<void> {
+		const url = getHubUrl();
+		if (!url || this.updateBusy) return;
+		this.updateBusy = "updating";
+		this.updateNote = null;
+		const api = new HubApi(url);
+		try {
+			const r = await api.update(force);
+			this.updateBusy = "restarting";
+			this.updateNote = { ok: true, text: `Pulled ${r.commit}; the hub is restarting…` };
+			const back = await this.waitForHub(api);
+			this.updateInfo = null;
+			this.updateNote = back ? { ok: true, text: `Hub back up at ${back.hubVersion} (${r.commit}).` } : { ok: false, text: `The hub pulled ${r.commit} but hasn't come back yet. Give it a moment, then connect again.` };
+			if (back) toast("Hub updated.");
+		} catch (err) {
+			const e = err as Error & { status?: number };
+			this.updateNote = { ok: false, text: e.message, force: e.status === 409 && !force && /mid-turn/.test(e.message) };
+		} finally {
+			this.updateBusy = null;
+		}
+	}
+
+	// The hub exits after answering; poll until systemd has it listening again.
+	private async waitForHub(api: HubApi) {
+		await new Promise((r) => setTimeout(r, 1500));
+		for (let i = 0; i < 40; i++) {
+			try {
+				return await api.health();
+			} catch {
+				await new Promise((r) => setTimeout(r, 1500));
+			}
+		}
+		return null;
+	}
+
+	private renderUpdate() {
+		if (!getHubUrl()) return html`<p class="hint">Connect to a hub first.</p>`;
+		const u = this.updateInfo;
+		const busy = this.updateBusy;
+		const label = busy === "checking" ? "checking…" : busy === "updating" ? "updating…" : busy === "restarting" ? "restarting…" : u ? "check again" : "check for updates";
+		return html`
+			<div class="row">
+				<button class="btn ghost" ?disabled=${Boolean(busy)} @click=${() => this.checkUpdate()}>${label}</button>
+				${u?.behind ? html`<button class="btn" ?disabled=${Boolean(busy)} @click=${() => this.applyUpdate()}>update &amp; restart</button>` : nothing}
+				${this.updateNote?.force ? html`<button class="btn" ?disabled=${Boolean(busy)} @click=${() => this.applyUpdate(true)}>update anyway</button>` : nothing}
+			</div>
+			${u
+				? html`<p class="hint" role="status">
+						hub ${u.version} at <code>${u.commit}</code>${u.dirty ? ", with local changes" : ""}.
+						${u.fetchError ? html` Couldn't reach GitHub: ${u.fetchError}.` : u.behind ? html` ${u.behind} commit${u.behind === 1 ? "" : "s"} behind master; latest: <code>${u.latest}</code>.` : " Up to date with master."}
+					</p>`
+				: nothing}
+			${this.updateNote ? html`<p class="status ${this.updateNote.ok ? "ok" : "bad"}" role="status">${this.updateNote.text}</p>` : nothing}
+		`;
 	}
 
 	connectedCallback(): void {
@@ -122,6 +202,9 @@ export class PiSettings extends LitElement {
 				</div>
 				${this.status ? html`<p class="status ${this.status.ok ? "ok" : "bad"}" role="status">${this.status.text}</p>` : nothing}
 			</form>
+			<h2>hub</h2>
+			<p class="hint">Pull the latest master on spark, install, and restart the hub. A session mid-turn would be cut off, so the hub refuses while one is running unless you say so.</p>
+			${this.renderUpdate()}
 			<h2>theme</h2>
 			<div class="seg" role="radiogroup" aria-label="Theme">
 				${(["system", "light", "dark"] as const).map(
