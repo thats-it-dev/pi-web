@@ -11,7 +11,8 @@ const model = await startFakeModel();
 // Manual /compact needs older turns to summarize; auto-compaction stays off so only the test compacts.
 const pi = makePiEnv({ modelUrl: model.url, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
 rmSync(WORKDIR, { recursive: true, force: true });
-mkdirSync(WORKDIR, { recursive: true });
+mkdirSync(join(WORKDIR, "docs"), { recursive: true });
+writeFileSync(join(WORKDIR, "docs", "notes.md"), "notes\n"); // for the @ mention test
 
 const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);

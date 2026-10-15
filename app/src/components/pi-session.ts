@@ -10,7 +10,7 @@ import { openStream } from "../lib/stream.ts";
 import { toast } from "../lib/toast.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
 import { sharedStyles } from "../styles/shared.ts";
-import type { PiComposer, SubmitDetail } from "./pi-composer.ts";
+import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
 import "./pi-header.ts";
 import "./pi-messages.ts";
@@ -233,6 +233,11 @@ export class PiSession extends LitElement {
 
 	private onAbort = () => void this.run({ type: "abort" });
 
+	private searchFiles: FileSearch = async (q, signal) => {
+		const s = this.store;
+		return s ? (await this.api.files(s.id, q, signal)).files : [];
+	};
+
 	private async runBuiltin(name: string, args: string): Promise<boolean> {
 		const snap = this.store?.snapshot ?? null;
 		switch (name) {
@@ -384,6 +389,7 @@ export class PiSession extends LitElement {
 				.model=${snap?.state.model ?? null}
 				.thinking=${snap?.state.thinkingLevel ?? null}
 				.approvalMode=${snap?.approvalMode ?? null}
+				.searchFiles=${this.searchFiles}
 				@pi-submit=${this.onSubmit}
 				@pi-abort=${this.onAbort}
 				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}

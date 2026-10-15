@@ -16,6 +16,11 @@ export interface HistoryResponse {
 	error?: string | null;
 }
 
+export interface FileEntry {
+	path: string; // relative to the session's cwd
+	dir: boolean;
+}
+
 export class HubApi {
 	readonly base: string;
 
@@ -23,11 +28,12 @@ export class HubApi {
 		this.base = base.replace(/\/+$/, "");
 	}
 
-	private async req<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+	private async req<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
 		let res: Response;
 		try {
-			res = await fetch(`${this.base}${path}`, body === undefined ? { method } : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-		} catch {
+			res = await fetch(`${this.base}${path}`, body === undefined ? { method, signal } : { method, signal, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+		} catch (e) {
+			if (signal?.aborted) throw e;
 			throw new HubError(0, "Can't reach the hub. Is Tailscale connected?");
 		}
 		const data = await res.json().catch(() => ({}));
@@ -58,6 +64,9 @@ export class HubApi {
 	}
 	command(id: string, cmd: AppCommand) {
 		return this.req<{ result: CommandResult; sessionId: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/commands`, cmd);
+	}
+	files(id: string, q: string, signal?: AbortSignal) {
+		return this.req<{ files: FileEntry[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/files?q=${encodeURIComponent(q)}`, undefined, signal);
 	}
 	close(id: string) {
 		return this.req<{ ok: true }>("POST", `/api/sessions/${encodeURIComponent(id)}/close`, {});

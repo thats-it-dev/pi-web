@@ -2,7 +2,7 @@
 
 A PWA for the [pi](https://pi.dev) coding agent running on spark: browse every
 session (CLI or app), continue them with live streaming, start new ones, switch
-models and thinking levels, watch context usage, and use slash commands. Styled
+models and thinking levels, watch context usage, use slash commands, and @-mention files. Styled
 after thatsit.dev.
 
 - `hub/`: Node server on spark. Runs one headless `pi --mode rpc` per open

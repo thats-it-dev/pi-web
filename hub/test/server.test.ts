@@ -299,3 +299,12 @@ test("POST /api/update pulls, installs and restarts; refuses mid-turn unless for
 	assert.ok(logs.some((l) => l.includes("updated to def5678")));
 	h.busy = false;
 });
+
+test("files searches the session's working directory", async () => {
+	mkdirSync(join(work, "src"), { recursive: true });
+	writeFileSync(join(work, "src", "mention.ts"), "");
+	const r = await call(port, "GET", "/api/sessions/disk-1/files?q=menti", GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, { files: [{ path: "src/mention.ts", dir: false }] });
+	assert.equal((await call(port, "GET", "/api/sessions/nope/files?q=a", GOOD)).status, 404);
+});

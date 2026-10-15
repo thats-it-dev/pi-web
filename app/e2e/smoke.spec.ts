@@ -49,6 +49,21 @@ test("desktop: start a session, stream a reply, switch model, rename and compact
 	await expect(page.locator("pi-messages .user").first()).not.toHaveText("hi"); // the first turn was summarized away
 });
 
+test("desktop: @ mentions complete files and folders from the session's folder", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await startSession(page);
+	const input = page.getByLabel("Message");
+	await input.pressSequentially("look at @do");
+	const files = page.getByRole("listbox", { name: "Files" });
+	await expect(files).toContainText("docs/");
+	await input.press("Enter");
+	await expect(input).toHaveValue("look at @docs/");
+	await expect(files.getByRole("option").first()).toHaveText("docs/notes.md");
+	await input.press("Enter");
+	await expect(input).toHaveValue("look at @docs/notes.md ");
+	await expect(files).toHaveCount(0);
+});
+
 test("phone: send with the button, then find the session from the menu", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await startSession(page);

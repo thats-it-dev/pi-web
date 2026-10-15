@@ -9,6 +9,7 @@ import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, ty
 import { checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
+import { FileLister } from "./files.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
 import { type PushStore, isSubscription } from "./push.ts";
@@ -32,14 +33,16 @@ export interface HubDeps {
 type Cors = Record<string, string>;
 const MAX_BODY = 50 * 1024 * 1024; // prompts can carry images
 const SSE_PING_MS = 20_000;
+const FILE_RESULTS = 20;
 
 export function createHubServer(deps: HubDeps): Server {
 	const home = deps.home ?? homedir();
 	const log = deps.log ?? ((m: string) => console.log(m));
 	const { cfg, registry, index } = deps;
+	const fileLister = new FileLister();
 
 	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
-		const { pathname: p } = new URL(req.url ?? "/", "http://hub");
+		const { pathname: p, searchParams } = new URL(req.url ?? "/", "http://hub");
 		const m = req.method;
 
 		if (m === "GET" && p === "/api/health") {
@@ -90,11 +93,16 @@ export function createHubServer(deps: HubDeps): Server {
 			return sendJson(res, 200, { ok: true }, cors);
 		}
 
-		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close)$/);
+		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close|files)$/);
 		if (sm) {
 			const [, id, action] = sm;
 			if (m === "GET" && action === "history") return sendJson(res, 200, await history(id), cors);
 			if (m === "GET" && action === "stream") return sessionStream(req, res, cors, id);
+			if (m === "GET" && action === "files") {
+				const cwd = registry.get(id)?.cwd ?? (await index.find(id))?.cwd;
+				if (!cwd) throw new HttpError(404, "Session not found");
+				return sendJson(res, 200, { files: await fileLister.search(cwd, searchParams.get("q") ?? "", FILE_RESULTS) }, cors);
+			}
 			if (m === "POST" && action === "commands") {
 				const cmd = parseCommand(await readJson(req));
 				const h = await registry.ensure(id);
