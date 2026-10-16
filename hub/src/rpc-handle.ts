@@ -68,6 +68,7 @@ export class RpcHandle implements SessionHandle {
 	private proc: ChildProcessWithoutNullStreams | null = null;
 	private pending = new Map<string, (res: RpcResponse) => void>();
 	private subscribers = new Set<(m: StreamMessage) => void>();
+	private observers = new Set<(m: StreamMessage) => void>();
 	private listeners = new Set<(e: HandleEvent) => void>();
 	private conv: Conversation = createConversation();
 	private state: SessionStateInfo | null = null;
@@ -146,7 +147,7 @@ export class RpcHandle implements SessionHandle {
 	// The tool call a permission dialog is about: the latest one the model asked
 	// for that hasn't finished. pi reports tool_execution_start before the
 	// permission hook runs, so the call is usually already marked running.
-	private pendingTool(): PendingTool | null {
+	pendingTool(): PendingTool | null {
 		const messages = this.conv.partial ? [...this.conv.messages, this.conv.partial] : this.conv.messages;
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const m = messages[i];
@@ -160,6 +161,13 @@ export class RpcHandle implements SessionHandle {
 			return null; // the latest assistant message has no unfinished call
 		}
 		return null;
+	}
+
+	observe(fn: (m: StreamMessage) => void): () => void {
+		this.observers.add(fn);
+		return () => {
+			this.observers.delete(fn);
+		};
 	}
 
 	subscribe(fn: (m: StreamMessage) => void): () => void {
@@ -483,7 +491,7 @@ export class RpcHandle implements SessionHandle {
 	}
 
 	private broadcast(m: StreamMessage): void {
-		for (const fn of [...this.subscribers]) {
+		for (const fn of [...this.subscribers, ...this.observers]) {
 			try {
 				fn(m);
 			} catch (err) {

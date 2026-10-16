@@ -87,6 +87,16 @@ test("reap() closes only idle, unwatched sessions past the idle timeout", async 
 	unsubscribe();
 });
 
+test("an observer does not keep an idle headless session from being reaped", async () => {
+	const { registry, started, setClock } = setup();
+	const h = (await registry.ensure("disk-1")) as FakeHandle;
+	for (const x of started) x.lastActive = 0;
+	h.observe(() => {});
+	setClock(2000);
+	registry.reap();
+	assert.equal(h.closed, true);
+});
+
 test("a session change inside a handle re-keys it", async () => {
 	const { registry, changes } = setup();
 	const h = (await registry.ensure("disk-1")) as FakeHandle;

@@ -330,6 +330,18 @@ test("a throwing subscriber does not stop other subscribers", async (t) => {
 	unsubscribe();
 });
 
+test("observe sees the same stream as subscribe without counting as a subscriber", async (t) => {
+	const { h } = await startHandle(t);
+	const seen: string[] = [];
+	const off = h.observe((m) => seen.push(m.type));
+	assert.equal(h.subscriberCount(), 0);
+	const w = watch(h);
+	await h.command({ type: "prompt", text: "hi", mode: "send" });
+	await w.next(isEvent("agent_settled"));
+	assert.ok(seen.includes("event"));
+	off();
+});
+
 test("steer queues a message mid-reply and pi delivers it before settling", async (t) => {
 	// The fake model's request counter is shared across tests, so key the reply off the last user message.
 	const { h } = await startHandle(t, (req) => (JSON.stringify(req.messages.at(-1)?.content).includes("change course") ? { text: "steered reply" } : { text: "word ".repeat(40), chunkDelayMs: 50 }));

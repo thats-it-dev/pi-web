@@ -1,6 +1,7 @@
 // The seam between the hub and "something running a pi session". RpcHandle
 // (headless child) and BridgeHandle (terminal pi) implement it.
 
+import type { PendingTool } from "./auto-approve.ts";
 import type { AppCommand, Capabilities, CommandResult, HandleKind, LiveState, Snapshot, StreamMessage } from "../../shared/src/protocol.ts";
 
 export type HandleEvent =
@@ -23,6 +24,8 @@ export interface SessionHandle {
 	snapshot(): Snapshot;
 	command(cmd: AppCommand): Promise<CommandResult>;
 	subscribe(fn: (msg: StreamMessage) => void): () => void;
+	observe(fn: (msg: StreamMessage) => void): () => void; // every StreamMessage subscribe() gets, but not counted by subscriberCount()
+	pendingTool?(): PendingTool | null; // rpc only: the tool call a permission dialog is about
 	onEvent(fn: (e: HandleEvent) => void): () => void;
 	notice?(text: string): void; // bridge only: shown in the terminal TUI
 	close(): void;

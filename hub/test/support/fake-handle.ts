@@ -1,5 +1,6 @@
 import type { AppCommand, Capabilities, CommandResult, HandleKind, LiveState, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
+import type { PendingTool } from "../../src/auto-approve.ts";
 import type { HandleEvent, SessionHandle } from "../../src/handle.ts";
 
 export class FakeHandle implements SessionHandle {
@@ -21,6 +22,9 @@ export class FakeHandle implements SessionHandle {
 	notices: string[] = [];
 	conv = createConversation();
 	private subs = new Set<(m: StreamMessage) => void>();
+	private observers = new Set<(m: StreamMessage) => void>();
+	/** What pendingTool() returns. */
+	pendingToolValue: PendingTool | null = null;
 	private listeners = new Set<(e: HandleEvent) => void>();
 
 	constructor(sessionId: string, cwd = "/tmp", sessionFile: string | null = null, opts: { kind?: HandleKind; pid?: number } = {}) {
@@ -74,6 +78,16 @@ export class FakeHandle implements SessionHandle {
 			this.subs.delete(fn);
 		};
 	}
+	observe(fn: (m: StreamMessage) => void): () => void {
+		this.observers.add(fn);
+		return () => {
+			this.observers.delete(fn);
+		};
+	}
+
+	pendingTool(): PendingTool | null {
+		return this.pendingToolValue;
+	}
 	onEvent(fn: (e: HandleEvent) => void): () => void {
 		this.listeners.add(fn);
 		return () => {
@@ -84,7 +98,7 @@ export class FakeHandle implements SessionHandle {
 		this.notices.push(text);
 	}
 	push(m: StreamMessage): void {
-		for (const fn of [...this.subs]) fn(m);
+		for (const fn of [...this.subs, ...this.observers]) fn(m);
 	}
 	fire(e: HandleEvent): void {
 		for (const fn of [...this.listeners]) fn(e);

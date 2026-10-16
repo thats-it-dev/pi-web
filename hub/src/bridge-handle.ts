@@ -46,6 +46,7 @@ export class BridgeHandle implements SessionHandle {
 	private prompt: TerminalPrompt | null = null;
 	private pending = new Map<string, (r: CommandResult) => void>();
 	private subscribers = new Set<(m: StreamMessage) => void>();
+	private observers = new Set<(m: StreamMessage) => void>();
 	private listeners = new Set<(e: HandleEvent) => void>();
 	private left = false;
 	private seq = 0;
@@ -97,6 +98,13 @@ export class BridgeHandle implements SessionHandle {
 			widgets: {},
 			terminalPrompt: this.prompt,
 			approvalMode: "manual", // the terminal answers its own dialogs
+		};
+	}
+
+	observe(fn: (m: StreamMessage) => void): () => void {
+		this.observers.add(fn);
+		return () => {
+			this.observers.delete(fn);
 		};
 	}
 
@@ -259,7 +267,7 @@ export class BridgeHandle implements SessionHandle {
 	}
 
 	private broadcast(m: StreamMessage): void {
-		for (const fn of [...this.subscribers]) {
+		for (const fn of [...this.subscribers, ...this.observers]) {
 			try {
 				fn(m);
 			} catch (err) {
