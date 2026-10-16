@@ -1,4 +1,4 @@
-import type { AppCommand, Capabilities, CommandResult, HandleKind, LiveState, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, Dialog, HandleKind, LiveState, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import type { PendingTool } from "../../src/auto-approve.ts";
 import type { HandleEvent, SessionHandle } from "../../src/handle.ts";
@@ -23,6 +23,8 @@ export class FakeHandle implements SessionHandle {
 	conv = createConversation();
 	private subs = new Set<(m: StreamMessage) => void>();
 	private observers = new Set<(m: StreamMessage) => void>();
+	/** What snapshot().dialogs returns; a dialog_response removes its dialog, as RpcHandle does. */
+	dialogs: Dialog[] = [];
 	/** What pendingTool() returns. */
 	pendingToolValue: PendingTool | null = null;
 	private listeners = new Set<(e: HandleEvent) => void>();
@@ -61,7 +63,7 @@ export class FakeHandle implements SessionHandle {
 			models: [],
 			thinkingLevels: ["off"],
 			commands: [],
-			dialogs: [],
+			dialogs: this.dialogs,
 			statuses: {},
 			widgets: {},
 			terminalPrompt: null,
@@ -70,6 +72,10 @@ export class FakeHandle implements SessionHandle {
 	}
 	async command(cmd: AppCommand): Promise<CommandResult> {
 		this.received.push(cmd);
+		if (cmd.type === "dialog_response" && this.dialogs.some((d) => d.id === cmd.id)) {
+			this.dialogs = this.dialogs.filter((d) => d.id !== cmd.id);
+			this.fire({ type: "state_changed" });
+		}
 		return { ok: true };
 	}
 	subscribe(fn: (m: StreamMessage) => void): () => void {

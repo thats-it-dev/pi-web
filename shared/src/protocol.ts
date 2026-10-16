@@ -291,3 +291,46 @@ export interface PushSubscriptionInfo {
 	endpoint: string;
 	keys: { p256dh: string; auth: string };
 }
+
+// The Pebble watch (spec §4, §5). A request is anything the watch may show.
+export type WatchRequestKind = "dialog" | "finished" | "error";
+
+export interface WatchRequest {
+	id: string; // dialog:<sessionId>:<dialogId>, finished:<sessionId>:<messageIndex>, error:<sessionId>:<messageIndex>
+	kind: WatchRequestKind;
+	sessionId: string;
+	sessionTitle: string;
+	tool: string | null;
+	message: string;
+	options: string[];
+	method: DialogMethod | null;
+	createdAt: number;
+}
+
+export interface WatchSession {
+	id: string;
+	title: string;
+	state: LiveState;
+	live: boolean;
+	model: string | null;
+	contextPercent: number | null;
+	contextTokens: number | null;
+	contextWindow: number | null;
+	tps: number | null;
+	updatedAt: number;
+}
+
+export interface WatchPending {
+	cursor: number;
+	requests: WatchRequest[];
+	showing: string | null;
+	sessions: WatchSession[];
+}
+
+export type WatchAnswerResult = { ok: true } | { ok: false; reason: "gone" | "no_match"; options?: string[] };
+
+export interface WatchTurn {
+	i: number;
+	role: "you" | "agent" | "tool";
+	text: string;
+}
