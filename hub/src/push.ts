@@ -118,7 +118,7 @@ function loadSubs(file: string, log: (m: string) => void): PushSubscriptionInfo[
 	return [];
 }
 
-function writeAtomic(file: string, text: string): void {
+export function writeAtomic(file: string, text: string): void {
 	const tmp = `${file}.tmp`;
 	writeFileSync(tmp, text, { mode: 0o600 });
 	renameSync(tmp, file);
