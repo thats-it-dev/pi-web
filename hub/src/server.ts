@@ -6,7 +6,7 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
-import { checkRequest, checkWatchRequest, corsHeaders } from "./auth.ts";
+import { checkHostAndLogin, checkRequest, checkWatchRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
@@ -229,6 +229,12 @@ export function createHubServer(deps: HubDeps): Server {
 			const path = new URL(req.url ?? "/", "http://hub").pathname;
 			if (path.startsWith("/api/watch/")) {
 				// The watch has no Origin; it proves itself with the bearer token instead.
+				// Identity first, so a stranger can't tell whether the watch API is configured.
+				const identity = checkHostAndLogin(cfg, req.headers);
+				if (!identity.ok) {
+					log(`rejected ${req.method} ${req.url}: ${identity.reason}`);
+					throw new HttpError(403, "Forbidden");
+				}
 				if (!deps.watch || !deps.secrets) throw new HttpError(503, "Watch API isn't set up on this hub");
 				const watchAuth = checkWatchRequest(cfg, req.headers, deps.secrets.token);
 				if (!watchAuth.ok) {

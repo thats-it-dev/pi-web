@@ -81,6 +81,8 @@ test("watch routes need the bearer token and not an Origin; other routes still n
 	assert.equal((await call(port, "GET", "/api/sessions", WATCH)).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch/nothing", WATCH)).status, 404);
 	assert.equal((await call(barePort, "GET", "/api/watch/pending", WATCH)).status, 503);
+	assert.equal((await call(barePort, "GET", "/api/watch/pending", { ...WATCH, "tailscale-user-login": undefined })).status, 403);
+	assert.equal((await call(barePort, "GET", "/api/watch/pending", { ...WATCH, host: "evil.test" })).status, 403);
 });
 
 test("pending without wait returns at once; with wait=1 it returns when a dialog is raised", async () => {
