@@ -3,12 +3,13 @@ import { HubApi } from "../lib/api.ts";
 import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import { sharedStyles } from "../styles/shared.ts";
-import type { UpdateStatus } from "../../../shared/src/protocol.ts";
+import type { HealthInfo, UpdateStatus } from "../../../shared/src/protocol.ts";
 import { toast } from "../lib/toast.ts";
+import { watchSectionCopy } from "../lib/watch-settings.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
 
 export class PiSettings extends LitElement {
-	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true } };
+	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true }, health: { state: true } };
 	declare url: string;
 	declare status: { ok: boolean; text: string } | null;
 	declare checking: boolean;
@@ -19,6 +20,7 @@ export class PiSettings extends LitElement {
 	declare updateInfo: UpdateStatus | null; // the last check
 	declare updateBusy: "checking" | "updating" | "restarting" | null;
 	declare updateNote: { ok: boolean; text: string; force?: boolean } | null;
+	declare health: HealthInfo | null;
 
 	static styles = [
 		sharedStyles,
@@ -33,6 +35,7 @@ export class PiSettings extends LitElement {
 			form { display: grid; gap: 8px; }
 			.row { display: flex; gap: 8px; }
 			.row input { flex: 1; min-width: 0; }
+			.row code { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: all; align-self: center; }
 			.status.ok { color: var(--success); }
 			.status.bad { color: var(--accent); }
 			a.back { font-family: var(--font-quote); }
@@ -51,6 +54,50 @@ export class PiSettings extends LitElement {
 		this.updateInfo = null;
 		this.updateBusy = null;
 		this.updateNote = null;
+		this.health = null;
+	}
+
+	// ---- watch pairing --------------------------------------------------------
+
+	private async loadHealth(): Promise<void> {
+		const url = getHubUrl();
+		if (!url) return;
+		try {
+			this.health = await new HubApi(url).health();
+		} catch {
+			this.health = null;
+		}
+	}
+
+	private async copy(value: string, el: HTMLElement | null): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(value);
+			toast("Copied.");
+		} catch {
+			// Clipboard blocked: select the text so it can be copied by hand.
+			const node = el?.firstChild;
+			if (node) {
+				const range = document.createRange();
+				range.selectNodeContents(el as HTMLElement);
+				const sel = getSelection();
+				sel?.removeAllRanges();
+				sel?.addRange(range);
+			}
+		}
+	}
+
+	private renderWatch() {
+		if (!getHubUrl()) return html`<p class="hint">Connect to a hub first.</p>`;
+		const w = watchSectionCopy(this.health);
+		const rowFor = (label: string, value: string | null, id: string) =>
+			value
+				? html`<div class="row">
+						<span>${label}</span>
+						<code id=${id}>${value}</code>
+						<button class="btn ghost" @click=${() => this.copy(value, this.renderRoot.querySelector<HTMLElement>(`#${id}`))}>copy</button>
+					</div>`
+				: nothing;
+		return html`${rowFor("token", w.token, "watch-token")}${rowFor("Index secret", w.secret, "watch-secret")}<p class="hint">${w.hint}</p>`;
 	}
 
 	// ---- hub self-update ------------------------------------------------------
@@ -128,6 +175,7 @@ export class PiSettings extends LitElement {
 	connectedCallback(): void {
 		super.connectedCallback();
 		void this.refreshPush();
+		void this.loadHealth();
 	}
 
 	private async refreshPush(): Promise<void> {
@@ -217,6 +265,8 @@ export class PiSettings extends LitElement {
 			<h2>notifications</h2>
 			<p class="hint">${PUSH_COPY.hint}</p>
 			${this.renderPush()}
+			<h2>watch</h2>
+			${this.renderWatch()}
 			<h2>display diagnostics</h2>
 			<p class="hint">Temporary: shows the screen measurements on top of the app, for fixing the iPhone layout.</p>
 			<div class="seg" role="radiogroup" aria-label="Display diagnostics">
@@ -230,3 +280,4 @@ export class PiSettings extends LitElement {
 	}
 }
 customElements.define("pi-settings", PiSettings);
+export { watchSectionCopy };
