@@ -105,7 +105,7 @@ export class WatchService {
 
 	// An aborted signal drops the waiter and leaves the promise pending, so only abort for a caller that has gone.
 	wait(since: number, maxMs = WAIT_MS, signal?: AbortSignal): Promise<WatchPending> {
-		if (this.cursor > since || this.closed) return Promise.resolve(this.pending());
+		if (this.cursor !== since || this.closed) return Promise.resolve(this.pending());
 		if (signal?.aborted) return new Promise(() => {});
 		return new Promise((resolve) => {
 			const done = (p: WatchPending) => {
@@ -221,7 +221,7 @@ export class WatchService {
 		const cwd = join(this.deps.home, "pebble");
 		mkdirSync(cwd, { recursive: true });
 		const h = await this.deps.registry.create(cwd);
-		await h.command({ type: "prompt", text, mode: "send" });
+		await this.send(h, { type: "prompt", text, mode: "send" });
 		this.deps.log?.(`index: started session ${h.sessionId} in ~/pebble`);
 		return h.sessionId;
 	}
@@ -370,7 +370,7 @@ export class WatchService {
 }
 
 function dialogMessage(d: Dialog): string {
-	return d.message ? `${d.title}\n${d.message}` : d.title;
+	return clip(d.message ? `${d.title}\n${d.message}` : d.title);
 }
 
 function dialogOptions(d: Dialog): string[] {

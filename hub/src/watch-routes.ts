@@ -115,7 +115,7 @@ async function weather(watch: WatchService, latRaw: string | null, lonRaw: strin
 	const hit = cache.get(key);
 	if (hit && now - hit.at < WEATHER_TTL_MS) return hit.value;
 	try {
-		const r = await (deps.fetchFn ?? fetch)(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`);
+		const r = await (deps.fetchFn ?? fetch)(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`, { signal: AbortSignal.timeout(5000) });
 		if (!r.ok) throw new Error(`HTTP ${r.status}`);
 		const j = (await r.json()) as { current?: { temperature_2m?: unknown; weather_code?: unknown } };
 		const tempC = j.current?.temperature_2m;

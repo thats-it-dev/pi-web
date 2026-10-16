@@ -280,4 +280,3 @@ export class PiSettings extends LitElement {
 	}
 }
 customElements.define("pi-settings", PiSettings);
-export { watchSectionCopy };

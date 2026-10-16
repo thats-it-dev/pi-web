@@ -1,7 +1,10 @@
-// Every request must come from an allowed page (Origin), to the tailnet host
+// Every app request must come from an allowed page (Origin), to the tailnet host
 // (Host), as the allowed Tailscale user. The identity header is ambient: tailscale
 // serve adds it to any request this device makes, including ones another
-// website triggers, so the Origin check is what makes it safe (spec §6).
+// website triggers, so the Origin check is what makes it safe (spec §6). The
+// Origin check applies to app routes; /api/watch/* (bearer token) and
+// /api/index/webhook (HMAC signature) are exempt from Origin but still require
+// Host and the Tailscale identity.
 
 import type { IncomingHttpHeaders } from "node:http";
 import type { HubConfig } from "./config.ts";

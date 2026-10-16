@@ -188,3 +188,9 @@ test("weather proxies Open-Meteo once per 10 minutes per rounded coordinate and 
 	upstream = "throw";
 	assert.equal((await call(port, "GET", "/api/watch/weather?lat=3&lon=4", WATCH)).status, 502);
 });
+
+test("the watch prefix boundary: paths that resolve outside /api/watch/ still need an Origin", async () => {
+	assert.equal((await call(port, "GET", "/api/watch/../sessions", WATCH)).status, 403);
+	assert.equal((await call(port, "GET", "/api/watch/%2e%2e/sessions", WATCH)).status, 403);
+	assert.equal((await call(port, "GET", "/api/watch", WATCH)).status, 403);
+});

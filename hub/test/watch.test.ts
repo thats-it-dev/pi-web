@@ -685,6 +685,45 @@ test("prompt keeps an outcome that lands while the prompt is being sent", async 
 	svc.close();
 });
 
+test("startRingSession rejects when the first prompt is refused", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "watch-test-"));
+	const index = new SessionIndex(dir);
+	const registry = new Registry({
+		factory: {
+			startRpc: async (o) => {
+				const h = new FakeHandle("s-1", o.cwd, null);
+				h.command = async () => ({ ok: false, error: "nope" });
+				return h;
+			},
+		},
+		lookup: index,
+		maxHeadless: 6,
+		idleMs: 60_000,
+	});
+	const svc = new WatchService({ registry, index, viewers: new Viewers(), home: dir });
+	await assert.rejects(svc.startRingSession("hi"), /nope/);
+	svc.close();
+});
+
+test("wait returns at once for a cursor from the future (stale after a restart)", async () => {
+	const { svc } = setup();
+	const t0 = Date.now();
+	const p = await svc.wait(999_999, 2000);
+	assert.equal(p.cursor, 0);
+	assert.ok(Date.now() - t0 < 500);
+	svc.close();
+});
+
+test("dialog title+message text is clipped to 240 chars", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	raise(h, { id: "big", method: "select", title: "T", message: "m".repeat(300), options: ["allow", "deny"] });
+	const msg = svc.pending().requests[0]!.message;
+	assert.equal(msg.length, 240);
+	assert.ok(msg.endsWith("…"));
+	svc.close();
+});
+
 test("startRingSession creates ~/pebble once and prompts the new session", async () => {
 	const { registry, svc, dir } = setup();
 	const id = await svc.startRingSession("hello ring");

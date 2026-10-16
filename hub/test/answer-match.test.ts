@@ -34,3 +34,18 @@ test("yesNo", () => {
 	assert.equal(yesNo("don't"), "no");
 	assert.equal(yesNo("maybe"), null);
 });
+
+for (const [text, options, want] of [
+	["Yes.", ["yes", "no"], { kind: "match", option: "yes" }],
+	["No.", ["yes", "no"], { kind: "match", option: "no" }],
+	["Allow once.", ["Allow once", "Allow always", "Deny"], { kind: "match", option: "Allow once" }],
+	["Go ahead.", ["Allow once", "Allow always", "Deny"], { kind: "match", option: "Allow once" }],
+	["yes please", ["allow", "deny"], { kind: "match", option: "allow" }],
+	["  allow   always ", ["allow", "allow always", "deny"], { kind: "match", option: "allow always" }],
+	["yes", [" allow", "deny"], { kind: "match", option: " allow" }],
+] as const) test(`normalised: matchOption(${JSON.stringify(text)}, ${JSON.stringify(options)})`, () => assert.deepEqual(matchOption(text, [...options]), want));
+
+test("yesNo accepts a synonym followed by please", () => {
+	assert.equal(yesNo("Yes please."), "yes");
+	assert.equal(yesNo("no please"), "no");
+});

@@ -43,7 +43,7 @@ setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
 watchPush(registry, (p) => void push.send(p), viewers);
-const secrets = loadWatchSecrets(cfg.dataDir);
+const secrets = loadWatchSecrets(cfg.dataDir, (m) => console.log(m));
 const watch = new WatchService({ registry, index, viewers, home: homedir() });
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
