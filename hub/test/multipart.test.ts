@@ -63,3 +63,17 @@ test("missing closing delimiter, missing boundary and headerless part are 400", 
 test("an empty part list parses to []", () => {
 	assert.deepEqual(parseMultipart(Buffer.from("------b--\r\n"), CT), []);
 });
+
+test("Content-Disposition accepts whitespace around = and bare token values", () => {
+	const body = Buffer.from(
+		'--q\r\nContent-Disposition: form-data; name = "audio" ;  filename =  a.m4a\r\n\r\nv\r\n--q\r\nContent-Disposition: form-data;   filename="x.bin";name=plain\r\n\r\nw\r\n--q--\r\n',
+	);
+	const parts = parseMultipart(body, "multipart/form-data; boundary=q");
+	assert.deepEqual(parts.map((p) => [p.name, p.filename]), [["audio", "a.m4a"], ["plain", "x.bin"]]);
+});
+
+test("the boundary parameter is anchored; an empty boundary is 400", () => {
+	const body = Buffer.from('--foo\r\nContent-Disposition: form-data; name="a"\r\n\r\nv\r\n--foo--\r\n');
+	assert.equal(parseMultipart(body, "multipart/form-data; xboundary=bar; boundary=foo")[0].name, "a");
+	assert.equal(status(() => parseMultipart(body, 'multipart/form-data; boundary=""')), 400);
+});

@@ -10,6 +10,7 @@ import { checkHostAndLogin, checkRequest, checkWatchRequest, corsHeaders } from 
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
+import { ReplayCache, handleIndexWebhook } from "./index-webhook.ts";
 import { type Cors, readJson, sendJson } from "./http.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
@@ -46,6 +47,7 @@ export function createHubServer(deps: HubDeps): Server {
 	const log = deps.log ?? ((m: string) => console.log(m));
 	const { cfg, registry, index } = deps;
 	const fileLister = new FileLister();
+	const replays = new ReplayCache();
 
 	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
 		const { pathname: p, searchParams } = new URL(req.url ?? "/", "http://hub");
@@ -243,6 +245,17 @@ export function createHubServer(deps: HubDeps): Server {
 				}
 				const url = new URL(req.url ?? "/", "http://hub");
 				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
+				return;
+			}
+			if (req.method === "POST" && path === "/api/index/webhook") {
+				// The ring has no Origin or bearer; its HMAC (checked in the handler) stands in for both.
+				const identity = checkHostAndLogin(cfg, req.headers);
+				if (!identity.ok) {
+					log(`rejected ${req.method} ${req.url}: ${identity.reason}`);
+					throw new HttpError(403, "Forbidden");
+				}
+				if (!deps.watch || !deps.secrets) throw new HttpError(503, "Watch API isn't set up on this hub");
+				await handleIndexWebhook(req, res, { watch: deps.watch, secret: deps.secrets.indexSecret, dataDir: cfg.dataDir, replays, now: deps.now, log });
 				return;
 			}
 			const auth = checkRequest(cfg, req.headers);

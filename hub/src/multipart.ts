@@ -8,7 +8,7 @@ export interface Part {
 }
 
 function boundaryOf(contentType: string | undefined): string {
-	const m = contentType?.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
+	const m = contentType?.match(/(?:^|;)\s*boundary\s*=\s*(?:"([^"]*)"|([^;\s]+))/i);
 	const boundary = m?.[1] ?? m?.[2];
 	if (!boundary) throw new HttpError(400, "Missing multipart boundary");
 	return boundary;
@@ -24,8 +24,8 @@ function parseHeaders(block: string): Map<string, string> {
 }
 
 function param(value: string | undefined, key: string): string | undefined {
-	const m = value?.match(new RegExp(`(?:^|;)\\s*${key}="([^"]*)"`, "i"));
-	return m?.[1];
+	const m = value?.match(new RegExp(`(?:^|;)\\s*${key}\\s*=\\s*(?:"([^"]*)"|([^;\\s]+))`, "i"));
+	return m?.[1] ?? m?.[2];
 }
 
 export function parseMultipart(body: Buffer, contentType: string | undefined): Part[] {

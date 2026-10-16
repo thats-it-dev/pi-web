@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
@@ -682,5 +682,17 @@ test("prompt keeps an outcome that lands while the prompt is being sent", async 
 	};
 	await svc.prompt("s-1", "again");
 	assert.deepEqual(svc.pending().requests.map((r) => r.id), ["finished:s-1:3"]);
+	svc.close();
+});
+
+test("startRingSession creates ~/pebble once and prompts the new session", async () => {
+	const { registry, svc, dir } = setup();
+	const id = await svc.startRingSession("hello ring");
+	const h = registry.get(id) as FakeHandle;
+	assert.equal(h.cwd, join(dir, "pebble"));
+	assert.ok(existsSync(join(dir, "pebble")));
+	assert.deepEqual(h.received, [{ type: "prompt", text: "hello ring", mode: "send" }]);
+	const again = await svc.startRingSession("again");
+	assert.notEqual(again, id);
 	svc.close();
 });

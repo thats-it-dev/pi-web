@@ -3,6 +3,8 @@
 // that finished or errored while no app was open. The service also keeps the
 // watch's dismissals and what it reports as on screen, and wakes long-pollers.
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
 import type { AppCommand, Dialog, WatchAnswerResult, WatchPending, WatchRequest, WatchSession, WatchTurn } from "../../shared/src/protocol.ts";
 import { matchOption } from "./answer-match.ts";
@@ -212,6 +214,16 @@ export class WatchService {
 			if (r) return { requestId: r.id, sessionId: r.sessionId };
 		}
 		return null;
+	}
+
+	// A voice note with nothing to answer starts a session in ~/pebble (spec §10).
+	async startRingSession(text: string): Promise<string> {
+		const cwd = join(this.deps.home, "pebble");
+		mkdirSync(cwd, { recursive: true });
+		const h = await this.deps.registry.create(cwd);
+		await h.command({ type: "prompt", text, mode: "send" });
+		this.deps.log?.(`index: started session ${h.sessionId} in ~/pebble`);
+		return h.sessionId;
 	}
 
 	health(): { running: number; pending: number } {

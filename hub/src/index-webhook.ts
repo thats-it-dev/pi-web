@@ -1,5 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { IncomingHttpHeaders } from "node:http";
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
+import { HttpError } from "./errors.ts";
+import { sendJson } from "./http.ts";
+import { type Sidecar, prune, saveAudio, saveSidecar } from "./index-store.ts";
+import { parseMultipart } from "./multipart.ts";
+import type { WatchService } from "./watch.ts";
 
 export interface IndexHeaders {
 	version?: string;
@@ -67,4 +72,105 @@ export function verifyIndex(h: IndexHeaders, body: Buffer, secret: string, repla
 	if (given.length !== want.length || !timingSafeEqual(given, want)) return fail(401, "Invalid signature");
 	if (replays.seen(h.delivery)) return fail(409, "Duplicate delivery");
 	return { ok: true, isTest };
+}
+
+const BODY_MAX = 25 * 1024 * 1024;
+const KEEP = 200;
+
+export interface IndexDeps {
+	watch: WatchService;
+	secret: string;
+	dataDir: string;
+	replays?: ReplayCache;
+	now?: () => number;
+	log?: (m: string) => void;
+	keep?: number;
+}
+
+function readBody(req: IncomingMessage): Promise<Buffer> {
+	return new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		let size = 0;
+		req.on("data", (c: Buffer) => {
+			if (size > BODY_MAX) return;
+			size += c.length;
+			if (size > BODY_MAX) {
+				chunks.length = 0;
+				reject(new HttpError(413, "Request body too large"));
+				return;
+			}
+			chunks.push(c);
+		});
+		req.on("end", () => resolve(Buffer.concat(chunks)));
+		req.on("error", reject);
+	});
+}
+
+// Spec §10: answer what the watch is showing, else start a session in ~/pebble.
+async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, "action" | "sessionId" | "requestId" | "reason">> {
+	if (!text) return { action: "kept_audio" };
+	const target = watch.currentTarget();
+	if (!target) return { action: "new_session", sessionId: await watch.startRingSession(text) };
+	const r = await watch.answer(target.requestId, { text });
+	if (r.ok) return { action: "answered", requestId: target.requestId };
+	return { action: "no_match", requestId: target.requestId, reason: r.reason };
+}
+
+export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
+	const log = deps.log ?? (() => {});
+	const done = (): void => {
+		res.writeHead(200);
+		res.end();
+	};
+	let body: Buffer;
+	try {
+		body = await readBody(req);
+	} catch (e) {
+		req.resume(); // discard the rest; the connection closes after the answer
+		const status = e instanceof HttpError ? e.status : 400;
+		log(`index: rejected (${(e as Error).message})`);
+		res.setHeader("connection", "close");
+		return sendJson(res, status, { error: (e as Error).message }, {});
+	}
+	const headers = readIndexHeaders(req.headers);
+	const v = verifyIndex(headers, body, deps.secret, deps.replays ?? new ReplayCache(), deps.now);
+	if (!v.ok) {
+		log(`index: rejected (${v.reason})`);
+		return sendJson(res, v.status, { error: v.reason }, {});
+	}
+	if (v.isTest) {
+		log("index: test event ok");
+		return done();
+	}
+	let stage = "parse";
+	try {
+		let parts;
+		try {
+			parts = parseMultipart(body, first(req.headers["content-type"]));
+		} catch (e) {
+			log(`index: parse: ${(e as Error).message}`);
+			return done();
+		}
+		const text = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
+		const transcription = (text("transcription") ?? "").trim();
+		const audio = parts.find((p) => p.name === "audio")?.data;
+		const delivery = headers.delivery ?? "";
+		stage = "store";
+		if (audio) saveAudio(deps.dataDir, delivery, audio);
+		stage = "decide";
+		let outcome: Awaited<ReturnType<typeof decide>>;
+		try {
+			outcome = await decide(deps.watch, transcription);
+		} catch (e) {
+			log(`index: decide: ${(e as Error).message}`);
+			outcome = { action: "error", reason: (e as Error).message };
+		}
+		stage = "store";
+		const { signature: _omit, ...kept } = headers;
+		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), client: text("client"), ...outcome });
+		prune(deps.dataDir, deps.keep ?? KEEP);
+	} catch (e) {
+		log(`index: ${stage}: ${(e as Error).message}`);
+	}
+	done();
 }
