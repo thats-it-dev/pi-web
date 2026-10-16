@@ -13,8 +13,18 @@
 import { resolve, sep } from "node:path";
 import type { ApprovalMode, Dialog } from "../../shared/src/protocol.ts";
 
-const ALLOW_EXACT = /^(allow|yes|approve|ok|accept)$/i;
-const ALLOW_PREFIX = /^(allow|yes|approve|accept)\b/i;
+export const ALLOW_EXACT = /^(allow|yes|approve|ok|accept)$/i;
+export const ALLOW_PREFIX = /^(allow|yes|approve|accept)\b/i;
+export const DENY_EXACT = /^(deny|no|reject|cancel|decline)$/i;
+export const DENY_PREFIX = /^(deny|no|reject|decline)\b/i;
+
+export function findAllow(options: string[]): string | undefined {
+	return options.find((o) => ALLOW_EXACT.test(o)) ?? options.find((o) => ALLOW_PREFIX.test(o));
+}
+
+export function findDeny(options: string[]): string | undefined {
+	return options.find((o) => DENY_EXACT.test(o)) ?? options.find((o) => DENY_PREFIX.test(o));
+}
 
 export type AutoAnswer = { value: string } | { confirmed: true };
 
@@ -36,7 +46,7 @@ export function autoAnswer(d: Pick<Dialog, "method" | "options">, ctx: ApprovalC
 	if (d.method === "confirm") return { confirmed: true };
 	if (d.method !== "select") return null;
 	const options = (d.options ?? []).map((o) => String(o).trim());
-	const allow = options.find((o) => ALLOW_EXACT.test(o)) ?? options.find((o) => ALLOW_PREFIX.test(o));
+	const allow = findAllow(options);
 	return allow === undefined ? null : { value: allow };
 }
 
