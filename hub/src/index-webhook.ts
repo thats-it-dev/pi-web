@@ -76,12 +76,13 @@ export function verifyIndex(h: IndexHeaders, body: Buffer, secret: string, repla
 
 const BODY_MAX = 25 * 1024 * 1024;
 const KEEP = 200;
+const TEXT_MAX = 8_000;
 
 export interface IndexDeps {
 	watch: WatchService;
 	secret: string;
 	dataDir: string;
-	replays?: ReplayCache;
+	replays: ReplayCache;
 	now?: () => number;
 	log?: (m: string) => void;
 	keep?: number;
@@ -113,7 +114,7 @@ async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, 
 	if (!target) return { action: "new_session", sessionId: await watch.startRingSession(text) };
 	const r = await watch.answer(target.requestId, { text });
 	if (r.ok) return { action: "answered", requestId: target.requestId };
-	return { action: "no_match", requestId: target.requestId, reason: r.reason };
+	return { action: "no_match", requestId: target.requestId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
 }
 
 export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
@@ -133,7 +134,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		return sendJson(res, status, { error: (e as Error).message }, {});
 	}
 	const headers = readIndexHeaders(req.headers);
-	const v = verifyIndex(headers, body, deps.secret, deps.replays ?? new ReplayCache(), deps.now);
+	const v = verifyIndex(headers, body, deps.secret, deps.replays, deps.now);
 	if (!v.ok) {
 		log(`index: rejected (${v.reason})`);
 		return sendJson(res, v.status, { error: v.reason }, {});
@@ -152,9 +153,13 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 			return done();
 		}
 		const text = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
-		const transcription = (text("transcription") ?? "").trim();
 		const audio = parts.find((p) => p.name === "audio")?.data;
 		const delivery = headers.delivery ?? "";
+		let transcription = (text("transcription") ?? "").trim();
+		if (transcription.length > TEXT_MAX) {
+			transcription = transcription.slice(0, TEXT_MAX);
+			log(`index: ${delivery} transcription cut to ${TEXT_MAX} chars`);
+		}
 		stage = "store";
 		if (audio) saveAudio(deps.dataDir, delivery, audio);
 		stage = "decide";
@@ -165,6 +170,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };
 		}
+		log(`index: ${delivery} ${outcome.action}${outcome.reason ? ` (${outcome.reason})` : ""}`);
 		stage = "store";
 		const { signature: _omit, ...kept } = headers;
 		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), client: text("client"), ...outcome });

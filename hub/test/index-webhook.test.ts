@@ -238,6 +238,7 @@ test("a transcription that matches no option is logged and nothing reaches pi", 
 	assert.equal(j.action, "no_match");
 	assert.equal(j.requestId, requestId);
 	assert.equal(typeof j.reason, "string");
+	assert.ok(logs.includes(`index: ${s.delivery} no_match (options: allow, deny)`));
 	watch.showing(null);
 	settle(h);
 });
@@ -250,6 +251,7 @@ test("empty transcription keeps the audio and does nothing else", async () => {
 	assert.equal((await post(port, s.headers, b)).status, 200);
 	assert.ok(readFileSync(join(root, "index", `${s.delivery}.m4a`)).equals(audio));
 	assert.equal(sidecar(s.delivery).action, "kept_audio");
+	assert.ok(logs.includes(`index: ${s.delivery} kept_audio`));
 	assert.equal(created.length, before);
 });
 
@@ -270,7 +272,7 @@ test("a pi failure is logged and still 200, with the sidecar recording the error
 	const failing = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root });
 	failing.startRingSession = async () => { throw new Error("pi is down"); };
 	const lines: string[] = [];
-	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: failing, secret, dataDir: root, now, log: (m) => lines.push(m) }));
+	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: failing, secret, dataDir: root, replays: new ReplayCache(), now, log: (m) => lines.push(m) }));
 	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
 	const b = multipart({ transcription: "go" });
 	const s = signed(b);
@@ -283,6 +285,15 @@ test("a pi failure is logged and still 200, with the sidecar recording the error
 	assert.ok(lines.some((l) => l === "index: decide: pi is down"));
 });
 
+test("a 9000-char transcription is cut to 8000 for pi and the sidecar, and logged", async () => {
+	const b = multipart({ transcription: "x".repeat(9_000) });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(sidecar(s.delivery).transcription.length, 8_000);
+	assert.equal((created[created.length - 1].received[0] as { text: string }).text.length, 8_000);
+	assert.ok(logs.includes(`index: ${s.delivery} transcription cut to 8000 chars`));
+});
+
 test("a body over 25 MB is 413", async () => {
 	const big = Buffer.alloc(25 * 1024 * 1024 + 1);
 	const s = signed(big);
@@ -292,7 +303,7 @@ test("a body over 25 MB is 413", async () => {
 
 test("only the newest `keep` deliveries are kept", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-index-keep-"));
-	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch, secret, dataDir: dir, now, keep: 2 }));
+	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch, secret, dataDir: dir, replays: new ReplayCache(), now, keep: 2 }));
 	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
 	for (const d of ["k-1", "k-2", "k-3"]) {
 		const b = multipart({ transcription: "" }, Buffer.from(d));
