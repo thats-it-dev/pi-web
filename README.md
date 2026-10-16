@@ -93,6 +93,10 @@ On iPhone or iPad, add pi-web to the Home Screen first (Share → Add to Home Sc
 
 The hub keeps its push keys in `~/.config/pi-web/vapid.json` and the subscribed devices in `~/.config/pi-web/push.json`. Deleting `vapid.json` makes new keys. Each device then re-subscribes the next time it opens pi-web.
 
+## Watch
+
+The hub has an API for a Pebble watch: it lists the dialogs, finished runs and errors the watch may show, takes answers and prompts, and receives voice notes from an Index 01 ring. The app's settings page shows the watch token and the Index secret, which the hub makes on first start and keeps in `~/.config/pi-web/watch.json`. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [design spec](docs/superpowers/specs/2026-10-16-pebble-watch-design.md) for the plan.
+
 ## Deploy
 
 The app is a Cloudflare Pages project (`pi-web`) connected to this repo. A push
