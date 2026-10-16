@@ -337,8 +337,8 @@ Latin at the sizes used (16 and 14), as the `hellopiu-text` example does.
 Nothing on either screen is set below 14 px: the panel has no anti-aliasing,
 and 14 is the smallest size that reads.
 
-Settings (Clay): four corner assignments, dark/light, hub URL, watch token
-(§9), temperature unit. Settings persist on the watch in `localStorage`.
+Settings (Clay): four corner assignments, dark/light, hub URL, temperature
+unit. Settings persist on the watch in `localStorage`.
 
 Dark/light inverts paper and ink everywhere (idle, sheet). Default: dark.
 
@@ -558,19 +558,20 @@ three seconds after a flick; if the app hasn't launched by then it reverts to
 
 ## 9. Security
 
-- **Watch token.** The hub generates a random 32-byte token on first start
-  (stored in its data dir, next to the VAPID keys) and exposes it to the
-  pi-web app on `/api/health` (already identity-checked) for display in the
-  app's settings sheet, with a copy button. The watch sends it as
-  `Authorization: Bearer <token>`. On `/api/watch/*` and `/api/index/webhook`
-  the Origin check is skipped; the Host check and `Tailscale-User-Login` check
-  still apply, so a request must come from a tailnet device logged in as the
-  allowed user **and** hold the token. Constant-time comparison.
-- **Index 01 secret.** A second generated secret, shown the same way, for the
-  Index app's webhook configuration. `/api/index/webhook` verifies
-  `X-Index-Signature` per §2, rejects a missing or wrong signature with 401,
-  and rejects timestamps more than five minutes off. `X-Index-Delivery` ids
-  seen in the last hour are rejected as replays.
+- **Tailnet identity only.** On `/api/watch/*` and `/api/index/webhook` the
+  Origin check is skipped (neither caller is a web page); the Host check and
+  `Tailscale-User-Login` check still apply, so a request must come from a
+  tailnet device logged in as the allowed user. **No watch token and no Index
+  signing secret** (Michael's call, 2026-10-16: the hub is reachable only
+  over his single-user VPN, so anything on his own devices is trusted). What
+  this gives up: a web page open in a tailnet browser, or an app on a tailnet
+  device, that knows the hub's hostname could call these routes with his
+  identity. The first version of this section had a bearer token and an
+  HMAC-signed webhook for exactly that; the code is in git history
+  (`d7ea588` and before) if the threat model changes.
+- **Replay.** `/api/index/webhook` still rejects an `X-Index-Delivery` id
+  seen in the last hour (409), so a retried upload doesn't act twice. The
+  Index app's "Sign requests" toggle stays off.
 - The Developer Connection on the phone has no auth. Path 1 in §8 never
   exposes it beyond the phone. Path 2 relies on Tailscale and the toggle in
   the Pebble app; the design notes that any tailnet device could then launch
@@ -652,8 +653,8 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
 - Memory: start from the `words` example's `Application` options
   (`displayListLength`, `commandListLength`, `pixels: screen.width * 4`) and
   tune by `pebble logs`; the history screen keeps at most 24 turns in memory.
-- Both projects need the hub URL and token; v1 enters them twice (two Clay
-  pages). A later improvement is a QR or deep link.
+- Both projects need the hub URL; v1 enters it twice (two Clay pages). A
+  later improvement is a QR or deep link.
 
 ## 13. Testing
 
@@ -694,8 +695,8 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
    screenshots. Then the menu: sessions, history, model, with the hub
    endpoints of §5 they need.
 4. **Face**: idle, corners, settings, sheet, flick → app.
-5. **Index 01 webhook** and the settings UI in the pi-web app for the token and
-   secret.
+5. **Index 01 webhook** and a short "watch" note in the pi-web app's settings
+   (the mute step).
 6. Hardware pass of §13, README, and the known-issues list.
 
 ## 15. Risks and open unknowns
@@ -726,5 +727,4 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
 - How many turns of history to clip per turn (240 chars is the starting
   point) and how `Scroller` paging feels on buttons.
 - Whether `finished` requests clip at the first paragraph or at N characters.
-- How the pi-web app's settings sheet presents the token and secret.
 - Menu behaviour at the ends (wrap vs. stop) and swipe thresholds.

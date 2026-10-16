@@ -2,13 +2,13 @@
 // (Host), as the allowed Tailscale user. The identity header is ambient: tailscale
 // serve adds it to any request this device makes, including ones another
 // website triggers, so the Origin check is what makes it safe (spec §6). The
-// Origin check applies to app routes; /api/watch/* (bearer token) and
-// /api/index/webhook (HMAC signature) are exempt from Origin but still require
-// Host and the Tailscale identity.
+// Origin check applies to app routes; /api/watch/* and /api/index/webhook have
+// no page behind them and are exempt from Origin. They rely on Host and the
+// Tailscale identity alone: anything on a tailnet device logged in as the
+// allowed user may use them (spec §9, Michael's call, 2026-10-16).
 
 import type { IncomingHttpHeaders } from "node:http";
 import type { HubConfig } from "./config.ts";
-import { bearerMatches } from "./watch-secrets.ts";
 
 type AuthConfig = Pick<HubConfig, "hostname" | "allowedLogin" | "allowedOrigins">;
 export type AuthResult = { ok: true } | { ok: false; reason: string };
@@ -17,14 +17,6 @@ export function checkRequest(cfg: AuthConfig, h: IncomingHttpHeaders): AuthResul
 	const origin = h.origin;
 	if (!origin || !cfg.allowedOrigins.includes(origin)) return { ok: false, reason: `origin ${origin ?? "(none)"}` };
 	return checkHostAndLogin(cfg, h);
-}
-
-// Watch routes are called by the phone app, not a page, so there is no Origin;
-// the bearer token stands in for it.
-export function checkWatchRequest(cfg: AuthConfig, h: IncomingHttpHeaders, token: string): AuthResult {
-	const base = checkHostAndLogin(cfg, h);
-	if (!base.ok) return base;
-	return bearerMatches(h.authorization, token) ? { ok: true } : { ok: false, reason: "watch token" };
 }
 
 export function checkHostAndLogin(cfg: AuthConfig, h: IncomingHttpHeaders): AuthResult {

@@ -13,7 +13,6 @@ import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
 import { gitUpdater } from "./update.ts";
 import { WatchService } from "./watch.ts";
-import { loadWatchSecrets } from "./watch-secrets.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
 
 const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -43,7 +42,6 @@ setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
 watchPush(registry, (p) => void push.send(p), viewers);
-const secrets = loadWatchSecrets(cfg.dataDir, (m) => console.log(m));
 const watch = new WatchService({ registry, index, viewers, home: homedir() });
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
@@ -55,7 +53,7 @@ try {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, secrets });
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });

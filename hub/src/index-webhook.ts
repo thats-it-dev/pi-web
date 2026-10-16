@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { HttpError } from "./errors.ts";
 import { sendJson } from "./http.ts";
@@ -32,11 +31,6 @@ export function readIndexHeaders(h: IncomingHttpHeaders): IndexHeaders {
 	};
 }
 
-export function signIndex(secret: string, timestamp: string, delivery: string, trigger: string, isTest: boolean, body: Buffer): string {
-	const prefix = Buffer.from(`v1\n${timestamp}\n${delivery}\n${trigger}\n${isTest ? "1" : "0"}\n`, "utf8");
-	return createHmac("sha256", Buffer.from(secret, "utf8")).update(prefix).update(body).digest("hex");
-}
-
 export class ReplayCache {
 	private ids = new Map<string, number>();
 	private ttlMs: number;
@@ -57,21 +51,17 @@ export class ReplayCache {
 	}
 }
 
-export type Verify = { ok: true; isTest: boolean } | { ok: false; status: 400 | 401 | 409; reason: string };
+export type Verify = { ok: true; isTest: boolean } | { ok: false; status: 400 | 409; reason: string };
 
-const fail = (status: 400 | 401 | 409, reason: string): Verify => ({ ok: false, status, reason });
+const fail = (status: 400 | 409, reason: string): Verify => ({ ok: false, status, reason });
 
-export function verifyIndex(h: IndexHeaders, body: Buffer, secret: string, replays: ReplayCache, now: () => number = Date.now): Verify {
+// The tailnet identity (checked in server.ts) is the only authentication; the
+// Index app's signing is not required (spec §9). Replays are still refused so
+// a retried upload doesn't act twice.
+export function verifyIndex(h: IndexHeaders, replays: ReplayCache): Verify {
 	if (h.version !== "1") return fail(400, "Unsupported webhook version");
-	if (!h.signature || !h.timestamp || !h.delivery) return fail(401, "Missing signature");
-	if (!/^-?\d+$/.test(h.timestamp)) return fail(400, "Invalid timestamp");
-	if (Math.abs(now() / 1000 - Number(h.timestamp)) > 300) return fail(401, "Expired request");
-	const isTest = h.test === "true";
-	const want = Buffer.from(signIndex(secret, h.timestamp, h.delivery, h.trigger ?? "", isTest, body));
-	const given = Buffer.from(h.signature);
-	if (given.length !== want.length || !timingSafeEqual(given, want)) return fail(401, "Invalid signature");
-	if (replays.seen(h.delivery)) return fail(409, "Duplicate delivery");
-	return { ok: true, isTest };
+	if (h.delivery && replays.seen(h.delivery)) return fail(409, "Duplicate delivery");
+	return { ok: true, isTest: h.test === "true" };
 }
 
 const BODY_MAX = 25 * 1024 * 1024;
@@ -80,7 +70,6 @@ const TEXT_MAX = 8_000;
 
 export interface IndexDeps {
 	watch: WatchService;
-	secret: string;
 	dataDir: string;
 	replays: ReplayCache;
 	now?: () => number;
@@ -134,7 +123,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		return sendJson(res, status, { error: (e as Error).message }, {});
 	}
 	const headers = readIndexHeaders(req.headers);
-	const v = verifyIndex(headers, body, deps.secret, deps.replays, deps.now);
+	const v = verifyIndex(headers, deps.replays);
 	if (!v.ok) {
 		log(`index: rejected (${v.reason})`);
 		return sendJson(res, v.status, { error: v.reason }, {});

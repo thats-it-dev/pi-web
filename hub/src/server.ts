@@ -6,7 +6,7 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
-import { checkHostAndLogin, checkRequest, checkWatchRequest, corsHeaders } from "./auth.ts";
+import { checkHostAndLogin, checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
@@ -20,7 +20,6 @@ import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 import type { Updater } from "./update.ts";
 import type { WatchService } from "./watch.ts";
 import { routeWatch } from "./watch-routes.ts";
-import type { WatchSecrets } from "./watch-secrets.ts";
 
 export interface HubDeps {
 	cfg: HubConfig;
@@ -34,7 +33,6 @@ export interface HubDeps {
 	updater?: Updater; // self-update from the app (update.ts); absent means the routes answer 501
 	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
 	watch?: WatchService; // the Pebble watch API; absent means /api/watch/* answers 503
-	secrets?: WatchSecrets; // the watch bearer token and Index 01 secret
 	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
 	now?: () => number;
 }
@@ -55,7 +53,6 @@ export function createHubServer(deps: HubDeps): Server {
 
 		if (m === "GET" && p === "/api/health") {
 			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: deps.push?.publicKey ?? null };
-			if (deps.secrets) body.watch = { token: deps.secrets.token, indexSecret: deps.secrets.indexSecret };
 			return sendJson(res, 200, body, cors);
 		}
 		if (p === "/api/update") {
@@ -230,32 +227,27 @@ export function createHubServer(deps: HubDeps): Server {
 			}
 			const path = new URL(req.url ?? "/", "http://hub").pathname;
 			if (path.startsWith("/api/watch/")) {
-				// The watch has no Origin; it proves itself with the bearer token instead.
+				// The watch has no Origin; the tailnet identity alone lets it in (auth.ts).
 				// Identity first, so a stranger can't tell whether the watch API is configured.
 				const identity = checkHostAndLogin(cfg, req.headers);
 				if (!identity.ok) {
 					log(`rejected ${req.method} ${req.url}: ${identity.reason}`);
 					throw new HttpError(403, "Forbidden");
 				}
-				if (!deps.watch || !deps.secrets) throw new HttpError(503, "Watch API isn't set up on this hub");
-				const watchAuth = checkWatchRequest(cfg, req.headers, deps.secrets.token);
-				if (!watchAuth.ok) {
-					log(`rejected ${req.method} ${req.url}: ${watchAuth.reason}`);
-					throw new HttpError(403, "Forbidden");
-				}
+				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
 				const url = new URL(req.url ?? "/", "http://hub");
 				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
 				return;
 			}
 			if (req.method === "POST" && path === "/api/index/webhook") {
-				// The ring has no Origin or bearer; its HMAC (checked in the handler) stands in for both.
+				// The ring has no Origin either; same rule as the watch routes.
 				const identity = checkHostAndLogin(cfg, req.headers);
 				if (!identity.ok) {
 					log(`rejected ${req.method} ${req.url}: ${identity.reason}`);
 					throw new HttpError(403, "Forbidden");
 				}
-				if (!deps.watch || !deps.secrets) throw new HttpError(503, "Watch API isn't set up on this hub");
-				await handleIndexWebhook(req, res, { watch: deps.watch, secret: deps.secrets.indexSecret, dataDir: cfg.dataDir, replays, now: deps.now, log });
+				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
+				await handleIndexWebhook(req, res, { watch: deps.watch, dataDir: cfg.dataDir, replays, now: deps.now, log });
 				return;
 			}
 			const auth = checkRequest(cfg, req.headers);

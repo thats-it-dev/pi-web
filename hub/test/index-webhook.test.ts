@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,7 +7,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import type { Dialog } from "../../shared/src/protocol.ts";
 import type { HubConfig } from "../src/config.ts";
-import { type IndexHeaders, ReplayCache, handleIndexWebhook, readIndexHeaders, signIndex, verifyIndex } from "../src/index-webhook.ts";
+import { type IndexHeaders, ReplayCache, handleIndexWebhook, readIndexHeaders, verifyIndex } from "../src/index-webhook.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { createHubServer } from "../src/server.ts";
@@ -16,48 +15,30 @@ import { SessionIndex } from "../src/sessions.ts";
 import { WatchService } from "../src/watch.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
-const body = Buffer.from("x");
-const secret = "s3c";
 const now = () => 1_700_000_000_000;
 const good = (over: Partial<IndexHeaders> = {}): IndexHeaders => ({
 	version: "1",
 	trigger: "single-click-hold",
-	timestamp: "1700000000",
 	delivery: "d-1",
-	signature: signIndex(secret, "1700000000", "d-1", "single-click-hold", false, body),
 	...over,
 });
 
-test("a correctly signed request passes once; the same delivery id is a 409 replay", () => {
+test("a request passes once; the same delivery id is a 409 replay", () => {
 	const cache = new ReplayCache(undefined, now);
-	assert.deepEqual(verifyIndex(good(), body, secret, cache, now), { ok: true, isTest: false });
-	const again = verifyIndex(good(), body, secret, cache, now);
-	assert.deepEqual(again, { ok: false, status: 409, reason: "Duplicate delivery" });
+	assert.deepEqual(verifyIndex(good(), cache), { ok: true, isTest: false });
+	assert.deepEqual(verifyIndex(good(), cache), { ok: false, status: 409, reason: "Duplicate delivery" });
 });
 
-test("test events sign with '1' and pass as isTest", () => {
-	const signature = signIndex(secret, "1700000000", "d-1", "test-event", true, body);
-	const h = good({ test: "true", trigger: "test-event", signature });
-	assert.deepEqual(verifyIndex(h, body, secret, new ReplayCache(), now), { ok: true, isTest: true });
-	const wrong = good({ test: "true", trigger: "test-event" });
-	assert.equal(verifyIndex(wrong, body, secret, new ReplayCache(), now).ok, false);
+test("a test event passes as isTest; a missing delivery id is accepted and never a replay", () => {
+	const cache = new ReplayCache(undefined, now);
+	assert.deepEqual(verifyIndex(good({ test: "true", trigger: "test-event" }), cache), { ok: true, isTest: true });
+	assert.deepEqual(verifyIndex(good({ delivery: undefined }), cache), { ok: true, isTest: false });
+	assert.deepEqual(verifyIndex(good({ delivery: undefined }), cache), { ok: true, isTest: false });
 });
 
-test("wrong version, stale timestamp, bad and missing signature, bad timestamp", () => {
-	const run = (h: IndexHeaders) => verifyIndex(h, body, secret, new ReplayCache(), now);
-	assert.deepEqual(run(good({ version: "2" })), { ok: false, status: 400, reason: "Unsupported webhook version" });
-	const stale = signIndex(secret, "1699999699", "d-1", "single-click-hold", false, body);
-	assert.deepEqual(run(good({ timestamp: "1699999699", signature: stale })), { ok: false, status: 401, reason: "Expired request" });
-	const edge = signIndex(secret, "1699999700", "d-1", "single-click-hold", false, body);
-	assert.equal(run(good({ timestamp: "1699999700", signature: edge })).ok, true);
-	assert.deepEqual(run(good({ signature: "00" })), { ok: false, status: 401, reason: "Invalid signature" });
-	assert.deepEqual(run(good({ signature: undefined })), { ok: false, status: 401, reason: "Missing signature" });
-	assert.deepEqual(run(good({ timestamp: "abc" })), { ok: false, status: 400, reason: "Invalid timestamp" });
-});
-
-test("signIndex matches the documented prefix", () => {
-	const want = createHmac("sha256", secret).update(Buffer.concat([Buffer.from("v1\n1700000000\nd-1\nsingle-click-hold\n0\n", "utf8"), body])).digest("hex");
-	assert.equal(signIndex(secret, "1700000000", "d-1", "single-click-hold", false, body), want);
+test("a wrong version is 400; signature and timestamp headers are ignored", () => {
+	assert.deepEqual(verifyIndex(good({ version: "2" }), new ReplayCache()), { ok: false, status: 400, reason: "Unsupported webhook version" });
+	assert.deepEqual(verifyIndex(good({ signature: "00", timestamp: "abc" }), new ReplayCache()), { ok: true, isTest: false });
 });
 
 test("replay cache forgets ids after the ttl", () => {
@@ -89,7 +70,6 @@ const root = mkdtempSync(join(tmpdir(), "pi-web-index-"));
 mkdirSync(join(root, "sessions"));
 const cfg: HubConfig = { port: 0, hostname: "hub.test:7878", allowedLogin: "me@github", allowedOrigins: ["https://pi.thatsit.app"], idleMinutes: 20, maxHeadless: 6, piBin: "pi", dev: false, approvalMode: "manual", dataDir: root };
 const RING = { host: "hub.test:7878", "tailscale-user-login": "me@github" };
-const secrets = { token: "t0k", indexSecret: secret };
 const logs: string[] = [];
 let n = 0;
 const created: FakeHandle[] = [];
@@ -101,7 +81,7 @@ const registry = new Registry({
 	idleMs: 60_000,
 });
 const watch = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root });
-const server = createHubServer({ cfg, registry, index: idx, version: "t", home: root, log: (m) => logs.push(m), watch, secrets, now });
+const server = createHubServer({ cfg, registry, index: idx, version: "t", home: root, log: (m) => logs.push(m), watch, now });
 const bare = createHubServer({ cfg, registry, index: idx, version: "t", home: root, log: () => {} });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 await new Promise<void>((r) => bare.listen(0, "127.0.0.1", r));
@@ -145,9 +125,7 @@ function signed(body: Buffer, o: { delivery?: string; test?: boolean; contentTyp
 			"content-type": o.contentType ?? `multipart/form-data; boundary=${BOUNDARY}`,
 			"x-index-webhook-version": "1",
 			"x-index-trigger": trigger,
-			"x-index-timestamp": "1700000000",
 			"x-index-delivery": delivery,
-			"x-index-signature": signIndex(secret, "1700000000", delivery, trigger, !!o.test, body),
 			...(o.test ? { "x-index-test": "true" } : {}),
 		} as Record<string, string>,
 	};
@@ -171,18 +149,16 @@ const settle = (h: FakeHandle) => {
 	h.fire({ type: "state_changed" });
 };
 
-test("rejects without the tailnet identity (403) and with a bad signature (401); a replayed delivery is 409", async () => {
-	const b = multipart({ transcription: "allow" });
+test("rejects without the tailnet identity (403) or with the wrong host; no signature is needed; a replayed delivery is 409", async () => {
+	const b = multipart({ transcription: "" });
 	const s = signed(b, { delivery: "rej-1" });
 	assert.equal((await post(port, { ...s.headers, "tailscale-user-login": "" }, b)).status, 403);
-	assert.equal((await post(port, { ...s.headers, "x-index-signature": "00" }, b)).status, 401);
-	assert.equal((await post(port, { ...s.headers, "x-index-signature": "00" }, b)).body, JSON.stringify({ error: "Invalid signature" }));
+	assert.equal((await post(port, { ...s.headers, host: "evil.test" }, b)).status, 403);
 	assert.equal((await post((bare.address() as AddressInfo).port, s.headers, b)).status, 503);
-	const emptyB = multipart({ transcription: "" });
-	const e = signed(emptyB, { delivery: "rej-2" });
-	assert.equal((await post(port, e.headers, emptyB)).status, 200);
-	assert.equal((await post(port, e.headers, emptyB)).status, 409);
-	assert.ok(logs.some((l) => l === "index: rejected (Invalid signature)"));
+	assert.equal((await post(port, { ...s.headers, "x-index-signature": "00" }, b)).status, 200);
+	assert.equal((await post(port, s.headers, b)).status, 409);
+	assert.equal((await post(port, s.headers, b)).body, JSON.stringify({ error: "Duplicate delivery" }));
+	assert.ok(logs.some((l) => l === "index: rejected (Duplicate delivery)"));
 });
 
 test("a test event is 200 with an empty body and writes nothing", async () => {
@@ -272,7 +248,7 @@ test("a pi failure is logged and still 200, with the sidecar recording the error
 	const failing = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root });
 	failing.startRingSession = async () => { throw new Error("pi is down"); };
 	const lines: string[] = [];
-	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: failing, secret, dataDir: root, replays: new ReplayCache(), now, log: (m) => lines.push(m) }));
+	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: failing, dataDir: root, replays: new ReplayCache(), now, log: (m) => lines.push(m) }));
 	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
 	const b = multipart({ transcription: "go" });
 	const s = signed(b);
@@ -303,7 +279,7 @@ test("a body over 25 MB is 413", async () => {
 
 test("only the newest `keep` deliveries are kept", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-index-keep-"));
-	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch, secret, dataDir: dir, replays: new ReplayCache(), now, keep: 2 }));
+	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch, dataDir: dir, replays: new ReplayCache(), now, keep: 2 }));
 	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
 	for (const d of ["k-1", "k-2", "k-3"]) {
 		const b = multipart({ transcription: "" }, Buffer.from(d));

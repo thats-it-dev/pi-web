@@ -30,8 +30,7 @@ const cfg: HubConfig = {
 	dataDir: root,
 };
 const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };
-const WATCH = { host: "hub.test:7878", "tailscale-user-login": "me@github", authorization: "Bearer t0k" };
-const secrets = { token: "t0k", indexSecret: "s3c" };
+const WATCH = { host: "hub.test:7878", "tailscale-user-login": "me@github" };
 
 let n = 0;
 const index = new SessionIndex(join(root, "sessions"));
@@ -46,7 +45,7 @@ const fetchFn = (async (input: string | URL | Request) => {
 	if (upstream === "fail") return new Response("no", { status: 500 });
 	return new Response(JSON.stringify({ current: { temperature_2m: 11.5, weather_code: 3 } }), { status: 200 });
 }) as typeof fetch;
-const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch, secrets, fetchFn, now: () => clock });
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch, fetchFn, now: () => clock });
 const bare = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {} });
 let port = 0;
 let barePort = 0;
@@ -74,10 +73,11 @@ async function raise(existing?: FakeHandle): Promise<{ h: FakeHandle; requestId:
 	return { h, requestId: `dialog:${h.sessionId}:d1` };
 }
 
-test("watch routes need the bearer token and not an Origin; other routes still need an Origin", async () => {
-	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, authorization: undefined })).status, 403);
-	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, authorization: "Bearer nope" })).status, 403);
+test("watch routes need the tailnet identity and not an Origin; other routes still need an Origin", async () => {
+	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, "tailscale-user-login": undefined })).status, 403);
+	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, host: "evil.test" })).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch/pending", WATCH)).status, 200);
+	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, origin: "https://evil.example" })).status, 200);
 	assert.equal((await call(port, "GET", "/api/sessions", WATCH)).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch/nothing", WATCH)).status, 404);
 	assert.equal((await call(barePort, "GET", "/api/watch/pending", WATCH)).status, 503);
@@ -161,10 +161,9 @@ test("showing, dismiss, prompt, model, sessions, history, models round-trip", as
 	assert.ok(Array.isArray(models.body.models));
 });
 
-test("health carries the watch token and index secret, and watch/health the counts", async () => {
+test("health carries no watch secrets; watch/health carries the counts", async () => {
 	const r = await call(port, "GET", "/api/health", GOOD);
-	assert.deepEqual(r.body.watch, { token: "t0k", indexSecret: "s3c" });
-	assert.equal((await call(barePort, "GET", "/api/health", GOOD)).body.watch, undefined);
+	assert.equal(r.body.watch, undefined);
 	const w = await call(port, "GET", "/api/watch/health", WATCH);
 	assert.deepEqual([w.status, w.body.ok, w.body.hubVersion], [200, true, "0.1.0-test"]);
 	assert.deepEqual(Object.keys(w.body.sessions).sort(), ["pending", "running"]);

@@ -4,9 +4,9 @@ The hub serves a small HTTP API under `/api/watch/*` for the Pebble watch, by wa
 
 ## Auth
 
-Callers have no `Origin`. Every request needs the Tailscale identity (the `Host` header must be the hub's hostname and `Tailscale-User-Login` must be the allowed login), then, for `/api/watch/*`, `Authorization: Bearer <token>`. Anything that fails answers `403`. If the hub has no watch service it answers `503` once the identity check passes. The webhook skips the bearer token and is signed instead (see below).
+Callers have no `Origin`. Every request needs the Tailscale identity: the `Host` header must be the hub's hostname and `Tailscale-User-Login` must be the allowed login. tailscale serve adds that header to any request from a tailnet device logged in as you, so the face, the app and the ring need only the hub's address. Anything that fails answers `403`. If the hub has no watch service it answers `503` once the identity check passes.
 
-The hub makes the token and the Index secret on first start and keeps them in `<dataDir>/watch.json` (`~/.config/pi-web/watch.json`, or `$PI_WEB_DATA_DIR`) as `token` and `indexSecret`. The app's settings page shows both. Deleting the file makes new ones, and the watch and ring must then be set up again.
+There is no token and no webhook signing. That means anything running on one of your tailnet devices, including a web page in a browser there that knows the hub's hostname, can use these routes as you. That is the trade chosen for a single-user tailnet; the earlier token-and-signature version is in git history if it is ever wanted back.
 
 Do this once in the Pebble app: mute pi-web in its notification settings. The hub already pushes to the phone, and without the mute each request arrives twice.
 
@@ -27,7 +27,7 @@ All bodies are JSON. Success is `200`. A bad body or query answers `400`.
 | POST | `/api/watch/dismiss` | `{ requestId }` | `{ ok: true }` | |
 | POST | `/api/watch/prompt` | `{ sessionId, text }` | same as answer | |
 | POST | `/api/watch/model` | `{ sessionId, provider, modelId }` | `{ ok: true }` | `409` if the session refuses |
-| POST | `/api/index/webhook` | multipart, signed | empty `200` | `400`, `401`, `409`, `413` |
+| POST | `/api/index/webhook` | multipart | empty `200` | `400`, `409`, `413` |
 
 A `WatchRequest` is `{ id, kind, sessionId, sessionTitle, tool, message, options, method, createdAt }`. `kind` is `dialog`, `finished` or `error`, and `id` is `dialog:<sessionId>:<dialogId>`, `finished:<sessionId>:<messageIndex>` or `error:<sessionId>:<messageIndex>`. A `WatchSession` is `{ id, title, state, live, model, contextPercent, contextTokens, contextWindow, tps, updatedAt }`.
 
@@ -50,19 +50,12 @@ The ring posts a `multipart/form-data` body to `POST /api/index/webhook` (up to 
 | --- | --- |
 | `X-Index-Webhook-Version` | must be `1` (else `400`) |
 | `X-Index-Trigger` | what started the recording |
-| `X-Index-Test` | `true` for a test event, which is verified and then ignored |
-| `X-Index-Timestamp` | Unix seconds, integer |
-| `X-Index-Delivery` | a unique id per delivery |
-| `X-Index-Signature` | lowercase hex HMAC-SHA-256 |
+| `X-Index-Test` | `true` for a test event, which is accepted and then ignored |
+| `X-Index-Delivery` | a unique id per delivery; one seen in the last hour is `409` |
+| `X-Index-Timestamp`, `X-Index-Signature` | read into the sidecar, not checked |
 | `X-Audio-Size` | audio size (read, not checked) |
 
-The signature is HMAC-SHA-256, keyed with `indexSecret` as the literal hex string (not decoded), over the prefix bytes followed by the raw request body:
-
-```
-v1\n<timestamp>\n<delivery>\n<trigger>\n<1 if X-Index-Test is "true", else 0>\n
-```
-
-Each `\n` is a single newline byte. A missing signature, timestamp or delivery is `401`; a bad timestamp is `400`. A timestamp more than 300 seconds from the hub's clock is `401` "Expired request". A wrong signature is `401`. A delivery id seen in the last hour is `409`.
+Leave "Sign requests" off in the Index app; a signature is ignored if sent.
 
 The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. The transcription is trimmed and cut to 8000 characters. The hub then picks an outcome:
 
@@ -74,48 +67,42 @@ The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`.
 | `kept_audio` | the transcription was empty, so only the audio is kept |
 | `error` | deciding failed; `reason` holds the message |
 
-Once the signature checks out, the hub answers `200` whatever the outcome. Each delivery is stored in `<dataDir>/index/` as `<delivery>.m4a` (when there was audio) and `<delivery>.json` (headers without the signature, transcription, `recordedAt`, `client`, `action`, and `sessionId`, `requestId` or `reason` where they apply). The newest 200 are kept.
+Once the headers pass, the hub answers `200` whatever the outcome. Each delivery is stored in `<dataDir>/index/` as `<delivery>.m4a` (when there was audio) and `<delivery>.json` (headers without the signature, transcription, `recordedAt`, `client`, `action`, and `sessionId`, `requestId` or `reason` where they apply). The newest 200 are kept.
 
 ## Examples
 
-Set the host and token once. Every call needs the tailnet identity, so run these from a device on the tailnet that `tailscale serve` recognises as you.
+Set the host once. Every call needs the tailnet identity, so run these from a device on the tailnet that `tailscale serve` recognises as you.
 
 ```bash
 HOST=https://<hostname>
-TOKEN=$(jq -r .token ~/.config/pi-web/watch.json)
 ```
 
 Wait up to 25 seconds for something new (start with `since=0`, then pass back the `cursor` you got):
 
 ```bash
-curl -sS -H "Authorization: Bearer $TOKEN" "$HOST/api/watch/pending?since=0&wait=1"
+curl -sS "$HOST/api/watch/pending?since=0&wait=1"
 ```
 
 Answer a dialog with one of its options (the id comes from `requests[].id`):
 
 ```bash
 curl -sS -X POST "$HOST/api/watch/answer" \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" \
   -d '{"requestId":"dialog:<sessionId>:<dialogId>","option":"Allow"}'
 ```
 
-Send a signed webhook. Write the body to a file first so the signature and the request cover the same bytes:
+Send a webhook as the ring would:
 
 ```bash
-SECRET=$(jq -r .indexSecret ~/.config/pi-web/watch.json)
-TS=$(date +%s); DELIVERY=$(uuidgen); TRIGGER=button; TEST=0   # TEST=1 if you send X-Index-Test: true
+DELIVERY=$(uuidgen); TRIGGER=single-click-hold
 
 printf -- '--b\r\nContent-Disposition: form-data; name="transcription"\r\n\r\nyes\r\n--b--\r\n' > body.bin
-
-{ printf 'v1\n%s\n%s\n%s\n%s\n' "$TS" "$DELIVERY" "$TRIGGER" "$TEST"; cat body.bin; } > signed.bin
-SIG=$(openssl dgst -sha256 -hmac "$SECRET" -r signed.bin | cut -d' ' -f1)
 
 curl -sS -i -X POST "$HOST/api/index/webhook" \
   -H "Content-Type: multipart/form-data; boundary=b" \
   -H "X-Index-Webhook-Version: 1" -H "X-Index-Trigger: $TRIGGER" \
-  -H "X-Index-Timestamp: $TS" -H "X-Index-Delivery: $DELIVERY" \
-  -H "X-Index-Signature: $SIG" \
+  -H "X-Index-Delivery: $DELIVERY" \
   --data-binary @body.bin
 ```
 
-A `200` with an empty body means the signature passed; the outcome is in `<dataDir>/index/$DELIVERY.json`.
+A `200` with an empty body means it was accepted; the outcome is in `<dataDir>/index/$DELIVERY.json`. Sending the same `DELIVERY` again within an hour is `409`.

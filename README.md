@@ -95,7 +95,7 @@ The hub keeps its push keys in `~/.config/pi-web/vapid.json` and the subscribed 
 
 ## Watch
 
-The hub has an API for a Pebble watch: it lists the dialogs, finished runs and errors the watch may show, takes answers and prompts, and receives voice notes from an Index 01 ring. The app's settings page shows the watch token and the Index secret, which the hub makes on first start and keeps in `~/.config/pi-web/watch.json`. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [design spec](docs/superpowers/specs/2026-10-16-pebble-watch-design.md) for the plan.
+The hub has an API for a Pebble watch: it lists the dialogs, finished runs and errors the watch may show, takes answers and prompts, and receives voice notes from an Index 01 ring. It is open to anything on the tailnet logged in as you, with no extra token, so the face, the app and the ring need only the hub's address. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [design spec](docs/superpowers/specs/2026-10-16-pebble-watch-design.md) for the plan.
 
 ## Deploy
 

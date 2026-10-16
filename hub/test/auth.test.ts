@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkRequest, checkWatchRequest, corsHeaders } from "../src/auth.ts";
+import { checkRequest, corsHeaders } from "../src/auth.ts";
 
 const cfg = { hostname: "spark-713a.tail9274fa.ts.net:7878", allowedLogin: "michaelthatsit@github", allowedOrigins: ["https://pi.thatsit.app"] };
 const good = { origin: "https://pi.thatsit.app", host: "spark-713a.tail9274fa.ts.net:7878", "tailscale-user-login": "michaelthatsit@github" };
@@ -33,13 +33,3 @@ test("CORS headers only echo an allowed origin", () => {
 	assert.deepEqual(corsHeaders(cfg, undefined), {});
 });
 
-test("checkWatchRequest needs host, login and the bearer token, and ignores Origin", () => {
-	const cfg = { hostname: "hub.test:7878", allowedLogin: "me@github", allowedOrigins: ["https://pi.thatsit.app"] };
-	const good = { host: "hub.test:7878", "tailscale-user-login": "me@github", authorization: "Bearer t0k" };
-	assert.deepEqual(checkWatchRequest(cfg, good, "t0k"), { ok: true });
-	assert.deepEqual(checkWatchRequest(cfg, { ...good, origin: "https://evil.example" }, "t0k"), { ok: true });
-	assert.equal(checkWatchRequest(cfg, { ...good, authorization: "Bearer nope" }, "t0k").ok, false);
-	assert.equal(checkWatchRequest(cfg, { ...good, authorization: undefined }, "t0k").ok, false);
-	assert.equal(checkWatchRequest(cfg, { ...good, host: "evil.example" }, "t0k").ok, false);
-	assert.equal(checkWatchRequest(cfg, { ...good, "tailscale-user-login": "other@github" }, "t0k").ok, false);
-});
