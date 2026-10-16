@@ -6,16 +6,20 @@ import { type IncomingMessage, type Server, type ServerResponse, createServer } 
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
-import { checkRequest, corsHeaders } from "./auth.ts";
+import { checkRequest, checkWatchRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
+import { type Cors, readJson, sendJson } from "./http.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
 import { type PushStore, isSubscription } from "./push.ts";
 import type { Viewers } from "./push-watch.ts";
 import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 import type { Updater } from "./update.ts";
+import type { WatchService } from "./watch.ts";
+import { routeWatch } from "./watch-routes.ts";
+import type { WatchSecrets } from "./watch-secrets.ts";
 
 export interface HubDeps {
 	cfg: HubConfig;
@@ -28,10 +32,12 @@ export interface HubDeps {
 	viewers?: Viewers; // open apps; holds back push while there are any
 	updater?: Updater; // self-update from the app (update.ts); absent means the routes answer 501
 	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
+	watch?: WatchService; // the Pebble watch API; absent means /api/watch/* answers 503
+	secrets?: WatchSecrets; // the watch bearer token and Index 01 secret
+	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
+	now?: () => number;
 }
 
-type Cors = Record<string, string>;
-const MAX_BODY = 50 * 1024 * 1024; // prompts can carry images
 const SSE_PING_MS = 20_000;
 const FILE_RESULTS = 20;
 
@@ -47,6 +53,7 @@ export function createHubServer(deps: HubDeps): Server {
 
 		if (m === "GET" && p === "/api/health") {
 			const body: HealthInfo = { ok: true, login: String(req.headers["tailscale-user-login"]), hubVersion: deps.version, vapidPublicKey: deps.push?.publicKey ?? null };
+			if (deps.secrets) body.watch = { token: deps.secrets.token, indexSecret: deps.secrets.indexSecret };
 			return sendJson(res, 200, body, cors);
 		}
 		if (p === "/api/update") {
@@ -219,6 +226,19 @@ export function createHubServer(deps: HubDeps): Server {
 				res.end();
 				return;
 			}
+			const path = new URL(req.url ?? "/", "http://hub").pathname;
+			if (path.startsWith("/api/watch/")) {
+				// The watch has no Origin; it proves itself with the bearer token instead.
+				if (!deps.watch || !deps.secrets) throw new HttpError(503, "Watch API isn't set up on this hub");
+				const watchAuth = checkWatchRequest(cfg, req.headers, deps.secrets.token);
+				if (!watchAuth.ok) {
+					log(`rejected ${req.method} ${req.url}: ${watchAuth.reason}`);
+					throw new HttpError(403, "Forbidden");
+				}
+				const url = new URL(req.url ?? "/", "http://hub");
+				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
+				return;
+			}
 			const auth = checkRequest(cfg, req.headers);
 			if (!auth.ok) {
 				log(`rejected ${req.method} ${req.url}: ${auth.reason}`);
@@ -234,11 +254,6 @@ export function createHubServer(deps: HubDeps): Server {
 	});
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown, cors: Cors): void {
-	res.writeHead(status, { ...cors, "content-type": "application/json", "cache-control": "no-store" });
-	res.end(JSON.stringify(body));
-}
-
 function openSse(res: ServerResponse, cors: Cors) {
 	res.writeHead(200, { ...cors, "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-accel-buffering": "no" });
 	res.write(": connected\n\n");
@@ -251,22 +266,6 @@ function openSse(res: ServerResponse, cors: Cors) {
 			clearInterval(ping);
 		},
 	};
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-	const chunks: Buffer[] = [];
-	let size = 0;
-	for await (const chunk of req as AsyncIterable<Buffer>) {
-		size += chunk.length;
-		if (size > MAX_BODY) throw new HttpError(413, "Request too large");
-		chunks.push(chunk);
-	}
-	if (chunks.length === 0) return {};
-	try {
-		return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-	} catch {
-		throw new HttpError(400, "Invalid JSON");
-	}
 }
 
 function parseCommand(body: unknown): AppCommand {

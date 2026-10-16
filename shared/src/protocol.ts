@@ -257,6 +257,7 @@ export interface HealthInfo {
 	login: string;
 	hubVersion: string;
 	vapidPublicKey: string | null;
+	watch?: { token: string; indexSecret: string }; // for the app's settings, so it can show the watch pairing
 }
 
 // GET /api/update: where the hub's checkout stands against origin/master.

@@ -101,16 +101,24 @@ export class WatchService {
 		return { cursor: this.cursor, requests, showing: this.showingState?.requestId ?? null, sessions: this.sessionList() };
 	}
 
-	wait(since: number, maxMs = WAIT_MS): Promise<WatchPending> {
+	// An aborted signal drops the waiter and leaves the promise pending, so only abort for a caller that has gone.
+	wait(since: number, maxMs = WAIT_MS, signal?: AbortSignal): Promise<WatchPending> {
 		if (this.cursor > since || this.closed) return Promise.resolve(this.pending());
+		if (signal?.aborted) return new Promise(() => {});
 		return new Promise((resolve) => {
 			const done = (p: WatchPending) => {
 				clearTimeout(timer);
 				this.waiters.delete(done);
+				signal?.removeEventListener("abort", drop);
 				resolve(p);
+			};
+			const drop = () => {
+				clearTimeout(timer);
+				this.waiters.delete(done);
 			};
 			const timer = setTimeout(() => done(this.pending()), maxMs);
 			this.waiters.add(done);
+			signal?.addEventListener("abort", drop, { once: true });
 		});
 	}
 
