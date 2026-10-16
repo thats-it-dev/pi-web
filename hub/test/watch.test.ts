@@ -1,29 +1,68 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
-import type { AgentMessage, Dialog, LiveState } from "../../shared/src/protocol.ts";
+import type { AgentMessage, Dialog, LiveState, ModelInfo, PiEvent, SessionStats } from "../../shared/src/protocol.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { SessionIndex } from "../src/sessions.ts";
 import { WatchService } from "../src/watch.ts";
+import { closedSession, shortModel, turnsFrom } from "../src/watch-sessions.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
 function setup() {
+	const dir = mkdtempSync(join(tmpdir(), "watch-test-"));
+	const index = new SessionIndex(dir);
 	let n = 0;
 	const registry = new Registry({
-		factory: { startRpc: async (o) => new FakeHandle(`s-${++n}`, o.cwd) },
-		lookup: { find: async () => null },
+		// A reopened session keeps its id (its file is <id>.jsonl here); a new one gets s-<n>.
+		factory: { startRpc: async (o) => new FakeHandle(o.sessionFile ? basename(o.sessionFile, ".jsonl") : `s-${++n}`, o.cwd, o.sessionFile ?? null) },
+		lookup: index,
 		maxHeadless: 6,
 		idleMs: 60_000,
 	});
-	const dir = mkdtempSync(join(tmpdir(), "watch-test-"));
 	const clock = { t: 1000 };
 	const viewers = new Viewers();
-	const svc = new WatchService({ registry, index: new SessionIndex(dir), viewers, home: dir, now: () => clock.t });
-	return { registry, viewers, svc, clock };
+	const svc = new WatchService({ registry, index, viewers, home: dir, now: () => clock.t });
+	return { registry, viewers, svc, clock, dir };
 }
+
+// A closed session file in the index: header, then one user/assistant exchange per prompt.
+function writeSession(dir: string, id: string, o: { mtime: number; model?: string; prompts?: string[]; name?: string }): void {
+	const sub = join(dir, "--work-proj--");
+	mkdirSync(sub, { recursive: true });
+	const [provider, modelId] = (o.model ?? "ollama/qwen3:32b").split("/");
+	const lines: object[] = [{ type: "session", id, cwd: "/work/proj", timestamp: new Date(0).toISOString() }];
+	if (o.name) lines.push({ type: "session_info", name: o.name });
+	let parent: string | null = null;
+	let k = 0;
+	for (const text of o.prompts ?? ["hello"]) {
+		const u = `e${++k}`;
+		lines.push({ type: "message", id: u, parentId: parent, message: user(text) });
+		const a = `e${++k}`;
+		lines.push({ type: "message", id: a, parentId: u, message: { role: "assistant", provider, model: modelId, content: [{ type: "text", text: `re: ${text}` }], usage: { input: 50_000, output: 2_000, cacheRead: 0, cacheWrite: 0 }, stopReason: "stop" } });
+		parent = a;
+	}
+	const file = join(sub, `${id}.jsonl`);
+	writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+	utimesSync(file, o.mtime / 1000, o.mtime / 1000);
+}
+
+const stats = (tokens: number, contextWindow: number, percent: number): SessionStats => ({
+	userMessages: 1,
+	assistantMessages: 1,
+	toolCalls: 0,
+	toolResults: 0,
+	totalMessages: 2,
+	tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	cost: 0,
+	contextUsage: { tokens, contextWindow, percent },
+});
+
+const model = (provider: string, id: string, name = id): ModelInfo => ({ id, name, provider, reasoning: false, input: ["text"], contextWindow: 128_000, maxTokens: 8_000 } as ModelInfo);
+
+const ev = (e: PiEvent) => ({ type: "event" as const, event: e });
 
 const user = (text: string): AgentMessage => ({ role: "user", content: [{ type: "text", text }] });
 const reply = (stopReason = "stop"): AgentMessage => ({ role: "assistant", content: [{ type: "text", text: "done" }], stopReason });
@@ -398,5 +437,250 @@ test("opening or closing an app wakes waiters", async () => {
 	const w2 = svc.wait(svc.pending().cursor, 2000);
 	leave();
 	assert.ok((await w2).cursor > c0 + 1);
+	svc.close();
+});
+
+test("sessions: live rpc sessions first by updatedAt, then closed ones capped at 20, with short model names and context percent", async () => {
+	const { registry, svc, dir } = setup();
+	for (let i = 0; i < 25; i++) writeSession(dir, `disk-${i}`, { mtime: 1_700_000_000_000 + i * 1000, prompts: [`task ${i}\nmore detail`] });
+	const a = await session(registry);
+	a.lastActive = 10;
+	a.stats = stats(52_000, 128_000, 40.6);
+	a.model = model("ollama", "qwen3:32b");
+	const b = await session(registry);
+	b.lastActive = 20;
+	const list = await svc.sessions();
+	assert.equal(list.length, 22);
+	assert.deepEqual(
+		list.slice(0, 2).map((s) => s.id),
+		["s-2", "s-1"],
+	);
+	assert.deepEqual(list[1], { id: "s-1", title: "proj", state: "idle", live: true, model: "qwen3", contextPercent: 41, contextTokens: 52_000, contextWindow: 128_000, tps: null, updatedAt: 10 });
+	assert.equal(list[0]!.contextPercent, null);
+	const closed = list.slice(2);
+	assert.equal(closed.length, 20);
+	assert.deepEqual(closed[0], { id: "disk-24", title: "task 24", state: "idle", live: false, model: "qwen3", contextPercent: null, contextTokens: 52_000, contextWindow: null, tps: null, updatedAt: 1_700_000_024_000 });
+	assert.equal(closed.at(-1)!.id, "disk-5");
+	assert.ok(closed.every((s) => !s.live && s.contextPercent === null && s.contextTokens === 52_000));
+	svc.close();
+});
+
+test("sessions: a live session is not listed again as closed; the long-poll carries the same list", async () => {
+	const { registry, svc, dir } = setup();
+	writeSession(dir, "disk-1", { mtime: 1_700_000_000_000 });
+	writeSession(dir, "disk-2", { mtime: 1_700_000_001_000, name: "release prep" });
+	await registry.ensure("disk-1");
+	const list = await svc.sessions();
+	assert.deepEqual(
+		list.map((s) => [s.id, s.live, s.title]),
+		[
+			["disk-1", true, "proj"], // a fake handle starts with an empty conversation
+			["disk-2", false, "release prep"],
+		],
+	);
+	assert.deepEqual(svc.pending().sessions, list);
+	svc.close();
+});
+
+test("tps is null before any reply, a number while one streams, and keeps the last reply's figure after", async () => {
+	const { registry, svc, clock } = setup();
+	const h = await session(registry);
+	const other = await session(registry);
+	await tick();
+	const tps = async () => (await svc.sessions()).find((s) => s.id === "s-1")!.tps;
+	assert.equal(await tps(), null);
+	h.push(ev({ type: "message_start", message: { role: "assistant", content: [] } }));
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "" } }));
+	clock.t = 2000;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x".repeat(400) } }));
+	assert.equal(await tps(), 100);
+	clock.t = 3000;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x".repeat(400) } }));
+	h.push(ev({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "x".repeat(800) }], stopReason: "stop" } }));
+	clock.t = 60_000;
+	assert.equal(await tps(), 100);
+	assert.equal((await svc.sessions()).find((s) => s.id === "s-2")!.tps, null);
+
+	// Streaming wakes pollers only for the session the watch shows, at most once a second.
+	svc.showing(null, "s-1");
+	await tick();
+	const c0 = svc.pending().cursor;
+	other.push(ev({ type: "message_start", message: { role: "assistant", content: [] } }));
+	other.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "abcd" } }));
+	await tick();
+	assert.equal(svc.pending().cursor, c0);
+	h.push(ev({ type: "message_start", message: { role: "assistant", content: [] } }));
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "abcd" } }));
+	await tick();
+	assert.equal(svc.pending().cursor, c0 + 1);
+	clock.t = 60_500;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "abcd" } }));
+	await tick();
+	assert.equal(svc.pending().cursor, c0 + 1);
+	clock.t = 61_000;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "abcd" } }));
+	await tick();
+	assert.equal(svc.pending().cursor, c0 + 2);
+	svc.close();
+});
+
+test("context percent falls back to the live estimate when the handle's stats have none", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	await tick();
+	h.push({ type: "meta", state: h.snapshot().state, stats: stats(32_000, 128_000, 25), statuses: {} } as never);
+	const s = (await svc.sessions())[0]!;
+	assert.equal(s.contextPercent, 25);
+	svc.close();
+});
+
+test("a handle that goes away stops being observed", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	await svc.sessions();
+	assert.equal(h.observerCount(), 1);
+	registry.close("s-1");
+	assert.equal(h.observerCount(), 0);
+	svc.close();
+});
+
+test("shortModel takes the part after the last slash, cut at the first colon", () => {
+	assert.equal(shortModel("ollama/qwen3:32b"), "qwen3");
+	assert.equal(shortModel("anthropic/claude-opus-5-5"), "claude-opus-5-5");
+	assert.equal(shortModel("qwen3"), "qwen3");
+	assert.equal(shortModel(null), null);
+});
+
+test("closedSession titles: name, else first prompt line, else the folder; clipped to 60", () => {
+	const base = { id: "x", file: "/f", cwd: "/work/proj", name: null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: 0, updatedAt: 0, parentSession: null };
+	assert.equal(closedSession({ ...base, name: "named", firstPrompt: "p" }).title, "named");
+	assert.equal(closedSession({ ...base, firstPrompt: "line one\nline two" }).title, "line one");
+	assert.equal(closedSession(base).title, "proj");
+	assert.equal(closedSession({ ...base, name: "n".repeat(80) }).title, `${"n".repeat(59)}…`);
+});
+
+test("turnsFrom: user → you, assistant text → agent, toolCall blocks → tool lines 'name · first arg line', toolResult messages skipped, text clipped to 240 chars", () => {
+	const long = "y".repeat(300);
+	const messages: AgentMessage[] = [
+		{ role: "user", content: "fix it" },
+		{
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "hmm" },
+				{ type: "text", text: "On it." },
+				{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "git push\n--force" } },
+				{ type: "toolCall", id: "t2", name: "read", arguments: { path: "src/a.ts" } },
+				{ type: "toolCall", id: "t3", name: "grep", arguments: { pattern: "x" } },
+			],
+		},
+		{ role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "ok" }] },
+		{ role: "assistant", content: [{ type: "toolCall", id: "t4", name: "bash", arguments: {} }] },
+		{ role: "bashExecution", command: "ls", output: "a" },
+		{ role: "compactionSummary", summary: "s" },
+		{ role: "assistant", content: [{ type: "text", text: long }] },
+	];
+	assert.deepEqual(turnsFrom(messages, { t4: { name: "bash", args: { command: "npm test" }, running: false } }), [
+		{ i: 0, role: "you", text: "fix it" },
+		{ i: 1, role: "agent", text: "On it." },
+		{ i: 2, role: "tool", text: "bash · git push" },
+		{ i: 3, role: "tool", text: "read · src/a.ts" },
+		{ i: 4, role: "tool", text: 'grep · {"pattern":"x"}' },
+		{ i: 5, role: "tool", text: "bash · npm test" },
+		{ i: 6, role: "agent", text: `${"y".repeat(239)}…` },
+	]);
+});
+
+test("history pages backwards: before=undefined gives the last `limit` turns with total; before=i gives the `limit` before i", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	for (let i = 0; i < 15; i++) h.conv.messages.push(user(`q${i}`), { role: "assistant", content: [{ type: "text", text: `a${i}` }] });
+	const last = await svc.history("s-1");
+	assert.equal(last.total, 30);
+	assert.deepEqual(
+		last.turns.map((t) => [t.i, t.text]),
+		Array.from({ length: 12 }, (_, k) => [18 + k, k % 2 ? `a${9 + (k >> 1)}` : `q${9 + (k >> 1)}`]),
+	);
+	const page = await svc.history("s-1", 18, 5);
+	assert.deepEqual(
+		page.turns.map((t) => t.i),
+		[13, 14, 15, 16, 17],
+	);
+	assert.deepEqual((await svc.history("s-1", 3)).turns.map((t) => t.i), [0, 1, 2]);
+	await assert.rejects(svc.history("nope"), (e: { status?: number }) => e.status === 404);
+	svc.close();
+});
+
+test("history of a closed session reads the file", async () => {
+	const { svc, dir } = setup();
+	writeSession(dir, "disk-1", { mtime: 1_700_000_000_000, prompts: ["first", "second"] });
+	assert.deepEqual(await svc.history("disk-1"), {
+		total: 4,
+		turns: [
+			{ i: 0, role: "you", text: "first" },
+			{ i: 1, role: "agent", text: "re: first" },
+			{ i: 2, role: "you", text: "second" },
+			{ i: 3, role: "agent", text: "re: second" },
+		],
+	});
+	svc.close();
+});
+
+test("models lists the handle's models and marks the current one; setModel sends set_model", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	h.models = [model("ollama", "qwen3:32b", "Qwen3 32B"), model("anthropic", "claude-opus-5-5", "Claude Opus 5.5")];
+	h.model = h.models[1]!;
+	assert.deepEqual(await svc.models("s-1"), {
+		current: { provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+		models: [
+			{ provider: "ollama", id: "qwen3:32b", name: "Qwen3 32B" },
+			{ provider: "anthropic", id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+		],
+	});
+	h.model = null;
+	assert.equal((await svc.models("s-1")).current, null);
+	await svc.setModel("s-1", "ollama", "qwen3:32b");
+	assert.deepEqual(h.received.at(-1), { type: "set_model", provider: "ollama", modelId: "qwen3:32b" });
+	await assert.rejects(svc.models("nope"), (e: { status?: number }) => e.status === 404);
+	svc.close();
+});
+
+test("prompt to a closed session reopens it through registry.ensure", async () => {
+	const { registry, svc, dir } = setup();
+	writeSession(dir, "disk-1", { mtime: 1_700_000_000_000 });
+	assert.deepEqual(await svc.prompt("disk-1", "carry on"), { ok: true });
+	const h = registry.get("disk-1") as FakeHandle;
+	assert.deepEqual(h.received, [{ type: "prompt", text: "carry on", mode: "send" }]);
+	svc.close();
+});
+
+test("prompt or answer on a session nobody can find returns gone; other failures still throw", async () => {
+	const { registry, svc } = setup();
+	assert.deepEqual(await svc.prompt("nope", "hi"), { ok: false, reason: "gone" });
+	const h = await session(registry);
+	await run(h);
+	registry.close("s-1");
+	// The finished request outlives its handle; the session has no file, so it cannot be reopened.
+	assert.deepEqual(await svc.answer("finished:s-1:1", { text: "more" }), { ok: false, reason: "gone" });
+	const g = await session(registry);
+	g.command = async () => ({ ok: false, error: "busy" });
+	await assert.rejects(svc.prompt("s-2", "hi"), (e: { status?: number }) => e.status === 409);
+	svc.close();
+});
+
+test("prompt keeps an outcome that lands while the prompt is being sent", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	await run(h);
+	assert.deepEqual(svc.pending().requests.map((r) => r.id), ["finished:s-1:1"]);
+	const send = h.command.bind(h);
+	h.command = async (cmd) => {
+		const res = await send(cmd);
+		// A fast reply: the turn runs and finishes before the send resolves.
+		await run(h);
+		return res;
+	};
+	await svc.prompt("s-1", "again");
+	assert.deepEqual(svc.pending().requests.map((r) => r.id), ["finished:s-1:3"]);
 	svc.close();
 });

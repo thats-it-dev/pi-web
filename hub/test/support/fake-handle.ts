@@ -1,4 +1,4 @@
-import type { AppCommand, Capabilities, CommandResult, Dialog, HandleKind, LiveState, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, Dialog, HandleKind, LiveState, ModelInfo, SessionStats, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import type { PendingTool } from "../../src/auto-approve.ts";
 import type { HandleEvent, SessionHandle } from "../../src/handle.ts";
@@ -27,6 +27,10 @@ export class FakeHandle implements SessionHandle {
 	dialogs: Dialog[] = [];
 	/** What pendingTool() returns. */
 	pendingToolValue: PendingTool | null = null;
+	/** What snapshot().stats, .models and .state.model return. */
+	stats: SessionStats | null = null;
+	models: ModelInfo[] = [];
+	model: ModelInfo | null = null;
 	private listeners = new Set<(e: HandleEvent) => void>();
 
 	constructor(sessionId: string, cwd = "/tmp", sessionFile: string | null = null, opts: { kind?: HandleKind; pid?: number } = {}) {
@@ -44,6 +48,9 @@ export class FakeHandle implements SessionHandle {
 	subscriberCount(): number {
 		return this.subs.size;
 	}
+	observerCount(): number {
+		return this.observers.size;
+	}
 	isBusy(): boolean {
 		return this.busy;
 	}
@@ -58,9 +65,9 @@ export class FakeHandle implements SessionHandle {
 			handleKind: this.kind,
 			capabilities: this.capabilities,
 			conv: this.conv,
-			state: { model: null, thinkingLevel: "off", isStreaming: false, isCompacting: false, sessionId: this.sessionId, messageCount: 0, pendingMessageCount: 0, autoCompactionEnabled: true },
-			stats: null,
-			models: [],
+			state: { model: this.model, thinkingLevel: "off", isStreaming: false, isCompacting: false, sessionId: this.sessionId, messageCount: 0, pendingMessageCount: 0, autoCompactionEnabled: true },
+			stats: this.stats,
+			models: this.models,
 			thinkingLevels: ["off"],
 			commands: [],
 			dialogs: this.dialogs,
