@@ -142,8 +142,7 @@ export class WatchService {
 				const conv = h.snapshot().conv;
 				if (conv.streaming) {
 					const t = this.tracked.get(h);
-					if (t) t.textAt = this.now();
-					this.emitText(next, contentText(conv.partial?.content ?? ""), true);
+					if (this.emitText(next, contentText(conv.partial?.content ?? ""), true) && t) t.textAt = this.now();
 				}
 			}
 		}
@@ -325,8 +324,7 @@ export class WatchService {
 						this.changed();
 					} else if (shown && m.event.type === "message_end") this.changed();
 					if (shown && m.event.type === "message_update" && this.now() - t.textAt >= TEXT_TICK_MS) {
-						t.textAt = this.now();
-						this.emitText(h.sessionId, contentText(h.snapshot().conv.partial?.content ?? ""), true);
+						if (this.emitText(h.sessionId, contentText(h.snapshot().conv.partial?.content ?? ""), true)) t.textAt = this.now();
 					} else if (shown && m.event.type === "message_end" && m.event.message?.role === "assistant") {
 						t.textAt = -Infinity;
 						this.emitText(h.sessionId, contentText(m.event.message?.content ?? ""), false);
@@ -391,9 +389,14 @@ export class WatchService {
 		return t;
 	}
 
-	private emitText(sessionId: string, text: string, streaming: boolean): void {
-		const frame: WatchStreamFrame = { type: "text", sessionId, text: text.trim().slice(-TEXT_TAIL), streaming };
+	// An empty tail (thinking, a tool call) is not sent: it would blank the watch's last reply.
+	// Returns whether a frame went out.
+	private emitText(sessionId: string, text: string, streaming: boolean): boolean {
+		const tail = text.trim().slice(-TEXT_TAIL);
+		if (!tail) return false;
+		const frame: WatchStreamFrame = { type: "text", sessionId, text: tail, streaming };
 		for (const s of [...this.subscribers]) s(frame);
+		return true;
 	}
 
 	// Coalesces a burst of changes into one cursor bump and one wake-up.

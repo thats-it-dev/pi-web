@@ -811,3 +811,42 @@ test("message_end for a user or toolResult message sends no text frame", async (
 	assert.equal(frames.filter((f) => f.type === "text").length, 0);
 	svc.close();
 });
+
+test("an empty tail sends no text frame: thinking or tool-call-only partials, a tool-call-only message_end, showing mid-thought", async () => {
+	const { registry, svc, clock } = setup();
+	const h = await session(registry);
+	await tick();
+	h.conv.partial = { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }] } as AgentMessage;
+	h.conv.streaming = true;
+	const frames: WatchStreamFrame[] = [];
+	svc.subscribe((f) => frames.push(f));
+	const texts = () => frames.filter((f) => f.type === "text");
+	svc.showing(null, "s-1");
+	await tick();
+	assert.equal(texts().length, 0, "showing mid-thought sends no empty tail");
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "m" } } as PiEvent));
+	clock.t += 300;
+	h.conv.partial = { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }] } as AgentMessage;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "{" } } as PiEvent));
+	await tick();
+	assert.equal(texts().length, 0, "thinking and tool-call partials send nothing");
+	h.conv.partial = null;
+	h.conv.streaming = false;
+	h.push(ev({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "ls" } }], stopReason: "toolUse" } as AgentMessage }));
+	await tick();
+	assert.equal(texts().length, 0, "a tool-call-only message_end sends no final frame");
+
+	// Text then a tool call: the text still goes out, streaming and final, with no throttle left over.
+	const both = [{ type: "text", text: "Let me look." }, { type: "toolCall", id: "t2", name: "bash", arguments: { command: "ls" } }];
+	h.conv.partial = { role: "assistant", content: both } as AgentMessage;
+	h.conv.streaming = true;
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "." } } as PiEvent));
+	await tick();
+	assert.deepEqual(texts(), [{ type: "text", sessionId: "s-1", text: "Let me look.", streaming: true }]);
+	h.conv.partial = null;
+	h.conv.streaming = false;
+	h.push(ev({ type: "message_end", message: { role: "assistant", content: both, stopReason: "toolUse" } as AgentMessage }));
+	await tick();
+	assert.deepEqual(texts()[1], { type: "text", sessionId: "s-1", text: "Let me look.", streaming: false });
+	svc.close();
+});
