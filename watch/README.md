@@ -97,6 +97,15 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **Code size is memory (emulator).** The emulator copies the mod archive (`build/mods/<platform>/mc.xsa`) into RAM, and at launch the runtime mallocs a table the size of the archive's `MAPS` atom (2 bytes per identifier reference in the bytecode). A 51 KB archive with `MAPS` 7636 B failed at launch with `fxMapArchive failed` or `fxAbort memory full`; 41.5 KB with `MAPS` 5836 B boots. Keep the archive near 42 KB: screens swap without transitions (`piuView.js`), the Menu has no tweens, and list screens share `modules/ListScreen.js`. Lists are virtualised (`Menu.js` keeps only the rows that fit plus one, re-bound on scroll), and sessions/models rows stay raw strings until drawn (`m.rowAt`). On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 install.
 
+**The full build does not boot in the emulator (emulator-only limitation, since History).** With History the full archive is 45.7 KB (`MAPS` 6496 B) and launch stops at `fxMapArchive failed`. Measured on emery: a 42.8 KB archive boots, 42.9 KB does not, so the ceiling is about 42.8 KB with the current VM sizes; it also costs runtime heap, since every byte of the archive copy is a byte less C heap (the firmware's high-water mark was 120.0 KB of 122.1 KB with a 42.0 KB archive). To check a screen in the emulator, build a subset of the views and install it:
+
+```bash
+cd watch/app
+node dev/build-subset.mjs MenuView History    # Home is always in; then pebble install as usual
+```
+
+`dev/build-subset.mjs` writes a temporary manifest that lists only the named views, runs `pebble build`, and restores the real manifest (also on failure; never commit the temporary one). It removes `build/mods` before and after, so the next full `pebble build` relinks. Opening a screen that was left out aborts the app. `MenuView History` is 42.8 KB, just under the ceiling; `Sessions`/`ModelView` were verified in their own task with the build of that time. On hardware the archive is mapped from flash, so whether the full build boots on a Time 2 is the first hardware check.
+
 ### With the real hub
 
 ```bash
@@ -114,7 +123,7 @@ Mute pi-web notifications in the Pebble phone app so they do not duplicate the w
 
 (Filled in Task 11.)
 
-- Full build boots on the Time 2? (The emulator copies the archive into RAM; hardware maps it from flash.) Also note the firmware's `Heap Usage for App` line at exit; it was 119.6 KB of 122.1 KB in the emulator.
+- Full build boots on the Time 2? (The emulator copies the archive into RAM, and the full build no longer boots there; hardware maps it from flash.) Also note the firmware's `Heap Usage for App` line at exit; it was 119.6 KB of 122.1 KB in the emulator.
 - dictation: hardware only (the emulator shows the dictation screen but cannot transcribe; check `say it` end to end on the watch: confirm screen, `sending…`, `sent`, and `didn't match` on a dialog).
 
 ## Known issues

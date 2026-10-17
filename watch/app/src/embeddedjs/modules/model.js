@@ -1,5 +1,6 @@
 const num = (v) => (typeof v === "number" && v >= 0 ? v : null);
 const MAX_RESULTS = 4;
+const HISTORY_MAX = 24;
 const lines = (s) => (s ? String(s).split("\n") : []);
 
 export function parseRows(kind, rows) {
@@ -39,7 +40,7 @@ export function createModel() {
 		cfg: { dark: false },
 		lists: { sessions: emptyList(), history: emptyList(), models: emptyList() },
 		sayIt: { text: "", status: "idle" },
-		// Row i of the sessions or models list, parsed.
+		// Row i of a list, parsed.
 		rowAt(kind, i) {
 			const line = m.lists[kind].rows[i];
 			return line === undefined ? undefined : parseRows(kind, [line])[0];
@@ -113,9 +114,17 @@ export function createModel() {
 					const list = m.lists[name];
 					const offset = g("OFFSET") || 0;
 					if (name === "history") {
-						const byI = new Map(list.rows.map((r) => [r.i, r]));
-						for (const r of parseRows(name, lines(g("ROWS")))) byI.set(r.i, r);
-						list.rows = [...byI.values()].sort((a, b) => a.i - b.i);
+						// Raw lines too, kept in order of i; at most HISTORY_MAX, dropping the
+						// newest (an older page is prepended while the user scrolls up).
+						const rows = list.rows;
+						for (const line of lines(g("ROWS"))) {
+							const i = parseInt(line);
+							const k = rows.findIndex((r) => parseInt(r) >= i);
+							if (k < 0) rows.push(line);
+							else rows.splice(k, parseInt(rows[k]) === i ? 1 : 0, line);
+						}
+						if (rows.length > HISTORY_MAX) rows.length = HISTORY_MAX;
+						list.earliest = rows.length ? parseInt(rows[0]) : 0;
 					} else {
 						// Sessions and models keep their raw lines, parsed one at a time when
 						// drawn (rowAt): a string per row costs far fewer XS slots than an object.

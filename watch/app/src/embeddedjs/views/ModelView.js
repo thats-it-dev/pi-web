@@ -22,10 +22,6 @@ class ModelBehavior extends ListBehavior {
 	get values() {
 		return true;
 	}
-	sessionId() {
-		const m = this.m;
-		return (m.home && m.home.sessionId) || (m.stats && m.stats.sessionId) || undefined;
-	}
 	count() {
 		return this.m.lists.models.rows.length;
 	}

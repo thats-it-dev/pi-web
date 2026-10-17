@@ -39,7 +39,7 @@ test("list chunks merge by OFFSET without duplicates; complete when MORE is 0; r
 	assert.equal(m.lists.history.rows.length, 12);
 	assert.equal(m.lists.history.complete, true);
 	assert.equal(m.lists.history.total, 40);
-	assert.deepEqual(m.lists.history.rows.map((r) => r.i).slice(0, 2), [28, 29]);
+	assert.deepEqual([0, 1].map((k) => m.rowAt("history", k).i), [28, 29]);
 	m.apply(M({ MSG: "list", LIST: "history", ROWS: hist(28, 33), OFFSET: 28, TOTAL: 40, MORE: 1 }));
 	assert.equal(m.lists.history.rows.length, 12);
 	m.resetList("history");
@@ -47,6 +47,21 @@ test("list chunks merge by OFFSET without duplicates; complete when MORE is 0; r
 	m.apply(M({ MSG: "list", LIST: "sessions", ROWS: "", OFFSET: 0, TOTAL: 0, MORE: 0 }));
 	assert.equal(m.lists.sessions.complete, true);
 	assert.equal(m.lists.sessions.rows.length, 0);
+});
+
+test("history keeps at most 24 turns: prepending an older page drops the newest beyond 24", () => {
+	const m = createModel();
+	const page = (a, b) => m.apply(M({ MSG: "list", LIST: "history", ROWS: hist(a, b), OFFSET: a, TOTAL: 40, MORE: 0 }));
+	const is = () => m.lists.history.rows.map((_, k) => m.rowAt("history", k).i);
+	page(28, 39);
+	assert.equal(m.lists.history.earliest, 28);
+	page(16, 27);
+	assert.equal(m.lists.history.rows.length, 24);
+	assert.deepEqual(is(), Array.from({ length: 24 }, (_, k) => 16 + k));
+	page(4, 15);
+	assert.deepEqual(is(), Array.from({ length: 24 }, (_, k) => 4 + k));
+	assert.equal(m.lists.history.earliest, 4);
+	assert.deepEqual(m.rowAt("history", 0), { i: 4, role: "you", text: "text 4" });
 });
 
 test("takeResult returns a result once", () => {

@@ -45,3 +45,33 @@ test("stepIndex: Up/Down stop at the ends, no wrap", () => {
 	assert.equal(stepIndex(9, 1, 3), 2);
 	assert.equal(stepIndex(0, 1, 0), 0);
 });
+
+import { scrollTurns } from "../src/embeddedjs/modules/listWindow.js";
+
+// 24 turns: every third 100 px tall, the rest 30 (gap included); total 1280.
+const H = (i) => (i % 3 ? 30 : 100);
+const pos = (s) => Array.from({ length: s.top }, (_, i) => H(i)).reduce((a, b) => a + b, 0) + s.dy;
+
+test("scrollTurns: opens at the bottom, the last turn's end on the view's end", () => {
+	const s = scrollTurns(23, 0, 0, 24, 210, H);
+	assert.equal(pos(s), 1280 - 210);
+	assert.ok(s.dy < H(s.top));
+});
+
+test("scrollTurns: half-view steps up reach the top exactly and stop there", () => {
+	let s = scrollTurns(23, 0, 0, 24, 210, H);
+	let steps = 0;
+	while (s.top || s.dy) { s = scrollTurns(s.top, s.dy, -105, 24, 210, H); steps++; }
+	assert.equal(steps, Math.ceil((1280 - 210) / 105));
+	assert.deepEqual(scrollTurns(0, 0, -105, 24, 210, H), { top: 0, dy: 0 });
+});
+
+test("scrollTurns: down steps move by d and stop at the bottom; short lists stay at the top", () => {
+	let s = scrollTurns(0, 0, 105, 24, 210, H);
+	assert.deepEqual(s, { top: 1, dy: 5 });
+	for (let k = 0; k < 20; k++) s = scrollTurns(s.top, s.dy, 105, 24, 210, H);
+	assert.equal(pos(s), 1280 - 210);
+	assert.deepEqual(scrollTurns(2, 0, 105, 3, 210, H), { top: 0, dy: 0 }); // 160 px of turns
+	assert.deepEqual(scrollTurns(0, 0, 0, 0, 210, H), { top: 0, dy: 0 });
+});
+

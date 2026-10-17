@@ -39,12 +39,7 @@ class MenuBehavior extends ListBehavior {
 		if (this.menu && (kind === "list" || kind === "stats" || kind === "home")) this.update(container);
 	}
 	onSelect(container, index) {
-		try {
-			controller.goTo(SCREENS[index]);
-		}
-		catch (e) {
-			console.log("pi-web: no " + SCREENS[index] + " screen yet");
-		}
+		controller.goTo(SCREENS[index]);
 		return true;
 	}
 }

@@ -87,3 +87,20 @@ export function tailLines(text, width, measure, max = 2) {
 	}
 	return lines;
 }
+
+// A history turn as whole lines of `width` px for Labels (History.js): words wrap
+// forward; a word too long for a line keeps a line of its own, cut at the edge.
+export function wrapLines(text, width, measure) {
+	const lines = [];
+	let line = "";
+	for (const word of String(text).split(" ")) {
+		const next = line ? line + " " + word : word;
+		if (line && measure(next) > width) {
+			lines.push(line);
+			line = word;
+		}
+		else line = next;
+	}
+	lines.push(line);
+	return lines;
+}

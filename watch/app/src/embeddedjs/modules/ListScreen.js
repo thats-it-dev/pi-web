@@ -41,6 +41,10 @@ export class ListBehavior extends View.Behavior {
 	get m() {
 		return controller.model;
 	}
+	sessionId() {
+		const m = this.m;
+		return (m.home && m.home.sessionId) || (m.stats && m.stats.sessionId) || undefined;
+	}
 	onDisplaying(container) {
 		if (this.load) this.load();
 		const theme = controller.theme;

@@ -22,3 +22,17 @@ export function windowFirst(scroll, count, pool, rowHeight) {
 export function stepIndex(selection, direction, count) {
 	return Math.max(0, Math.min(count - 1, selection + direction));
 }
+
+// History (spec §7.8): turns of varying height h(i) (gap included). The view
+// shows the turns from `top` on, `dy` px into it. Scroll by d px, clamped so the
+// view stays filled at the bottom and stops at the first turn's top.
+export function scrollTurns(top, dy, d, n, view, h) {
+	dy += d;
+	while (top < n - 1 && dy >= h(top)) dy -= h(top++);
+	let below = -dy;
+	for (let i = top; i < n && below < view; i++) below += h(i);
+	if (below < view) dy -= view - below;
+	while (dy < 0 && top > 0) dy += h(--top);
+	return { top, dy: Math.max(0, dy) };
+}
+

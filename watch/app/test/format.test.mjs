@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo, tailLines } from "../src/embeddedjs/modules/format.js";
+import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo, tailLines, wrapLines } from "../src/embeddedjs/modules/format.js";
 
 test("toolbar", () => {
 	assert.deepEqual(toolbar({ ctxPercent: 41, tps: 62, model: "qwen3" }), { ctx: "41%", percent: 41, speed: "62 T/S", model: "QWEN3" });
@@ -56,4 +56,13 @@ test("tailLines keeps the end of a transcript in at most 2 lines, … where cut"
 	assert.deepEqual(tailLines("aa bb cc dd ee ff gg hh", 80, w), ["…dd ee", "ff gg hh"]);
 	assert.deepEqual(tailLines("supercalifragilistic", 100, w), ["…agilistic"]);
 	assert.deepEqual(tailLines("ok supercalifragilistic", 100, w), ["…agilistic"]);
+});
+
+test("wrapLines wraps words forward into lines of `width`; a word too long keeps its own line (the Label cuts it)", () => {
+	const w = (s) => s.length * 10;
+	assert.deepEqual(wrapLines("one two three four", 100, w), ["one two", "three four"]);
+	assert.deepEqual(wrapLines("yes", 100, w), ["yes"]);
+	assert.deepEqual(wrapLines("", 100, w), [""]);
+	assert.deepEqual(wrapLines("a supercalifragilistic b", 100, w), ["a", "supercalifragilistic", "b"]);
+	assert.deepEqual(wrapLines("aaaa bbbbb", 100, w), ["aaaa bbbbb"]); // exactly 100
 });
