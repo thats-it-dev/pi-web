@@ -15,6 +15,6 @@ Commands (run in `watch/app`, verified, see `../README.md`; no `--vnc` needed, t
     pebble screenshot --no-open --emulator emery /tmp/emery.png
     pebble kill
 
-Caveat: PKJS does not run in the emulator on this machine today (the `STPyV8` module is a stub, no aarch64 build). Phone-side code must be tested elsewhere or via unit tests.
+PKJS runs in the emulator on this machine with the Python 3.13 pebble-tool and the prebuilt aarch64 STPyV8 wheel (see `../README.md`, Toolchain); its logs are the `pkjs>` lines of `pebble install --emulator emery --logs`. Phone-side code is also covered by unit tests. A stand-in hub for the emulator: `node watch/app/dev/stub-hub.mjs --port 5173` from the repo root.
 
 See `watch/README.md` and `docs/superpowers/specs/2026-10-16-pebble-watch-design.md`.
