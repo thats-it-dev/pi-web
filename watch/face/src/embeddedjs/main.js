@@ -11,6 +11,8 @@ import Accelerometer from "embedded:sensor/Accelerometer";
 import Timer from "timer";
 
 const DARK_KEY = "pi-web.dark";
+// The longest a launch can take on the phone (loopback 2.5 s + the hub POST's 15 s), rounded up.
+const LAUNCH_MAX_MS = 20000;
 
 function storedDark() {
 	try {
@@ -45,6 +47,7 @@ class FaceBehavior extends Behavior {
 		this.accel = null;
 		this.launchId = null;
 		this.openTimer = null;
+		this.launchTimer = null;
 	}
 	onDisplaying(app) {
 		this.idle = app.first;
@@ -139,8 +142,8 @@ class FaceBehavior extends Behavior {
 		if (kinds.includes("result") && r && r.id === this.launchId) {
 			// OK 1: the app takes over the screen; the footer stays until the timer.
 			console.log("pi-web: launch " + (r.ok ? "ok" : "failed"));
-			if (r.ok) this.launchId = null;
-			else this.endOpening();
+			if (!r.ok) this.endOpening();
+			else this.endLaunch();
 		}
 		if (kinds.includes("sheet")) {
 			const m = this.model;
@@ -197,11 +200,21 @@ class FaceBehavior extends Behavior {
 			this.openTimer = null;
 			if (this.sheet) this.sheet.delegate("onOpening", false);
 		}, OPENING_MS);
+		// A lost result must not hold the gate: it opens after loopback 2.5 s + the hub POST's 15 s.
+		this.launchTimer = Timer.set(() => {
+			this.launchTimer = null;
+			this.launchId = null;
+		}, LAUNCH_MAX_MS);
+	}
+	endLaunch() {
+		if (this.launchTimer !== null) Timer.clear(this.launchTimer);
+		this.launchTimer = null;
+		this.launchId = null;
 	}
 	endOpening() {
 		if (this.openTimer !== null) Timer.clear(this.openTimer);
 		this.openTimer = null;
-		this.launchId = null;
+		this.endLaunch();
 		if (this.sheet) this.sheet.delegate("onOpening", false);
 	}
 	// Starts the rise or the fall; a reversal mid-way starts from where the other one was.
