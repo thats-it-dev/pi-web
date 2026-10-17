@@ -105,3 +105,7 @@ Mute pi-web notifications in the Pebble phone app so they do not duplicate the w
 ## Hardware checklist
 
 (Filled in Task 11.)
+
+## Known issues
+
+- The LECO 1976 font could not be fetched (fontlibrary.org serves no download for it), so the UI uses the system `Gothic` font (`FONT_FAMILY` in `app/src/embeddedjs/assets.js`). Dropping a licensed TTF into `app/src/embeddedjs/assets/fonts/` and a `resources` entry in the manifest would restore it.

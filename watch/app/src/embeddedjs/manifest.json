@@ -3,7 +3,10 @@
 		"$(MODDABLE)/examples/manifest_mod.json",
 		"$(MODDABLE)/examples/manifest_typings.json"
 	],
+	"config": {
+		"creation": { "stack": 5120, "slot": 31744, "chunk": 19456 }
+	},
 	"modules": {
-		"*": "./main"
+		"*": [ "./assets", "./main", "./modules/model", "./modules/format" ]
 	}
 }
