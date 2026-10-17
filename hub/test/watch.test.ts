@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
-import type { AgentMessage, Dialog, LiveState, ModelInfo, PiEvent, SessionStats } from "../../shared/src/protocol.ts";
+import type { AgentMessage, Dialog, LiveState, ModelInfo, PiEvent, SessionStats, WatchStreamFrame } from "../../shared/src/protocol.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { SessionIndex } from "../src/sessions.ts";
@@ -733,5 +733,63 @@ test("startRingSession creates ~/pebble once and prompts the new session", async
 	assert.deepEqual(h.received, [{ type: "prompt", text: "hello ring", mode: "send" }]);
 	const again = await svc.startRingSession("again");
 	assert.notEqual(again, id);
+	svc.close();
+});
+
+test("subscribers get one pending frame per burst and text tails for the shown session only", async () => {
+	const { registry, svc, clock } = setup();
+	const h = await session(registry);
+	const other = await session(registry);
+	await tick();
+	const frames: WatchStreamFrame[] = [];
+	const off = svc.subscribe((f) => frames.push(f));
+	assert.equal(svc.subscriberCount(), 1);
+	svc.showing(null, "s-1");
+	await tick();
+	assert.equal(frames.filter((f) => f.type === "pending").length, 1);
+	assert.equal((frames[0] as { showing: string | null }).showing, null);
+	const stream = (fh: FakeHandle, text: string) => {
+		fh.conv.partial = { role: "assistant", content: [{ type: "text", text }] } as AgentMessage;
+		fh.conv.streaming = true;
+		fh.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "a" } }));
+	};
+	stream(h, "a".repeat(300));
+	stream(other, "zzz");
+	await tick();
+	const texts = () => frames.filter((f) => f.type === "text");
+	assert.deepEqual(texts(), [{ type: "text", sessionId: "s-1", text: "a".repeat(240), streaming: true }]);
+	clock.t += 100;
+	stream(h, "a".repeat(301)); // inside the 250 ms tick: no frame
+	await tick();
+	assert.equal(texts().length, 1);
+	clock.t += 200;
+	stream(h, "b".repeat(10));
+	await tick();
+	assert.equal(texts().length, 2);
+	h.conv.partial = null;
+	h.conv.streaming = false;
+	h.push(ev({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" } }));
+	await tick();
+	assert.deepEqual(texts()[2], { type: "text", sessionId: "s-1", text: "done", streaming: false });
+	off();
+	assert.equal(svc.subscriberCount(), 0);
+	clock.t += 1000;
+	stream(h, "c");
+	await tick();
+	assert.equal(texts().length, 3);
+	svc.close();
+});
+
+test("moving showing onto a session mid-reply sends its tail at once", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	await tick();
+	h.conv.partial = { role: "assistant", content: [{ type: "text", text: "half a reply" }] } as AgentMessage;
+	h.conv.streaming = true;
+	const frames: WatchStreamFrame[] = [];
+	svc.subscribe((f) => frames.push(f));
+	svc.showing(null, "s-1");
+	await tick();
+	assert.deepEqual(frames.filter((f) => f.type === "text"), [{ type: "text", sessionId: "s-1", text: "half a reply", streaming: true }]);
 	svc.close();
 });

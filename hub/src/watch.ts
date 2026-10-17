@@ -6,7 +6,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
-import type { AppCommand, Dialog, WatchAnswerResult, WatchPending, WatchRequest, WatchSession, WatchTurn } from "../../shared/src/protocol.ts";
+import type { AppCommand, Dialog, WatchAnswerResult, WatchPending, WatchRequest, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
+import { contentText } from "../../shared/src/reducer.ts";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
@@ -22,6 +23,8 @@ const WAIT_MS = 25_000;
 const CLOSED_MAX = 20;
 const HISTORY_LIMIT = 12;
 const SPEED_TICK_MS = 1000;
+const TEXT_TICK_MS = 250;
+const TEXT_TAIL = 240;
 
 export interface WatchDeps {
 	registry: Registry;
@@ -50,6 +53,7 @@ interface Tracked {
 	live: LiveStats;
 	off: () => void;
 	tickAt: number; // when streaming last woke pollers
+	textAt: number; // when a text tail last went to subscribers
 }
 
 type DialogAnswer = { value: string } | { confirmed: boolean };
@@ -62,6 +66,7 @@ export class WatchService {
 	private scheduled = false;
 	private closed = false;
 	private waiters = new Set<(p: WatchPending) => void>();
+	private subscribers = new Set<(f: WatchStreamFrame) => void>();
 	private dismissed = new Set<string>();
 	private outcomes = new Map<string, Outcome>(); // by session id
 	private created = new Map<string, number>(); // request id → first seen
@@ -130,6 +135,26 @@ export class WatchService {
 		this.showingState = requestId || sid ? { requestId, sessionId: sid, at: this.now() } : null;
 		if (requestId) this.lastShown = [...this.lastShown.filter((id) => id !== requestId), requestId].slice(-LAST_SHOWN_MAX);
 		if (prev?.requestId !== this.showingState?.requestId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
+		const next = this.showingState?.sessionId ?? null;
+		if (next && next !== (prev?.sessionId ?? null)) {
+			const h = this.deps.registry.get(next);
+			if (h?.kind === "rpc") {
+				const conv = h.snapshot().conv;
+				if (conv.streaming) this.emitText(next, contentText(conv.partial?.content ?? ""), true);
+			}
+		}
+	}
+
+	// Nothing is sent on subscribe; the caller sends pending() itself.
+	subscribe(fn: (f: WatchStreamFrame) => void): () => void {
+		this.subscribers.add(fn);
+		return () => {
+			this.subscribers.delete(fn);
+		};
+	}
+
+	subscriberCount(): number {
+		return this.subscribers.size;
 	}
 
 	dismiss(requestId: string): void {
@@ -241,6 +266,7 @@ export class WatchService {
 		for (const off of this.offs) off();
 		for (const t of this.tracked.values()) t.off();
 		this.tracked.clear();
+		this.subscribers.clear();
 		const p = this.pending();
 		for (const w of [...this.waiters]) w(p);
 	}
@@ -282,7 +308,7 @@ export class WatchService {
 			const snap = h.snapshot();
 			const live = new LiveStats(this.now);
 			live.reset(snap.stats, snap.conv.streaming);
-			const t: Tracked = { live, off: () => {}, tickAt: -Infinity };
+			const t: Tracked = { live, off: () => {}, tickAt: -Infinity, textAt: -Infinity };
 			this.tracked.set(h, t);
 			t.off = h.observe((m) => {
 				if (m.type === "handle_gone") return this.untrack(h, t);
@@ -294,6 +320,13 @@ export class WatchService {
 						t.tickAt = this.now();
 						this.changed();
 					} else if (shown && m.event.type === "message_end") this.changed();
+					if (shown && m.event.type === "message_update" && this.now() - t.textAt >= TEXT_TICK_MS) {
+						t.textAt = this.now();
+						this.emitText(h.sessionId, contentText(h.snapshot().conv.partial?.content ?? ""), true);
+					} else if (shown && m.event.type === "message_end") {
+						t.textAt = -Infinity;
+						this.emitText(h.sessionId, contentText(m.event.message?.content ?? ""), false);
+					}
 				} else if (m.type === "meta" || m.type === "snapshot") {
 					live.onStats(m.type === "meta" ? m.stats : m.snapshot.stats);
 					if (shown) this.changed();
@@ -354,6 +387,11 @@ export class WatchService {
 		return t;
 	}
 
+	private emitText(sessionId: string, text: string, streaming: boolean): void {
+		const frame: WatchStreamFrame = { type: "text", sessionId, text: text.trim().slice(-TEXT_TAIL), streaming };
+		for (const s of [...this.subscribers]) s(frame);
+	}
+
 	// Coalesces a burst of changes into one cursor bump and one wake-up.
 	private changed(): void {
 		if (this.scheduled || this.closed) return;
@@ -362,8 +400,9 @@ export class WatchService {
 			this.scheduled = false;
 			if (this.closed) return;
 			this.cursor++;
-			if (this.waiters.size === 0) return;
+			if (this.waiters.size + this.subscribers.size === 0) return;
 			const p = this.pending();
+			for (const s of [...this.subscribers]) s({ type: "pending", ...p });
 			for (const w of [...this.waiters]) w(p);
 		});
 	}
