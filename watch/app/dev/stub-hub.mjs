@@ -2,10 +2,13 @@
 // Run from the repo root (ws resolves from the root node_modules):
 //   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--options 1-4]
 //     [--platform emery|gabbro] [--no-launch-port]
-//     [--corners date,pi,hr,steps]
+//     [--corners date,pi,hr,steps] [--after ms] [--resolve ms]
 // --delay holds every POST's answer that long (to see the watch's `sending…` state).
 // --platform picks the emulator whose phone simulator port /dev/settings reports as LAUNCH_PORT
 // (for the face's launch); --no-launch-port reports 0 instead.
+// --after <ms>: on any scene, a second dialog (dialog:s3:d2 on llmwiki cron) appears that long after the
+// first socket opens. --resolve <ms>: each request leaves that long after it appeared (the scene's own
+// requests appear when the first socket opens), so the face's counter drops and its sheet slides away.
 import { readFileSync } from "node:fs";
 import http from "node:http";
 import { WebSocketServer } from "ws";
@@ -60,6 +63,19 @@ const FINISHED = {
 	createdAt: NOW - 1 * MIN,
 };
 
+// The request --after adds.
+const LATER = {
+	id: "dialog:s3:d2",
+	kind: "dialog",
+	sessionId: "s3",
+	sessionTitle: "llmwiki cron",
+	tool: "edit",
+	message: "Allow edit?\nwiki/index.md",
+	options: ["allow", "deny"],
+	method: "select",
+	createdAt: 0,
+};
+
 const SCENES = {
 	dialog: [DIALOG, FINISHED],
 	finished: [FINISHED],
@@ -111,6 +127,8 @@ const PLATFORM = arg("platform", "emery");
 // --corners tl,tr,bl,br: the four widget ids /dev/settings reports (default date,pi,hr,steps).
 const CORNERS = arg("corners", "date,pi,hr,steps").split(",");
 const NO_LAUNCH_PORT = process.argv.includes("--no-launch-port");
+const AFTER = Number(arg("after", "0")) || 0;
+const RESOLVE = Number(arg("resolve", "0")) || 0;
 // --options <n>: the dialog offers n options (2 by default; 4 fills Home with five rows).
 DIALOG.options = ["allow", "deny", "allow always", "deny always"].slice(0, Math.max(1, Math.min(4, Number(arg("options", "2")) || 2)));
 if (!SCENES[SCENE]) {
@@ -151,6 +169,27 @@ function changed() {
 	for (const w of waiters) w(p);
 	waiters.clear();
 	for (const ws of sockets) ws.send(JSON.stringify({ type: "pending", ...p }));
+}
+
+// --after and --resolve, from the first socket open. Each change goes out as a fresh pending frame.
+let timeline = false;
+function resolveLater(r) {
+	if (RESOLVE) setTimeout(() => {
+		console.log(`resolve ${r.id}`);
+		removeRequest(r.id);
+	}, RESOLVE);
+}
+function startTimeline() {
+	if (timeline) return;
+	timeline = true;
+	for (const r of requests) resolveLater(r);
+	if (AFTER) setTimeout(() => {
+		const r = { ...LATER, createdAt: Date.now() };
+		console.log(`after: ${r.id} appears`);
+		requests = [...requests.filter((x) => x.id !== r.id), r];
+		changed();
+		resolveLater(r);
+	}, AFTER);
 }
 
 function setShowing(f) {
@@ -283,6 +322,7 @@ wss.on("connection", (ws) => {
 	console.log("ws open");
 	sockets.add(ws);
 	ws.send(JSON.stringify({ type: "pending", ...pendingNow() }));
+	startTimeline();
 	let streamTimer = null;
 	if (SCENE === "stream") {
 		LIVE[0].state = "running";
@@ -318,5 +358,5 @@ wss.on("connection", (ws) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK} launch port=${launchPort()} (${NO_LAUNCH_PORT ? "off" : PLATFORM})`);
+	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK} launch port=${launchPort()} (${NO_LAUNCH_PORT ? "off" : PLATFORM})${AFTER ? " after=" + AFTER : ""}${RESOLVE ? " resolve=" + RESOLVE : ""}`);
 });

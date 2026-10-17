@@ -73,9 +73,16 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 | `empty` | nothing pending: home shows the current session's last reply |
 | `stream` | nothing pending; on each socket open, `s1` runs and a `text` tail for it grows by a sentence every 250 ms for 6 s, then `streaming: false` and `s1` goes idle. As on the real hub, text frames go out only while the client's `showing` reports `s1` |
 
+Two flags change any scene over time, counted from the first socket open (each change goes to open sockets as a fresh `pending` frame):
+
+| Flag | What happens |
+| --- | --- |
+| `--after <ms>` | a second dialog, `dialog:s3:d2` on `llmwiki cron` (`edit`, `Allow edit?` / `wiki/index.md`), appears that long after the first socket open |
+| `--resolve <ms>` | each request leaves that long after it appeared (the scene's own requests appear at the first socket open), so the face's counter drops and, when the last one leaves, its sheet slides away |
+
 ```bash
 # from the repo root (ws resolves from the root node_modules)
-node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--platform emery|gabbro] [--no-launch-port] [--corners date,pi,hr,steps]
+node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--platform emery|gabbro] [--no-launch-port] [--corners date,pi,hr,steps] [--after ms] [--resolve ms]
 
 # in another shell
 cd watch/app
@@ -153,7 +160,12 @@ cd watch/face && pebble build && pebble install --emulator emery --logs
 
 On `--scene empty` the face shows the time, `SAT 17` top left, `1/0` top right (`s1` is running, nothing pending), and heart rate and steps at the bottom once the emulator has values: `pebble emu-heart-rate 72`, `pebble emu-steps 4210`, `pebble emu-battery --percent 80` (all with `--emulator emery`). `pi` reads `--` until the phone's first `pending` frame. Screenshots: `screenshots/face-idle-emery-dark.png`, `-gabbro-dark.png`, `face-idle-emery-light.png` (stub `--dark 0`).
 
-- **Archive size.** `face/build/mods/emery/mc.xsa` is 14876 B with the idle screen and the corner readings, far under the 42.8 KB ceiling. The VM sizes are the app's.
+**The sheet** (spec §6.2; `src/embeddedjs/sheet.js`). A pending request raises an 84 px sheet over the bottom of the screen: a 2 px rule, the eyebrow (`PI-WEB · BASH`, or `DONE`, `ERROR`, `QUESTION`), the message in a two-line clip, and the footer `FLICK TO OPEN` / `1 OF 2` (on gabbro one centred line). The rise is one Piu `Timeline`, 350 ms, quad ease-out: the idle group's height shrinks to the space above the sheet (its labels re-lay out from `layout()` on every step) while the sheet slides up; the fall plays it backwards and removes the sheet. A `sheet` dict while the sheet is up only changes its texts. A message longer than two lines scrolls a line at a time: 2 s at the top, a line every 1.5 s, 2 s at the end, then back to the top (a horizontal marquee of a 240-character message is unreadable, and the clip already wraps). The phone decides the vibe (`VIBE: 1` when a request id appears that the previous frame did not have; not on a switch to the next oldest, a counter change, a replayed list, or the first frame after launch); the watch logs `pi-web: vibe` and calls `Vibes.shortPulse()` (the emulator has no vibration).
+
+- On `--scene dialog` the sheet is up at launch: `PI-WEB · BASH`, `Allow bash?` / `git push origin main`, `FLICK TO OPEN` `1 OF 2`; the time and corners sit above the rule. On `--scene empty --after 5000` the face idles, then logs `pi-web: vibe` and the sheet rises with `PI-WEB · EDIT`. With `--after 5000 --resolve 10000` (default scene) the counter reads `1 OF 3` after the vibe, `1 OF 1` once the first two leave, and the sheet slides away when the last does. On `--scene finished` the four-line message scrolls. Screenshots: `screenshots/face-sheet-emery-dark.png`, `face-sheet-emery-light.png`, `face-sheet-long-emery-dark.png` (gabbro not yet taken).
+- **Piu has no `top` accessor.** `Timeline.to(content, { top })` writes a plain JS property and nothing moves; the sheet's tween is on `y` (the application is at 0, so `y` is the top). The idle group's `height` works because its height is declared (`top: 0, height: screen.height`).
+- **One log reader.** Two `pebble install --logs` left attached to the same emulator print every line twice (or three times): stop the old one before reading counts such as `pi-web: vibe` from the log.
+- **Archive size.** `face/build/mods/emery/mc.xsa` is 20583 B with the sheet (14876 B before it; `piu/Timeline` and `sheet.js` are the new modules), far under the 42.8 KB ceiling. The VM sizes are the app's.
 - **The phone speaks first.** The watch's `pebble/message` can write only after it has received a dict (`pkjsReady` is set in `messageReceived`, `pebble-appmessage.c`), so the face's phone side sends `cfg`, `net`, `pi`, `sheet` on `ready`, and again when the watch's `hello` arrives, as the app's bridge does. Waiting for `hello` first deadlocks.
 - **Hub URL, twice.** PebbleKit JS `localStorage` is per app on a phone, so the face cannot read the app's stored hub URL even though both use the key `pi-web.hubUrl`. Set **Hub URL** in the face's settings page too (spec §12: entered twice in v1). The face's page also has the four corners, Dark and the temperature unit.
 - **Corner readings.** Steps come from `Health.metric.get("step count")` on `minutechange` and on `health` events; in QEMU the live value stays 0, so the face falls back to the day's sum (`Health.metric.query`, since local midnight), which `emu-steps` does set. Heart rate and steps show `--` when 0, battery is `Battery.sample().percent`. Weather is phone-side (`src/pkjs/weather.js`): position, then `GET /api/watch/weather?lat=&lon=` every 20 minutes, sent as the `weather` dict; `12°` in the emulator from the stub. The stub's `--corners weather,battery,hr,steps` reassigns the corners.

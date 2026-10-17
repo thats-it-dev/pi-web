@@ -1,8 +1,11 @@
-import { createFaceModel, KEYS } from "face";
+import { createFaceModel, KEYS, SHEET_HEIGHT, RISE_MS } from "face";
 import { createLink } from "link";
 import { makeTheme } from "assets";
 import { Idle } from "idle";
+import { Sheet } from "sheet";
+import Timeline from "piu/Timeline";
 import Health from "pebble/health";
+import Vibes from "pebble/vibes";
 import Battery from "embedded:sensor/Battery";
 
 const DARK_KEY = "pi-web.dark";
@@ -18,10 +21,20 @@ function storedDark() {
 // The face: the model holds what the phone sent; the screen updates in one
 // deferred pass per batch of dicts (pebble/message holds one unread dict, so
 // the read callback applies the dict and returns at once).
+//
+// The sheet: hidden → rising → up → falling → hidden. The rise is one Timeline
+// (the idle group shrinks to the space above the sheet while the sheet slides
+// up), driven by the application's clock; the fall plays it backwards. A sheet
+// dict while the sheet is up only changes its texts. The sheet's tween is on `y`
+// (Piu contents have no `top` accessor; the application is at 0, so y is the top).
 class FaceBehavior extends Behavior {
 	onCreate(app, $) {
 		this.model = $.model;
+		this.theme = $.theme;
 		this.dark = $.model.cfg.dark;
+		this.sheet = null;
+		this.timeline = null;
+		this.state = "hidden";
 		this.date = null;
 		this.hr = null;
 		this.steps = null;
@@ -29,6 +42,7 @@ class FaceBehavior extends Behavior {
 		this.batteryPct = null;
 	}
 	onDisplaying(app) {
+		this.idle = app.first;
 		this.link = createLink({ keys: KEYS, onMessage: (map) => this.onMessage(app, map) });
 		this.link.send("hello");
 		try {
@@ -108,11 +122,68 @@ class FaceBehavior extends Behavior {
 				localStorage.setItem(DARK_KEY, dark ? "1" : "0");
 			} catch (e) {
 			}
-			const theme = makeTheme(dark);
+			const theme = (this.theme = makeTheme(dark));
 			app.skin = theme.skins.paper;
 			app.distribute("onTheme", theme);
 		}
+		if (kinds.includes("sheet")) {
+			const m = this.model;
+			if (m.vibe) {
+				m.vibe = false;
+				console.log("pi-web: vibe");
+				try {
+					Vibes.shortPulse();
+				} catch (e) {
+				}
+			}
+			if (m.sheet) this.showSheet(app, m.sheet);
+			else this.hideSheet(app);
+		}
 		app.distribute("onCorners", this.data());
+	}
+	showSheet(app, sheet) {
+		if (!this.sheet) {
+			this.sheet = new Sheet({ theme: this.theme });
+			app.add(this.sheet);
+		}
+		this.sheet.delegate("onSheet", sheet);
+		if (this.state === "hidden" || this.state === "falling") this.run(app, "rising");
+	}
+	hideSheet(app) {
+		if (this.state === "hidden" || this.state === "falling") return;
+		this.sheet.delegate("stop");
+		this.run(app, "falling");
+	}
+	// Starts the rise or the fall; a reversal mid-way starts from where the other one was.
+	run(app, state) {
+		if (!this.timeline) {
+			const top = screen.height - SHEET_HEIGHT;
+			this.timeline = new Timeline()
+				.to(this.idle, { height: top }, RISE_MS, Math.quadEaseOut, 0)
+				.to(this.sheet, { y: top }, RISE_MS, Math.quadEaseOut, -RISE_MS);
+		}
+		const moving = this.state === "rising" || this.state === "falling";
+		const time = moving ? RISE_MS - app.time : 0;
+		this.state = state;
+		app.stop();
+		app.duration = RISE_MS;
+		app.time = time;
+		app.start();
+	}
+	onTimeChanged(app) {
+		this.timeline.seekTo(this.state === "rising" ? app.time : RISE_MS - app.time);
+		this.idle.delegate("place", this.idle.height);
+	}
+	onFinished(app) {
+		this.onTimeChanged(app);
+		if (this.state === "rising") {
+			this.state = "up";
+			return;
+		}
+		this.state = "hidden";
+		app.remove(this.sheet);
+		this.sheet = null;
+		this.timeline = null;
 	}
 }
 

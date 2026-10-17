@@ -12,7 +12,10 @@ export function makeTheme(dark) {
 			corner: style("bold 18px Gothic", "left"),
 			cornerRight: style("bold 18px Gothic", "right"),
 			small: style("14px Gothic", "left"),
+			smallRight: style("14px Gothic", "right"),
+			smallCenter: style("14px Gothic", "center"),
 			body: style("18px Gothic", "left"),
+			bodyCenter: style("18px Gothic", "center"),
 		},
 	};
 }

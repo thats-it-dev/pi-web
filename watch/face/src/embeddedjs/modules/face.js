@@ -1,5 +1,6 @@
-// The face's logic, no Piu: the corner strings, the layout numbers and the
-// model the phone's dicts are applied to.
+// The face's logic, no Piu: the corner strings, the layout numbers, the sheet's
+// texts and the model the phone's dicts are applied to.
+import { wrapLines } from "format";
 
 // Same order as package.json pebble.messageKeys: pebble/message maps index n to key 10000 + n.
 export const KEYS = (
@@ -45,12 +46,40 @@ export function layout(w, h, round) {
 	};
 }
 
+// The sheet (spec §6.2): its height, the rise, and the message's line scroll.
+export const SHEET_HEIGHT = 84;
+export const RISE_MS = 350;
+export const SCROLL_PAUSE_MS = 2000;
+export const SCROLL_STEP_MS = 1500;
+
+// sheet: { kind, tool, text, index, count } as the model holds it.
+export function sheetText(sheet) {
+	const name = sheet.kind === "finished" ? "DONE" : sheet.kind === "error" ? "ERROR" : sheet.tool ? sheet.tool.toUpperCase() : "QUESTION";
+	const counter = sheet.index + " OF " + sheet.count;
+	return {
+		eyebrow: "PI-WEB · " + name,
+		lines: (width, measure) => wrapLines(sheet.text, width, measure),
+		footer: (opening) => [opening ? "opening…" : "FLICK TO OPEN", counter],
+	};
+}
+
+// The line scroll for a message `max` lines longer than its clip: from offset k
+// (-1 to start), [the next offset, how long it stays there]. It pauses at the
+// top, steps a line at a time, pauses at the end, then jumps back to the top.
+export function scrollNext(k, max) {
+	if (k < 0) return [0, SCROLL_PAUSE_MS];
+	if (k >= max) return [0, SCROLL_PAUSE_MS];
+	return [k + 1, k + 1 < max ? SCROLL_STEP_MS : SCROLL_PAUSE_MS];
+}
+
 const text = (v) => (typeof v === "string" ? v : "");
 const count = (v) => (typeof v === "number" && v >= 0 ? v : null);
 
 export function createFaceModel() {
 	const m = {
 		sheet: null,
+		// Set by a sheet dict with VIBE 1; the face clears it when it has vibed.
+		vibe: false,
 		pi: null,
 		temp: null,
 		net: "connecting",
@@ -63,6 +92,7 @@ export function createFaceModel() {
 				m.sheet = id
 					? { id, kind: text(map.get("REQ_KIND")), tool: text(map.get("REQ_TOOL")), text: text(map.get("REQ_TEXT")), index: count(map.get("REQ_INDEX")) || 0, count: count(map.get("REQ_COUNT")) || 0 }
 					: null;
+				if (map.get("VIBE") === 1) m.vibe = true;
 			} else if (msg === "pi") {
 				const running = count(map.get("PI_RUNNING"));
 				const pending = count(map.get("PI_PENDING"));

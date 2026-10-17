@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cornerText, dateLabel, layout, createFaceModel, KEYS } from "../src/embeddedjs/modules/face.js";
+import { registerHooks } from "node:module";
+
+// On the watch, "format" is a manifest module name; here it resolves to the shared file.
+registerHooks({
+	resolve(specifier, context, next) {
+		return specifier === "format" ? next(new URL("../../shared/js/format.js", import.meta.url).href, context) : next(specifier, context);
+	},
+});
+const { cornerText, dateLabel, layout, createFaceModel, KEYS, sheetText, scrollNext, SHEET_HEIGHT, RISE_MS, SCROLL_PAUSE_MS, SCROLL_STEP_MS } = await import("../src/embeddedjs/modules/face.js");
 
 const M = (o) => new Map(Object.entries(o));
 
@@ -94,4 +102,56 @@ test("a cfg dict assigns the four corners and the unit; unknown ids fall back to
 	const m = createFaceModel();
 	assert.equal(m.apply(M({ MSG: "cfg", DARK: 0, CORNER_TL: "battery", CORNER_TR: "none", CORNER_BL: "weather", CORNER_BR: "bogus", UNIT: "F" })), "cfg");
 	assert.deepEqual(m.cfg, { dark: false, corners: ["battery", "none", "weather", "steps"], unit: "F" });
+});
+
+test("the sheet's numbers (spec §6.2)", () => {
+	assert.deepEqual([SHEET_HEIGHT, RISE_MS, SCROLL_PAUSE_MS, SCROLL_STEP_MS], [84, 350, 2000, 1500]);
+});
+
+test("sheetText: the eyebrow names the tool, DONE, ERROR or QUESTION", () => {
+	const dialog = { kind: "dialog", tool: "bash", text: "Allow bash?\ngit push origin main", index: 1, count: 2 };
+	assert.equal(sheetText(dialog).eyebrow, "PI-WEB · BASH");
+	assert.equal(sheetText({ ...dialog, kind: "finished", tool: "question" }).eyebrow, "PI-WEB · DONE");
+	assert.equal(sheetText({ ...dialog, kind: "error", tool: "" }).eyebrow, "PI-WEB · ERROR");
+	assert.equal(sheetText({ ...dialog, tool: "" }).eyebrow, "PI-WEB · QUESTION");
+});
+
+test("sheetText: the footer is the hint and the counter", () => {
+	const s = sheetText({ kind: "dialog", tool: "bash", text: "Allow bash?", index: 1, count: 2 });
+	assert.deepEqual(s.footer(false), ["FLICK TO OPEN", "1 OF 2"]);
+	assert.deepEqual(s.footer(true), ["opening…", "1 OF 2"]);
+});
+
+test("sheetText: lines wraps the message to the width and keeps every line, newlines honoured", () => {
+	const measure = (s) => s.length * 8;
+	const s = sheetText({ kind: "dialog", tool: "bash", text: "Allow bash?\ngit push origin main", index: 1, count: 2 });
+	assert.deepEqual(s.lines(160, measure), ["Allow bash?", "git push origin main"]);
+	const long = sheetText({ kind: "finished", tool: "", text: "Done. The bridge tests pass and the build is clean. Want me to run the emulator smoke test next?", index: 1, count: 1 });
+	// 160 px is 20 characters here: all six lines come back (the sheet scrolls them).
+	assert.deepEqual(long.lines(160, measure), ["Done. The bridge", "tests pass and the", "build is clean. Want", "me to run the", "emulator smoke test", "next?"]);
+});
+
+test("scrollNext: pause at the top, a line per step to the end, pause, back to the top", () => {
+	// From offset k (-1 to start), with `max` lines below the clip: [next offset, how long it stays there].
+	assert.deepEqual(scrollNext(-1, 3), [0, SCROLL_PAUSE_MS]);
+	assert.deepEqual(scrollNext(0, 3), [1, SCROLL_STEP_MS]);
+	assert.deepEqual(scrollNext(1, 3), [2, SCROLL_STEP_MS]);
+	assert.deepEqual(scrollNext(2, 3), [3, SCROLL_PAUSE_MS]);
+	assert.deepEqual(scrollNext(3, 3), [0, SCROLL_PAUSE_MS]);
+	// A two-line clip scrolls one line: down after the pause, back after the pause.
+	assert.deepEqual(scrollNext(0, 1), [1, SCROLL_PAUSE_MS]);
+	assert.deepEqual(scrollNext(1, 1), [0, SCROLL_PAUSE_MS]);
+});
+
+test("a sheet dict with VIBE 1 sets the model's vibe flag; VIBE 0 leaves it", () => {
+	const m = createFaceModel();
+	assert.equal(m.vibe, false);
+	m.apply(M({ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow?", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 0 }));
+	assert.equal(m.vibe, false);
+	m.apply(M({ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow?", REQ_INDEX: 1, REQ_COUNT: 2, VIBE: 1 }));
+	assert.equal(m.vibe, true);
+	// The face clears it once it has vibed; a later VIBE 0 does not set it.
+	m.vibe = false;
+	m.apply(M({ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow?", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 0 }));
+	assert.equal(m.vibe, false);
 });

@@ -9,6 +9,6 @@
 	"modules": {
 		"format": "../../../shared/js/format",
 		"link": "../../../shared/js/link",
-		"*": [ "./assets", "./main", "./idle", "./modules/face" ]
+		"*": [ "./assets", "./main", "./idle", "./sheet", "./modules/face" ]
 	}
 }

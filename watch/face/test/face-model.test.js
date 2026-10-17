@@ -150,7 +150,7 @@ test("a new request on an empty list sends a sheet with index/count and reports 
 	assert.deepEqual(t.drain(), [{ MSG: "pi", PI_RUNNING: 0, PI_PENDING: 0 }]);
 	t.face.onPending({ requests: [req("d1", 10, { tool: "bash", message: "Allow bash?\ngit push" })], sessions: [session("s1", "needs_you")] });
 	assert.deepEqual(t.drain(), [
-		{ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow bash?\ngit push", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 0 },
+		{ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow bash?\ngit push", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 1 },
 		{ MSG: "pi", PI_RUNNING: 0, PI_PENDING: 1 },
 	]);
 	assert.deepEqual(t.hub.of("showing"), [{ kind: "showing", requestId: "d1", sessionId: null }]);
@@ -339,4 +339,42 @@ test("onWeather sends the temperature; hello repeats the last one", () => {
 	assert.deepEqual(t.drain(), [{ MSG: "weather", TEMP: "12°" }]);
 	t.face.onAppMessage({ CMD: "hello", CMD_ID: 1 });
 	assert.deepEqual(t.drain().map((d) => d.MSG), ["cfg", "net", "pi", "sheet", "weather"]);
+});
+
+test("VIBE is 1 when a request id appears that the previous frame did not have; 0 for a switch, a counter change or a replay", () => {
+	const t = setup();
+	t.hello();
+	const vibes = (frame) => {
+		t.face.onPending(frame);
+		return t.drain().filter((d) => d.MSG === "sheet").map((d) => [d.REQ_ID, d.REQ_COUNT, d.VIBE]);
+	};
+	assert.deepEqual(vibes({ requests: [], sessions: [] }), []);
+	// [] → [a]: the list went from empty to non-empty.
+	assert.deepEqual(vibes({ requests: [req("a", 10)], sessions: [] }), [["a", 1, 1]]);
+	// [a] → [a, b]: a new request while others are pending (the sheet stays on a).
+	assert.deepEqual(vibes({ requests: [req("a", 10), req("b", 20)], sessions: [] }), [["a", 2, 1]]);
+	// The same list again: nothing goes out (VIBE does not count as a change).
+	assert.deepEqual(vibes({ requests: [req("a", 10), req("b", 20)], sessions: [] }), []);
+	// [a, b] → [b]: a switch to the next oldest.
+	assert.deepEqual(vibes({ requests: [req("b", 20)], sessions: [] }), [["b", 1, 0]]);
+	// A reconnect replaying [b], and the watch's hello: no vibe.
+	assert.deepEqual(vibes({ requests: [req("b", 20)], sessions: [] }), []);
+	t.face.onAppMessage({ CMD: "hello", CMD_ID: 1 });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet").map((d) => d.VIBE), [0]);
+	// A request that leaves and one that arrives in the same frame (count unchanged): still a vibe.
+	assert.deepEqual(vibes({ requests: [req("b", 20), req("c", 30)], sessions: [] }), [["b", 2, 1]]);
+	assert.deepEqual(vibes({ requests: [req("b", 20), req("d", 40)], sessions: [] }), [["b", 2, 1]]);
+});
+
+test("a queued vibe survives coalescing: a newer sheet without a vibe keeps VIBE 1", () => {
+	const t = setup();
+	t.hello();
+	t.face.onPending({ requests: [], sessions: [] });
+	t.drain();
+	t.face.onStatus("online"); // in flight
+	t.face.onPending({ requests: [req("a", 10), req("b", 20)], sessions: [] });
+	// a leaves before the vibing sheet went out: the switch to b replaces it in the queue.
+	t.face.onPending({ requests: [req("b", 20)], sessions: [] });
+	const sheets = t.drain().filter((d) => d.MSG === "sheet");
+	assert.deepEqual(sheets.map((d) => [d.REQ_ID, d.REQ_COUNT, d.VIBE]), [["b", 1, 1]]);
 });

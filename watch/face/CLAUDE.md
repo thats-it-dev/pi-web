@@ -1,12 +1,12 @@
 # pi-web watchface
 
-Alloy watchface (`watchface: true`): JavaScript runs on the watch via the Moddable SDK, UI is Piu. Targets emery (Pebble Time 2) and gabbro (Pebble Round 2) only. The idle screen is the time and four configurable corners (`date` `pi` `hr` `steps` `battery` `weather` `none`); a pending pi-web request will raise a sheet over the bottom third (plan 3).
+Alloy watchface (`watchface: true`): JavaScript runs on the watch via the Moddable SDK, UI is Piu. Targets emery (Pebble Time 2) and gabbro (Pebble Round 2) only. The idle screen is the time and four configurable corners (`date` `pi` `hr` `steps` `battery` `weather` `none`); a pending pi-web request raises a sheet over the bottom third (`sheet.js`, with the rise in `main.js`).
 
-- Watch code: `src/embeddedjs/` (ES modules; every module must be listed in `manifest.json`). Entry is `main.js`; `idle.js` is the idle screen; `modules/face.js` is the logic (corner strings, layout numbers, the model the phone's dicts apply to) and imports nothing from Piu. Font strings live only in `assets.js`.
+- Watch code: `src/embeddedjs/` (ES modules; every module must be listed in `manifest.json`). Entry is `main.js` (the link, the readings, the sheet's rise/fall state machine); `idle.js` is the idle screen; `sheet.js` is the request sheet; `modules/face.js` is the logic (corner strings, layout numbers, the model the phone's dicts apply to) and imports nothing from Piu. Font strings live only in `assets.js`.
 - Phone code: `src/pkjs/` (plain ES5, CommonJS, `@rebble/clay`). `face.js` is the phone-side model (sheet selection, `pi` counts, the outbox, the idle policy); `index.js` is wiring only.
 - AppMessage keys are `pebble.messageKeys` in `package.json`, in the same order as `KEYS` in `modules/face.js` (a test checks it); add new keys to both.
 - Shared modules live in `watch/shared/` (`js/format`, `js/link` via manifest paths; `pkjs/hub` via a relative `require`).
-- Tests: `node --test watch/face/test/` from the repo root, or `npm run test:watch` for both watch projects.
+- Tests: `node --test watch/face/test/` from the repo root, or `npm run test:watch` for both watch projects. `modules/face.js` imports `format` (a manifest name); `face.test.mjs` maps it to the shared file with `module.registerHooks` and imports the module dynamically.
 
 Commands (run in `watch/face`, see `../README.md`; the emulator runs headless):
 

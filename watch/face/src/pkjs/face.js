@@ -49,6 +49,27 @@ function piCounts(frame) {
 	return { running: running, pending: ((frame && frame.requests) || []).length };
 }
 
+// Spec §6.2: the watch vibes when the list goes from empty to non-empty or a
+// request appears while others are pending, i.e. when an id is new since the
+// previous frame. A switch to the next oldest, a count change or a replayed
+// list (reconnect, poll) has no new id. The first frame after launch has no
+// previous one and does not vibe.
+function arrived(before, now) {
+	var seen = {};
+	var i;
+	for (i = 0; i < before.length; i++) seen[before[i].id] = true;
+	for (i = 0; i < now.length; i++) if (!seen[now[i].id]) return true;
+	return false;
+}
+
+function noVibe(key, value) {
+	return key === "VIBE" ? undefined : value;
+}
+
+function content(dict) {
+	return JSON.stringify(dict, noVibe);
+}
+
 function darkValue(d) {
 	return d === true || d === 1 || d === "1" || d === "true";
 }
@@ -79,6 +100,8 @@ function createFace(deps) {
 	var unit = storage.getItem(UNIT_KEY) === "F" ? "F" : "C";
 
 	// Outbox: one dict in flight; every kind but result coalesces to the latest.
+	// VIBE is not content: a sheet that differs only by it is the same sheet, a
+	// sheet with VIBE 1 always goes out, and a queued vibe survives being replaced.
 	var queue = [];
 	var inFlight = null;
 	var lastQueued = {};
@@ -86,11 +109,12 @@ function createFace(deps) {
 	function enqueue(dict, force) {
 		var msg = dict.MSG;
 		if (msg !== "result") {
-			var json = JSON.stringify(dict);
-			if (!force && lastQueued[msg] === json) return;
+			var json = content(dict);
+			if (!force && !dict.VIBE && lastQueued[msg] === json) return;
 			lastQueued[msg] = json;
 			for (var i = 0; i < queue.length; i++) {
 				if (queue[i].MSG === msg) {
+					if (queue[i].VIBE) dict.VIBE = 1;
 					queue[i] = dict;
 					return;
 				}
@@ -133,7 +157,7 @@ function createFace(deps) {
 					return;
 				}
 				log("pi-web: drop " + msg + " after " + item.tries + " tries");
-				if (lastQueued[msg] === JSON.stringify(item.dict)) delete lastQueued[msg];
+				if (lastQueued[msg] === content(item.dict)) delete lastQueued[msg];
 				inFlight = null;
 				pump();
 			}
@@ -154,7 +178,7 @@ function createFace(deps) {
 		return { MSG: "pi", PI_RUNNING: c.running, PI_PENDING: c.pending };
 	}
 
-	function sheetDict() {
+	function sheetDict(vibe) {
 		var list = sorted(frame && frame.requests);
 		var r = null;
 		var index = 0;
@@ -172,7 +196,7 @@ function createFace(deps) {
 			REQ_TEXT: r ? clipTo(r.message, TEXT_MAX) : "",
 			REQ_INDEX: index,
 			REQ_COUNT: r ? list.length : 0,
-			VIBE: 0,
+			VIBE: vibe ? 1 : 0,
 		};
 	}
 
@@ -230,7 +254,9 @@ function createFace(deps) {
 
 	function onPending(f) {
 		if (!f || idle) return;
+		var previous = frame;
 		frame = { requests: f.requests || [], sessions: f.sessions || [] };
+		var vibe = previous !== null && arrived(previous.requests, frame.requests);
 		var r = selectSheet(frame.requests, shownId);
 		var id = r ? r.id : null;
 		if (id !== shownId) {
@@ -238,7 +264,7 @@ function createFace(deps) {
 			if (hub) hub.showing(id, null);
 		}
 		// enqueue drops a sheet or pi identical to the last one queued: only changes go out.
-		enqueue(sheetDict());
+		enqueue(sheetDict(vibe));
 		enqueue(piDict());
 		if (!quiet(frame)) {
 			if (idleTimer !== null) deps.clearTimeout(idleTimer);

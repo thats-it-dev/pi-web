@@ -1,6 +1,7 @@
 // The idle screen: the time centred, four corners. Positions come from
 // layout() for the container's height, so a shorter group (under the sheet)
-// lays out the same way.
+// lays out the same way. Its height is explicit so the sheet's rise can tween it;
+// main calls place() on every step of the rise.
 import { layout, cornerText } from "face";
 import { clock } from "format";
 
@@ -36,7 +37,7 @@ class IdleBehavior extends Behavior {
 }
 
 export const Idle = Container.template($ => ({
-	left: 0, right: 0, top: 0, bottom: 0, skin: $.theme.skins.paper, Behavior: IdleBehavior,
+	left: 0, right: 0, top: 0, height: screen.height, skin: $.theme.skins.paper, Behavior: IdleBehavior,
 	contents: [
 		Label($, { left: 0, top: 0, style: $.theme.styles.time, string: "" }),
 		Label($, { left: 0, top: 0, style: $.theme.styles.corner, string: "" }),
