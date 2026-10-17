@@ -121,6 +121,9 @@ export function createModel() {
 						// drawn (rowAt): a string per row costs far fewer XS slots than an object.
 						const rows = list.rows;
 						if (offset <= rows.length) lines(g("ROWS")).forEach((line, k) => { rows[offset + k] = line; });
+						// The last page of a shorter list: drop rows left from a longer one.
+						const total = g("TOTAL");
+						if (g("MORE") !== 1 && total >= 0) rows.length = Math.min(rows.length, total);
 					}
 					list.total = g("TOTAL") || 0;
 					list.complete = g("MORE") !== 1;

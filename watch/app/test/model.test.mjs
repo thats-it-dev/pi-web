@@ -138,3 +138,12 @@ test("sessions and models keep raw lines (parsed by rowAt), chunks land by OFFSE
 	assert.deepEqual(m.rowAt("models", 0), { provider: "p", id: "id1", name: "Name", current: true });
 	assert.equal(m.rowAt("models", 5), undefined);
 });
+
+test("a final page shorter than the list truncates it to TOTAL", () => {
+	const m = createModel();
+	m.apply(M({ MSG: "list", LIST: "models", ROWS: "p\ta\tA\t1\np\tb\tB\t0\np\tc\tC\t0", OFFSET: 0, TOTAL: 3, MORE: 0 }));
+	m.apply(M({ MSG: "list", LIST: "models", ROWS: "p\ta\tA\t1", OFFSET: 0, TOTAL: 1, MORE: 0 }));
+	assert.equal(m.lists.models.rows.length, 1);
+	m.apply(M({ MSG: "list", LIST: "models", ROWS: "", OFFSET: 0, TOTAL: -1, MORE: 0 }));
+	assert.equal(m.lists.models.rows.length, 1);
+});

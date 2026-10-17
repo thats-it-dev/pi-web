@@ -6,6 +6,8 @@ import Timer from "timer";
 import { ListBehavior, listScreen } from "ListScreen";
 
 const LINES = ["model for this session"];
+const WAIT_MS = 10000; // no result by then: failed
+const FLASH_MS = 1000;
 
 class ModelBehavior extends ListBehavior {
 	status() {
@@ -57,23 +59,28 @@ class ModelBehavior extends ListBehavior {
 		const p = this.pending = { index, label:"…" };
 		p.cmdId = controller.link.send("model", { SESSION_ID:this.sessionId(), PROVIDER:r.provider, MODEL_ID:r.id });
 		this.update(container);
-		p.timer = Timer.set(() => this.settle(container, p, false), 10000);
+		p.timer = Timer.set(() => {
+			p.timer = undefined;
+			this.settle(container, p, false);
+		}, WAIT_MS);
 		return true;
 	}
 	// `set` or `failed` for a second; then back to the menu, or the row as it was.
 	settle(container, p, ok) {
-		Timer.clear(p.timer);
+		if (p.timer !== undefined) Timer.clear(p.timer);
 		p.done = true;
 		p.label = ok ? "set" : "failed";
 		this.update(container);
 		p.timer = Timer.set(() => {
+			p.timer = undefined;
 			this.pending = null;
 			if (ok) controller.goBack();
 			else this.update(container);
-		}, 1000);
+		}, FLASH_MS);
 	}
 	onUndisplaying(container) {
-		if (this.pending) Timer.clear(this.pending.timer);
+		const p = this.pending;
+		if (p && p.timer !== undefined) Timer.clear(p.timer);
 		this.pending = null;
 		super.onUndisplaying(container);
 	}

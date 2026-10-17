@@ -69,7 +69,7 @@ export class ListBehavior extends View.Behavior {
 		this.menu.behavior.refresh(this.menu);
 	}
 	onDisplayed(container) {
-		if (controller.view === this.view) this.menu.focus();
+		if (this.menu && controller.view === this.view) this.menu.focus();
 	}
 	onClockChanged(container) {
 		container.first.last.string = clock(new Date(), controller.h24);

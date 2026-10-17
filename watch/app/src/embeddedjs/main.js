@@ -101,7 +101,9 @@ class PiController extends Controller {
 		const container = this.container;
 		this.onScreenUndisplaying(container, this.view);
 		container.replace(container.first, new this.view.Template(this.view));
-		this.onScreenDisplayed(container, this.view);
+		container.purge();
+		// After Piu's onDisplaying, where the screens build (as in display()).
+		container.defer("onScreenDisplayed", this.view);
 	}
 	// Leaves the app for the watchface. Returns false when the FFI call is unavailable.
 	exit() {
