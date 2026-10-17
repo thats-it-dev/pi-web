@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createHubClient, socketUrl, normalizeHubUrl } = require("../src/pkjs/hub.js");
+const { createHubClient, socketUrl, normalizeHubUrl } = require("../../shared/pkjs/hub.js");
 const { FakeSocket, FakeXhr, FakeTimers } = require("./support/fakes.js");
 
 function setup(opts) {

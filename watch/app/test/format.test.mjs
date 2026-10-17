@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo, tailLines, wrapLines } from "../src/embeddedjs/modules/format.js";
+import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo, tailLines, wrapLines } from "../../shared/js/format.js";
 
 test("toolbar", () => {
 	assert.deepEqual(toolbar({ ctxPercent: 41, tps: 62, model: "qwen3" }), { ctx: "41%", percent: 41, speed: "62 T/S", model: "QWEN3" });

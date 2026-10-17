@@ -2,6 +2,8 @@
 
 Pebble watchapp built with Alloy (Moddable SDK on PebbleOS). Targets emery (Pebble Time 2) and gabbro (Pebble Round 2).
 
+Shared modules live in `watch/shared/` (`js/` watch-side via manifest paths, `pkjs/` phone-side via relative `require`). The plain relative `require("../../../shared/pkjs/hub")` bundles fine with the SDK webpack (no symlink or copies needed).
+
 ## Toolchain
 
 Verified on the spark (aarch64 Linux, 2026-10-16). pebble-tool runs on Python 3.13 so that PebbleKit JS (the phone-side code in `src/pkjs`) runs in the emulator:

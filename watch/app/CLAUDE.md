@@ -5,6 +5,7 @@ Alloy watchapp (not a watchface): JavaScript runs on the watch via the Moddable 
 - Watch code: `src/embeddedjs/` (ES modules; every module must be listed in `manifest.json`). Entry is `main.js`.
 - Phone code: `src/pkjs/` (plain ES5, CommonJS, `@rebble/clay`). Talks to the hub and relays over AppMessage.
 - AppMessage keys are `pebble.messageKeys` in `package.json`; add new keys there first.
+- Shared modules live in `watch/shared/` (`js/` watch-side via manifest paths, `pkjs/` phone-side via relative `require`; `pkjs/package.json` marks it CommonJS for the tests).
 - Tests: `node --test watch/app/test/` from the repo root (`npm run test:watch`).
 
 Commands (run in `watch/app`, verified, see `../README.md`; no `--vnc` needed, the emulator runs headless):

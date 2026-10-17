@@ -1,6 +1,6 @@
 // Wiring only: Pebble events, the hub client, the bridge and Clay.
-var createHubClient = require("./hub").createHubClient;
-var normalizeHubUrl = require("./hub").normalizeHubUrl;
+var createHubClient = require("../../../shared/pkjs/hub").createHubClient;
+var normalizeHubUrl = require("../../../shared/pkjs/hub").normalizeHubUrl;
 var createBridge = require("./bridge").createBridge;
 var Clay = require("@rebble/clay");
 var clay = new Clay(require("./config"), null, { autoHandleEvents: false });
