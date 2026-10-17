@@ -1,3 +1,4 @@
+import type { ClientRequest } from "node:http";
 import { cpSync, existsSync, readFileSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,10 +8,14 @@ import { CSP } from "./src/lib/csp";
 
 // In dev the app talks to the hub through Vite at the same origin. The proxy
 // plays the part of `tailscale serve`: it adds the identity header the hub
-// requires, and an Origin header for same-origin GETs (browsers omit it).
+// requires, an Origin header for same-origin GETs (browsers omit it), and
+// X-Forwarded-Host with the dev hostname, so a client that reaches Vite by
+// another name (the watch emulator uses 127.0.0.1:5173) still passes the
+// hub's host check.
 const HUB = process.env.PI_WEB_HUB ?? "http://127.0.0.1:7878";
 const DEV_LOGIN = process.env.PI_WEB_DEV_LOGIN ?? "dev@local";
 const DEV_ORIGIN = "http://localhost:5173";
+const DEV_HOST = new URL(DEV_ORIGIN).host;
 
 // Only built HTML gets the CSP, so Vite's dev client keeps working.
 function csp(): Plugin {
@@ -73,11 +78,15 @@ export default defineConfig({
 			"/api": {
 				target: HUB,
 				changeOrigin: false,
+				ws: true,
 				configure(proxy) {
-					proxy.on("proxyReq", (req) => {
+					const stamp = (req: ClientRequest) => {
 						req.setHeader("tailscale-user-login", DEV_LOGIN);
+						req.setHeader("x-forwarded-host", DEV_HOST);
 						if (!req.getHeader("origin")) req.setHeader("origin", DEV_ORIGIN);
-					});
+					};
+					proxy.on("proxyReq", stamp);
+					proxy.on("proxyReqWs", stamp);
 				},
 			},
 		},

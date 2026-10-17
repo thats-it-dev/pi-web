@@ -19,7 +19,7 @@ export function checkRequest(cfg: AuthConfig, h: IncomingHttpHeaders): AuthResul
 	return checkHostAndLogin(cfg, h);
 }
 
-export function checkHostAndLogin(cfg: AuthConfig, h: IncomingHttpHeaders): AuthResult {
+export function checkHostAndLogin(cfg: Pick<HubConfig, "hostname" | "allowedLogin">, h: IncomingHttpHeaders): AuthResult {
 	// tailscale serve may forward the original host as X-Forwarded-Host. A client
 	// that could forge that header is not a browser, and cannot get the identity
 	// header either unless it runs on this machine as this user.

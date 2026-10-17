@@ -12,6 +12,7 @@ import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
 import { gitUpdater } from "./update.ts";
+import { attachWatchStream } from "./watch-stream.ts";
 import { WatchService } from "./watch.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
 
@@ -54,11 +55,13 @@ try {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
 const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch });
+const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });
 
 const shutdown = () => {
+	stream.close();
 	watch.close();
 	registry.closeAll();
 	void bridge.close();

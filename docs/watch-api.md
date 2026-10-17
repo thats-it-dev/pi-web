@@ -38,9 +38,34 @@ Notes:
 - `pending` returns an empty `requests` list while an app is open on a session, because the app is already showing them.
 - `history` pages back: pass the earliest `i` you have as `before`.
 
+## Stream
+
+`GET /api/watch/stream` upgrades to a WebSocket and carries the same data as the long-poll without the wait. Auth is the same Host and `Tailscale-User-Login` check, applied to the upgrade request: a failure answers `403` (an unknown path `404`) and no socket opens. Frames are JSON text.
+
+Hub to client:
+
+| Frame | When |
+| --- | --- |
+| `{ type: "pending", cursor, requests, showing, sessions }` | once on connect, then whenever the cursor moves (one frame per burst of changes; speed ticks for the current session at most once a second) |
+| `{ type: "text", sessionId, text, streaming }` | while the current session (the `sessionId` the client last reported in `showing`) streams a reply: the last 240 characters of the partial message, at most every 250 ms, and once more with `streaming: false` when it ends. Sent at once when `showing` moves onto a session that is mid-reply. |
+
+Client to hub:
+
+| Frame | Meaning |
+| --- | --- |
+| `{ type: "showing", requestId, sessionId? }` | same as `POST /api/watch/showing`; it also selects the session whose text is streamed |
+
+Anything else is ignored. Answers, dismissals, prompts and model changes stay HTTP POSTs. The hub pings every 30 s, drops a socket that misses two pongs, and closes every socket with code 1001 when it shuts down. A reconnecting client gets a full `pending` frame; `text` is a tail, not a delta.
+
+From a tailnet device tailscale serve adds the identity headers, so a browser's `new WebSocket("wss://<hostname>/api/watch/stream")` is enough. Without wscat, from the hub's workspace (where `ws` is installed):
+
+```bash
+node -e 'const ws = new (require("ws"))(process.argv[1], { headers: { host: "<hostname>", "tailscale-user-login": "<login>" } }); ws.on("message", (m) => console.log(String(m)))' wss://<hostname>/api/watch/stream
+```
+
 ## Long-poll
 
-`GET /api/watch/pending` returns at once. Add `wait=1` and `since=<cursor>` to hold the request open until the cursor moves past `since`, or for 25 seconds, whichever comes first. Either way the reply is the full `WatchPending`; keep its `cursor` and send it as the next `since`. A client that goes away is dropped from the wait. If `since` is missing or not a number, it counts as 0.
+The fallback when a WebSocket is not available. `GET /api/watch/pending` returns at once. Add `wait=1` and `since=<cursor>` to hold the request open until the cursor moves past `since`, or for 25 seconds, whichever comes first. Either way the reply is the full `WatchPending`; keep its `cursor` and send it as the next `since`. A client that goes away is dropped from the wait. If `since` is missing or not a number, it counts as 0.
 
 ## Webhook
 

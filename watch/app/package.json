@@ -1,0 +1,68 @@
+{
+  "name": "pi-web-watch",
+  "author": "Michael Gutensohn",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "pi-web",
+    "uuid": "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b",
+    "projectType": "moddable",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "MSG",
+      "CMD",
+      "CMD_ID",
+      "REQ_ID",
+      "REQ_KIND",
+      "REQ_TOOL",
+      "REQ_TEXT",
+      "REQ_OPTIONS",
+      "REQ_INDEX",
+      "REQ_COUNT",
+      "SESSION_ID",
+      "SESSION_TITLE",
+      "STATE",
+      "MODEL",
+      "CTX_PERCENT",
+      "CTX_TOKENS",
+      "CTX_WINDOW",
+      "TPS",
+      "TEXT",
+      "STREAMING",
+      "NET",
+      "OK",
+      "REASON",
+      "OPTIONS",
+      "LIST",
+      "ROWS",
+      "OFFSET",
+      "TOTAL",
+      "MORE",
+      "OPTION",
+      "PROVIDER",
+      "MODEL_ID",
+      "DARK",
+      "HUB_URL"
+    ],
+    "resources": {
+      "media": []
+    },
+    "capabilities": [
+      "configurable"
+    ]
+  },
+  "dependencies": {
+    "@rebble/clay": "1.1.0"
+  }
+}

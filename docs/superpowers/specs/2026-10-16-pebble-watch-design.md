@@ -1,6 +1,6 @@
 # pi-web on the wrist: design
 
-Status: revised 2026-10-16 (Alloy, session menu, ring-started sessions); awaiting Michael's approval before planning. Companion mockups: https://claude.ai/artifact/VWNxsE45NNUaSb5ve8C1Kz (private).
+Status: revised 2026-10-16 (Alloy, session menu, ring-started sessions), and again later that day after plan 1 shipped: **a WebSocket stream replaces the long-poll as the primary transport** and the app shows the reply text as it streams (§5.1, §6.4, §7.5). Plan 1 (hub) is merged; plan 2 (app) is written against this revision. Companion mockups: https://claude.ai/artifact/VWNxsE45NNUaSb5ve8C1Kz (private).
 
 ## 1. Intent
 
@@ -82,6 +82,12 @@ developer.repebble.com/index-01/webhooks/.
 - On iOS the JS runs in JavaScriptCore with `XMLHttpRequest`, `WebSocket`,
   timers and `localStorage`; **no `fetch`, no `EventSource`**. iOS suspends the
   Pebble app when no Bluetooth activity is pending; timers then run late.
+- `tailscale serve` is a reverse proxy: it passes WebSocket upgrades through
+  and stamps `Tailscale-User-Login` on the upgrade request as on any other.
+  Node 26 ships a WebSocket *client* only; a server needs the `ws` package.
+- AppMessage (watch ↔ phone) carries one small dictionary at a time, each
+  acknowledged before the next goes; a few messages a second is the practical
+  rate. Whatever the phone receives faster than that, it coalesces.
 - The phone cannot push data into a closed watchapp, and server-pushed timeline
   pins are gone. Local pins exist but can't be created while the app's JS isn't
   running.
@@ -197,6 +203,12 @@ These are his calls, as he made them:
 - **Built with Alloy** (JavaScript on the watch, Piu UI), both face and app.
   Chosen 2026-10-16 after reading the docs and examples; it replaces the C
   plan.
+- **Push over a WebSocket** (2026-10-16, after plan 1 merged). The app shows
+  the reply text as it streams and context and speed about once a second.
+  Over a long-poll every one of those events ends the held request and the
+  phone opens a new one; a socket carries them as frames. The long-poll stays
+  as the fallback (no `WebSocket` in the phone-side runtime) and as the curl
+  path. Michael's call; the shape is §5.1.
 
 ## 4. The request model (hub)
 
@@ -269,7 +281,8 @@ token (§9), because PebbleKit JS sends no usable Origin.
 
 | Method, path | Purpose |
 |---|---|
-| `GET /api/watch/pending?since=<cursor>&wait=1` | Returns `{ cursor, requests: Request[], showing }`. With `wait=1` the hub holds the response up to 25 s until something changes (long-poll), then returns. Without it, returns at once. `requests` is the full current list (small), sorted oldest first, dismissed ones excluded. |
+| `GET /api/watch/stream` (WebSocket) | The primary transport (§5.1). On connect the hub sends the current `WatchPending`; after that, a `pending` frame whenever anything changes and `text` frames while the current session streams a reply. The client may send `showing` frames. |
+| `GET /api/watch/pending?since=<cursor>&wait=1` | The fallback and the curl path. Returns `{ cursor, requests: Request[], showing, sessions }`. With `wait=1` the hub holds the response up to 25 s until something changes (long-poll), then returns. Without it, returns at once. `requests` is the full current list (small), sorted oldest first, dismissed ones excluded. |
 | `POST /api/watch/showing` | `{ requestId: string \| null }`. The face or app reports what is on screen. |
 | `POST /api/watch/answer` | `{ requestId, option?: string, text?: string }`. Exactly one of `option`/`text`. Returns `{ ok: true }` or `{ ok: false, reason: "gone" \| "no_match", options?: string[] }`. |
 | `POST /api/watch/dismiss` | `{ requestId }`. |
@@ -285,10 +298,45 @@ contextTokens, contextWindow, tps, updatedAt }`. `tps` is tokens per second of
 the reply streaming now, else of the last reply, else `null`. The hub computes
 it from the same events the pi-web app uses; `LiveStats` moves from
 `app/src/lib/live-stats.ts` to `shared/src/live-stats.ts` so both use one
-implementation. The **long-poll response also carries `sessions`**, so the
-toolbar and the sessions list are live without a second connection; the
-long-poll also wakes on stats changes for the session the watch reports as
-current (`POST /api/watch/showing` gains an optional `sessionId`).
+implementation. Every `pending` frame (and long-poll response) **also carries
+`sessions`**, so the toolbar and the sessions list are live without a second
+connection; stats changes for the session the watch reports as current wake
+it too (`POST /api/watch/showing` takes an optional `sessionId`).
+
+### 5.1 The stream
+
+`GET /api/watch/stream` upgrades to a WebSocket. Auth is the same Host and
+`Tailscale-User-Login` check as every other watch route, applied to the
+upgrade request; a failed check answers `403` and closes. Frames are JSON
+text.
+
+Hub → client:
+
+| Frame | When |
+|---|---|
+| `{ type: "pending", cursor, requests, showing, sessions }` | once on connect, then whenever the cursor moves (same coalescing as the long-poll: one frame per burst of changes; speed ticks for the current session at most once a second) |
+| `{ type: "text", sessionId, text, streaming }` | while the **current session** (the `sessionId` the client last reported in `showing`) streams an assistant reply: the last 240 characters of the partial message, at most every 250 ms, and once more with `streaming: false` when the message ends. Sent once immediately when `showing` moves onto a session that is mid-reply. Nothing for other sessions. |
+
+Client → hub:
+
+| Frame | Meaning |
+|---|---|
+| `{ type: "showing", requestId, sessionId? }` | same as `POST /api/watch/showing`; it also selects the session whose text is streamed |
+
+Answers, dismissals, prompts and model changes stay HTTP POSTs: they are
+rare, they want a reply, and curl can do them. The hub pings every 30 s and
+drops a socket that misses two pongs; hub shutdown closes every socket with
+code 1001.
+
+Resync is trivial: a reconnecting client gets a full `pending` frame, and the
+`text` frame is a tail, not a delta, so nothing is replayed. The long-poll's
+`since` cursor matters only to the fallback.
+
+Why not the long-poll for this: at a few stats or text events a second it
+degenerates into a reconnect per event. Why not SSE: PebbleKit JS on iOS has
+no `EventSource`. Why the long-poll stays: the emulator's phone simulator and
+any other runtime without `WebSocket` still work, and the API stays
+curl-able.
 
 Answer mapping:
 
@@ -300,10 +348,11 @@ Answer mapping:
 | finished | n/a | `prompt { text, mode: "send" }` via the existing command path (`registry.ensure(id).command(...)`) |
 | error | n/a | same as finished |
 
-Long-poll notes: the hub's `Registry.onChange` and each handle's broadcast are
-already the change sources; the watch endpoint subscribes to those and wakes
-waiting pollers. One client at a time is expected (the face, or the app), but
-nothing breaks with two.
+Change sources: the hub's `Registry.onChange` and each handle's broadcast
+(tapped with `observe()`, which does not count as a viewer). The watch
+service subscribes to those once and fans out to stream subscribers and to
+waiting pollers alike. One client at a time is expected (the face, or the
+app), but nothing breaks with two.
 
 Push: the existing web push is unchanged. The watch does not use it, and
 the hub does not suppress it when the face is connected (§3: the duplicate
@@ -374,23 +423,41 @@ firmware. Whether tap events reach an Alloy *watchface* (the examples only
 use them in apps) is checked in milestone 1; the C service is available to
 faces, so it should.
 
-### 6.4 Phone-side code (PebbleKit JS)
+### 6.4 Phone-side code (PebbleKit JS), face and app
 
-- On `ready`: send one hello message to the watch (Alloy's `Message` can
-  only send after it has received), load settings, then long-poll
-  `/api/watch/pending` in a loop with `XMLHttpRequest` (no `fetch`, no
-  `EventSource`). Each response is diffed and the new list is sent to the
-  watch over AppMessage as a compact dictionary: request id, kind, tool,
-  message (clipped to ~120 chars), count, position. The long-poll stays on
-  the phone on purpose: `fetch` from the watch through the proxy would keep
-  the watch radio busy for every poll.
-- Back-off: on network error, retry after 5 s, doubling to 60 s. On success,
-  immediately poll again.
-- When the pending list is empty and has been for ten minutes, poll at most
-  every 60 s instead of long-polling, to let iOS suspend the app. First new
-  request after that may arrive up to 60 s late; acceptable for v1.
-- Weather: fetched at most every 20 minutes while the face is running, from
-  the source in §11.
+The face and the app share one phone-side design; the app's copy is plan 2,
+the face reuses its modules in plan 3.
+
+- **Transport.** On `ready`: send one hello message to the watch (Alloy's
+  `Message` can only send after it has received), load settings, then open
+  the stream (§5.1) with the runtime's `WebSocket`. If the runtime has no
+  `WebSocket`, long-poll `/api/watch/pending?wait=1` with `XMLHttpRequest`
+  instead; the two paths feed the same code. Networking stays on the phone
+  on purpose: a socket from the watch through the proxy would keep the watch
+  radio busy for every frame.
+- **Reconnect.** On close or error, reconnect after 1 s, doubling to 30 s;
+  a successful open resets the delay. Every (re)connect yields a full
+  `pending` frame, so there is no cursor to carry.
+- **The phone is the model, the watch is the view.** The phone keeps the
+  full pending list, the sessions list and loaded history pages; the watch
+  holds only what is on screen. The phone decides which request the watch
+  shows (the one it was showing if still pending, else the hub's `showing`,
+  else the oldest) and sends it as one compact dictionary: id, kind, tool,
+  message (clipped to 240 chars), options, position and count, session id
+  and title. Lists go to the watch in pages of at most 1000 bytes.
+- **Pacing to the watch.** One AppMessage in flight at a time; while one is
+  being acknowledged, newer values of the same kind replace the queued one
+  (latest pending list wins, latest text tail wins, latest stats win), and
+  replies and list pages queue in order. Stats go at most once a second,
+  text tails at most every 250 ms (the hub already paces both).
+- **Idle (face only).** When nothing has been pending and no session has
+  been running for ten minutes, close the socket and poll once a minute
+  instead, to let iOS suspend the app; the first poll that sees activity
+  reopens the socket. The first new request after going idle may arrive up
+  to 60 s late; acceptable for v1. The app never idles: its JS lives only
+  while the app is on screen.
+- Weather (face): fetched at most every 20 minutes while the face is running,
+  from the source in §11.
 - The watch-side code never blocks on the phone: no data yet means the
   widget shows `--`. Messages arrive through `pebble/message`'s `onReadable`.
 
@@ -427,6 +494,10 @@ the compaction threshold), speed as `62 T/S` (blinks while a reply streams,
 shows the last reply's figure otherwise, `--` with none), and the model's
 short name (`QWEN3`). Dark/light follows the app's own setting (same Clay
 keys; default dark); dark is paper black, ink white.
+
+The status line's left text is the connection cue as well: `CONNECTING` until
+the phone has reached the hub, `OFFLINE` while it cannot (the phone reports
+both over AppMessage), and `PI-WEB n/m` otherwise. No icon, no second line.
 
 ### 7.2 Request screen (home)
 
@@ -476,7 +547,12 @@ the menu.
 
 The app does not exit. Status line `PI-WEB 0/0`, toolbar, and the current
 session's last assistant message as the query, with a 14 px hint line
-`<SESSION TITLE> · <STATE>`. Rows: `say it` (sends a new prompt to this
+`<SESSION TITLE> · <STATE>`. **While the session is running, the query block
+is live**: it shows the tail of the reply as it streams (the stream's `text`
+frames, §5.1), the toolbar's speed figure blinks, and when the message ends
+the final tail stays as the last reply. The phone fetches the last reply
+from `/api/watch/history` when the current session changes and no stream text
+has arrived for it. Rows: `say it` (sends a new prompt to this
 session, §7.4) and `menu` (§7.6). The current session is the one the watch
 last showed; failing that, the most recently updated live session; failing
 that, the most recent closed one, whose `say it` reopens it through
@@ -497,7 +573,7 @@ first, most recently updated first; then recent closed sessions, dimmed, with
 `CLOSED · <age>` as the meta line. Select makes it current and returns to the
 home screen for that session (its pending request if it has one, else §7.5).
 Up/Down past the ends stop (no wrap). No scrollbar; the count in the status
-line is the only position cue. The list comes from the long-poll's `sessions`
+line is the only position cue. The list comes from the stream's `sessions`
 and refreshes in place.
 
 ### 7.8 History
@@ -519,7 +595,7 @@ is reached. Read only. Back returns to the menu.
 Status line `MODEL`. Query block: session title (14) and `model for this
 session`. Rows: pi's models for that session, short names, current one marked
 `●` on the right. Select POSTs `/api/watch/model`, shows `set` for a second,
-returns to the menu. The toolbar updates on the next poll.
+returns to the menu. The toolbar updates on the next `pending` frame.
 
 ### 7.10 Round 2
 
@@ -629,10 +705,17 @@ watch/
   app/                Alloy project, same shape; src/embeddedjs/{main.js,
                       views/*.js, modules/Menu.js}
   screenshots/        emulator captures, emery + gabbro, light + dark
-hub/src/watch.ts      request model, long-poll, sessions, answer mapping
+hub/src/watch.ts      request model, stream fan-out + long-poll, text tail, sessions, answer mapping
+hub/src/watch-stream.ts  the WebSocket endpoint (ws package), auth on upgrade, pings
 hub/src/index-webhook.ts
 shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
 ```
+
+Inside `watch/app/src/pkjs/`: `index.js` (wiring only), `hub.js` (the hub
+client: socket, long-poll fallback, reconnect, POSTs), `bridge.js` (the
+phone-side model: request selection, pacing, AppMessage packing, commands
+from the watch), `config.js` (Clay page). The face reuses `hub.js` and the
+packing half of `bridge.js`.
 
 - Scaffold each project with `pebble new-project --alloy --ai <name>` and
   keep the generated `CLAUDE.md`. `watch/face` and `watch/app` are **not**
@@ -648,8 +731,15 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
   `../../shared/js/*` modules under `modules`. Keep the module count low;
   each costs RAM.
 - `@moddable/pebbleproxy` is **not** a dependency: all networking is in
-  `src/pkjs/index.js` (plain ES5, `XMLHttpRequest`, Clay). The watch talks to
-  the phone with `pebble/message` only.
+  `src/pkjs/` (plain ES5, `WebSocket` with an `XMLHttpRequest` long-poll
+  fallback, Clay). The watch talks to the phone with `pebble/message` only.
+- The hub gains one runtime dependency, `ws` (and `@types/ws`); the hub's
+  self-update already runs `npm install`.
+- Emulator development: the Vite dev server already plays `tailscale serve`
+  for the browser app (it adds the identity header to proxied `/api`
+  requests). It proxies WebSocket upgrades too, so the emulator's phone-side
+  JS points its hub URL at `http://127.0.0.1:5173` and reaches a local dev
+  hub with the right headers.
 - Memory: start from the `words` example's `Application` options
   (`displayListLength`, `commandListLength`, `pixels: screen.width * 4`) and
   tune by `pebble logs`; the history screen keeps at most 24 turns in memory.
@@ -663,7 +753,12 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
   dismiss hides; finished turn → request; new prompt clears it; viewer gate:
   app open → list empty, finished dropped, dialog reappears on close). Answer
   mapping has table tests for the synonym rules. Long-poll returns early on
-  change and at 25 s without. Webhook tests sign a fixture multipart body and
+  change and at 25 s without. Stream tests, with Node's own `WebSocket`
+  client: an upgrade without the identity is refused; connect gets a
+  `pending` frame; a raised dialog arrives as a frame; a `showing` frame sets
+  the hub's showing; text tails arrive for the current session only, at most
+  every 250 ms, and a final one with `streaming: false`; a closed socket is
+  forgotten. Webhook tests sign a fixture multipart body and
   cover bad signature, stale timestamp, replay, test event, match, no match,
   empty transcription, and no pending → a session is created in `~/pebble/`
   (folder made if missing) and the transcription is its first prompt.
@@ -672,28 +767,34 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
   session reopens it, `tps` present while streaming and after.
 - Watch: emulator screenshots for every screen in the mockups on emery and
   gabbro, light and dark, checked into `watch/screenshots/`. The phone-side JS
-  is plain ES5 and gets a small `node:test` suite for the diffing and
-  AppMessage packing by loading it with a stubbed `Pebble` global. Watch-side
+  is plain ES5 and gets a `node:test` suite with stubbed `Pebble`,
+  `WebSocket` and `XMLHttpRequest` globals: the hub client (socket, fallback
+  when there is no `WebSocket`, reconnect back-off), request selection,
+  pacing and coalescing, list paging and AppMessage packing. Watch-side
   modules that hold logic (request packing, option matching for `no_match`
   display, history paging, toolbar formatting) are kept free of Piu imports
   so `node:test` can import them directly.
 - Hardware (manual, recorded in `watch/README.md`): on Michael's Time 2 and
-  iPhone: the flick path (§8), the long-poll surviving the phone locked in a
-  pocket for 30 minutes, dictation round trip, an Index 01 reply landing in
-  the right session.
+  iPhone: the flick path (§8), the socket surviving the phone locked in a
+  pocket for 30 minutes (and how fast it reconnects), dictation round trip,
+  an Index 01 reply landing in the right session.
 
 ## 14. Milestones
 
 1. **Launch and background check on hardware.** A throwaway Alloy face that
-   long-polls a stub endpoint from pkjs and, on `onTap`, tries §8 path 1, then
-   path 2. Outcome decides the launch path, whether the 60-second idle poll in
+   holds the stream open from pkjs (§5.1) and, on `onTap`, tries §8 path 1,
+   then path 2. Outcome decides the launch path, whether the idle policy in
    §6.4 is enough on iOS, whether `Accelerometer.onTap` fires in an Alloy
-   watchface, and whether Clay works from Alloy's pkjs. Half a day.
-   Everything after this is built on what it finds.
-2. **Hub**: request model, `/api/watch/*`, token, tests. Usable from `curl`.
-3. **App**: request screen, answer, dictation, touch, home, emulator
-   screenshots. Then the menu: sessions, history, model, with the hub
-   endpoints of §5 they need.
+   watchface, and whether Clay works from Alloy's pkjs. Half a day. The face
+   is built on what it finds. (Order changed after the fact: the hub and the
+   app come first because they can be verified on the emulator; this spike
+   moved into plan 3.)
+2. **Hub**: request model, `/api/watch/*`, tests. Usable from `curl`. **Done
+   (plan 1, merged 2026-10-16).** The stream endpoint (§5.1) is the first
+   part of plan 2.
+3. **App** (plan 2): the stream on the hub, the phone-side client and model,
+   then the request screen, answer, dictation, touch, home with live text,
+   emulator screenshots; then the menu: sessions, history, model.
 4. **Face**: idle, corners, settings, sheet, flick → app.
 5. **Index 01 webhook** and a short "watch" note in the pi-web app's settings
    (the mute step).
@@ -702,10 +803,19 @@ shared/src/live-stats.ts   moved from app/src/lib (tps + live context)
 ## 15. Risks and open unknowns
 
 - **iOS suspension.** If the Pebble app is suspended with the phone locked,
-  the face's long-poll stalls until Bluetooth traffic wakes it. Milestone 1
-  measures this. If it's bad, the fallback is the hub sending a web push
-  notification (already exists) so the iPhone wakes and the Pebble app sees
-  Bluetooth activity; the sheet then appears late but appears.
+  the face's socket is frozen or dropped until Bluetooth traffic wakes it,
+  exactly as a long-poll would be. Milestone 1 measures this. If it's bad,
+  the fallback is the hub sending a web push notification (already exists)
+  so the iPhone wakes and the Pebble app sees Bluetooth activity; the sheet
+  then appears late but appears.
+- **No `WebSocket` where the phone-side JS runs.** The emulator's phone
+  simulator may lack it, and the real app's runtime is only documented, not
+  yet measured. The long-poll fallback covers both; a status cue on the
+  watch (§7.1) says which transport is up.
+- **AppMessage throughput.** Streaming text is paced to the watch at four
+  tails a second at most, in 240-character pieces; if the emulator or the
+  watch drops messages at that size the cap halves. The watch never sees the
+  raw delta stream.
 - **Developer Connection availability.** The toggle may reset on app updates
   or reconnects. The sheet's manual path (§8.3) is always there.
 - **Dictation on iOS** depends on the phone app's transcription setup

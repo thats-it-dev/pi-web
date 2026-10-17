@@ -97,6 +97,8 @@ The hub keeps its push keys in `~/.config/pi-web/vapid.json` and the subscribed 
 
 The hub has an API for a Pebble watch: it lists the dialogs, finished runs and errors the watch may show, takes answers and prompts, and receives voice notes from an Index 01 ring. It is open to anything on the tailnet logged in as you, with no extra token, so the face, the app and the ring need only the hub's address. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [design spec](docs/superpowers/specs/2026-10-16-pebble-watch-design.md) for the plan.
 
+The watch app itself is in `watch/`. It is a Pebble Alloy watchapp for the Pebble Time 2 (emery) and Round 2 (gabbro), and a phone-side PebbleKit JS bridge relays it to the hub. [watch/README.md](watch/README.md) covers the toolchain, the emulator dev loop against a stub hub or the real hub, the Pebble app setup (hub URL, dark theme, muting pi-web notifications), the hardware checklist and the known issues.
+
 ## Deploy
 
 The app is a Cloudflare Pages project (`pi-web`) connected to this repo. A push

@@ -334,3 +334,6 @@ export interface WatchTurn {
 	role: "you" | "agent" | "tool";
 	text: string;
 }
+
+export type WatchStreamFrame = ({ type: "pending" } & WatchPending) | { type: "text"; sessionId: string; text: string; streaming: boolean };
+export type WatchClientFrame = { type: "showing"; requestId: string | null; sessionId?: string | null };
