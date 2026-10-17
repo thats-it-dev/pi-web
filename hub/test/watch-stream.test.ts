@@ -59,8 +59,8 @@ async function raise(): Promise<{ h: FakeHandle; requestId: string }> {
 	return { h, requestId: `dialog:${h.sessionId}:d1` };
 }
 
-async function connect(headers: Record<string, string>) {
-	const ws = new WebSocket(`ws://127.0.0.1:${port}/api/watch/stream`, { headers });
+async function connect(headers: Record<string, string>, opts: { autoPong?: boolean } = {}) {
+	const ws = new WebSocket(`ws://127.0.0.1:${port}/api/watch/stream`, { headers, ...opts });
 	const frames: WatchStreamFrame[] = [];
 	const waiters: (() => void)[] = [];
 	ws.on("message", (m) => {
@@ -160,6 +160,15 @@ test("the hub pings on the configured interval", async () => {
 	const pinged = new Promise<void>((r) => c.ws.once("ping", () => r()));
 	await Promise.race([pinged, new Promise((_, rej) => setTimeout(() => rej(new Error("no ping")), 500))]);
 	c.ws.close();
+});
+
+test("a socket that misses two pongs is dropped, one miss is not", async () => {
+	const c = await connect(WATCH, { autoPong: false });
+	await new Promise((r) => setTimeout(r, 15));
+	assert.equal(c.ws.readyState, WebSocket.OPEN);
+	await new Promise((r) => setTimeout(r, 100));
+	assert.equal(c.ws.readyState, WebSocket.CLOSED);
+	assert.equal(stream.clientCount(), 0);
 });
 
 test("stream.close() closes every client with 1001", async () => {

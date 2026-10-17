@@ -1,7 +1,8 @@
 // GET /api/watch/stream: the watch's WebSocket. One pending frame on connect,
 // then every frame WatchService emits; the client reports what it is showing.
 
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
+import type { Duplex } from "node:stream";
 import { type WebSocket, WebSocketServer } from "ws";
 import { checkHostAndLogin } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
@@ -19,36 +20,39 @@ export interface WatchStream {
 	close(): void;
 }
 
-const refuse = (socket: import("node:stream").Duplex, line: string) => {
+const refuse = (socket: Duplex, line: string) => {
 	socket.write(`HTTP/1.1 ${line}\r\nConnection: close\r\n\r\n`);
 	socket.destroy();
 };
 
 export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchStream {
 	const { watch, cfg, log = () => {}, pingMs = 30_000 } = deps;
-	const wss = new WebSocketServer({ noServer: true });
+	const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
 	const clients = new Set<WebSocket>();
-	const alive = new WeakMap<WebSocket, boolean>();
+	const missed = new WeakMap<WebSocket, number>();
+	let closed = false;
 
-	server.on("upgrade", (req, socket, head) => {
+	const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		const path = new URL(req.url ?? "/", "http://hub").pathname;
 		if (path !== "/api/watch/stream") return refuse(socket, "404 Not Found");
+		if (closed) return refuse(socket, "503 Service Unavailable");
 		const auth = checkHostAndLogin(cfg, req.headers);
 		if (!auth.ok) {
 			log(`rejected UPGRADE ${req.url}: ${auth.reason}`);
 			return refuse(socket, "403 Forbidden");
 		}
 		wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws));
-	});
+	};
+	server.on("upgrade", onUpgrade);
 
 	wss.on("connection", (ws: WebSocket) => {
 		clients.add(ws);
-		alive.set(ws, true);
+		missed.set(ws, 0);
 		ws.send(JSON.stringify({ type: "pending", ...watch.pending() }));
 		const off = watch.subscribe((f) => {
 			if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(f));
 		});
-		ws.on("pong", () => alive.set(ws, true));
+		ws.on("pong", () => missed.set(ws, 0));
 		ws.on("message", (data) => {
 			let f: unknown;
 			try {
@@ -73,11 +77,12 @@ export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchS
 
 	const timer = setInterval(() => {
 		for (const ws of clients) {
-			if (!alive.get(ws)) {
+			const n = (missed.get(ws) ?? 0) + 1;
+			if (n >= 2) {
 				ws.terminate();
 				continue;
 			}
-			alive.set(ws, false);
+			missed.set(ws, n);
 			ws.ping();
 		}
 	}, pingMs);
@@ -86,6 +91,8 @@ export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchS
 	return {
 		clientCount: () => clients.size,
 		close() {
+			closed = true;
+			server.off("upgrade", onUpgrade);
 			clearInterval(timer);
 			for (const ws of clients) ws.close(1001, "hub shutting down");
 		},
