@@ -65,6 +65,46 @@ test("sayIt via setSayIt", () => {
 	assert.deepEqual(m.sayIt, { text: "hello", status: "listening" });
 });
 
+test("say-it state: idle → listening → sending(text) → sent; no_match keeps text and options; failed returns to idle rows", () => {
+	const m = createModel();
+	const home = { requestId: "r1", kind: "dialog", options: ["allow", "deny"] };
+	assert.equal(m.sayIt.status, "idle");
+	m.setSayIt({ status: "listening" });
+	assert.equal(m.sayIt.status, "listening");
+	m.setSayIt({ status: "sending", text: "yes please", cmdId: 7 });
+	assert.deepEqual(homeRows(home, m.sayIt), ["sending…", "say it again"]);
+	assert.deepEqual(homeRows(null, m.sayIt), ["sending…", "say it again"]);
+	// A result for another command leaves the say-it state alone (and stays for takeResult).
+	m.apply(M({ MSG: "result", CMD_ID: 6, OK: 1 }));
+	assert.equal(m.sayIt.status, "sending");
+	assert.deepEqual(m.takeResult(6), { ok: true, reason: "", options: [] });
+	assert.equal(m.apply(M({ MSG: "result", CMD_ID: 7, OK: 1 })), "result");
+	assert.equal(m.sayIt.status, "sent");
+	assert.equal(m.sayIt.text, "yes please");
+	// A late duplicate for the same command does not move a settled state.
+	m.setSayIt({ status: "idle", text: "" });
+	m.apply(M({ MSG: "result", CMD_ID: 7, OK: 0, REASON: "error" }));
+	assert.equal(m.sayIt.status, "idle");
+
+	m.setSayIt({ status: "sending", text: "maybe", cmdId: 8 });
+	m.apply(M({ MSG: "result", CMD_ID: 8, OK: 0, REASON: "no_match", OPTIONS: "allow\ndeny" }));
+	assert.equal(m.sayIt.status, "no_match");
+	assert.equal(m.sayIt.text, "maybe");
+	assert.deepEqual(m.sayIt.options, ["allow", "deny"]);
+	assert.deepEqual(homeRows(home, m.sayIt), ["allow", "deny", "say it"]);
+
+	m.setSayIt({ status: "sending", text: "x", cmdId: 9 });
+	m.apply(M({ MSG: "result", CMD_ID: 9, OK: 0, REASON: "gone" }));
+	assert.equal(m.sayIt.status, "gone");
+
+	m.setSayIt({ status: "sending", text: "x", cmdId: 10 });
+	m.apply(M({ MSG: "result", CMD_ID: 10, OK: 0, REASON: "error" }));
+	assert.equal(m.sayIt.status, "failed");
+	assert.deepEqual(homeRows(home, m.sayIt), ["allow", "deny", "say it"]);
+	assert.deepEqual(homeRows(null, m.sayIt), ["say it", "menu"]);
+	assert.deepEqual(homeRows(home, { status: "idle", text: "" }), ["allow", "deny", "say it"]);
+});
+
 test("parseRows per kind; homeRows per kind", () => {
 	assert.deepEqual(parseRows("sessions", ["a\tTitle\trunning\t1\tqwen3\t42\t2h", "b\tT2\tclosed\t0\t\t-\t-"]), [
 		{ id: "a", title: "Title", state: "running", live: true, model: "qwen3", ctx: 42, age: "2h" },

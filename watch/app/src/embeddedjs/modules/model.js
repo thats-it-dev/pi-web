@@ -12,7 +12,13 @@ export function parseRows(kind, rows) {
 	});
 }
 
-export function homeRows(home) {
+// While a transcript is out (sending, then its sent/gone feedback) the rows are
+// the dimmed status row and `say it again`; otherwise the usual rows (after a
+// no_match the request's options return so one can be picked).
+const SAY_BUSY = { sending: 1, sent: 1, gone: 1 };
+
+export function homeRows(home, sayIt) {
+	if (sayIt && SAY_BUSY[sayIt.status]) return ["sending…", "say it again"];
 	if (!home || !home.kind) return ["say it", "menu"];
 	if (home.kind === "dialog") return [...home.options, "say it"];
 	return ["say it", "dismiss"];
@@ -79,9 +85,20 @@ export function createModel() {
 				case "net":
 					m.net = g("NET") || "connecting";
 					return kind;
-				case "result":
-					results.set(g("CMD_ID"), { ok: g("OK") === 1, reason: g("REASON") || "", options: lines(g("OPTIONS")) });
+				case "result": {
+					const r = { ok: g("OK") === 1, reason: g("REASON") || "", options: lines(g("OPTIONS")) };
+					const s = m.sayIt;
+					// The say-it command's result moves the say-it state; any other waits for takeResult.
+					if (s.status === "sending" && s.cmdId !== undefined && g("CMD_ID") === s.cmdId) {
+						if (r.ok) m.setSayIt({ status: "sent" });
+						else if (r.reason === "no_match") m.setSayIt({ status: "no_match", options: r.options });
+						else if (r.reason === "gone") m.setSayIt({ status: "gone" });
+						else m.setSayIt({ status: "failed" });
+					} else {
+						results.set(g("CMD_ID"), r);
+					}
 					return kind;
+				}
 				case "list": {
 					const name = g("LIST");
 					if (!m.lists[name]) return null;

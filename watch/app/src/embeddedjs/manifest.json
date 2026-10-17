@@ -4,7 +4,7 @@
 		"$(MODDABLE)/examples/manifest_typings.json"
 	],
 	"config": {
-		"creation": { "stack": 5120, "slot": 40960, "chunk": 19456 }
+		"creation": { "stack": 5120, "slot": 40960, "chunk": 23552 }
 	},
 	"modules": {
 		"piu/Controller": "./modules/piuController",

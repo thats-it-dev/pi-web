@@ -12,7 +12,7 @@ int main(void) {
 #endif
     .stack = 5120,
     .slot = 40960,
-    .chunk = 19456,
+    .chunk = 23552,
     .fxBuildFFI = fxBuildFFI,
   });
 

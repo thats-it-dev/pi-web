@@ -1,5 +1,5 @@
 // Adapted from the Alloy `words` example (piu/apps/words/modules/Menu.js):
-// rows from $.data.items ({ title, meta? }), Up/Down with repeat, the same
+// rows from $.data.items ({ title, meta?, dim? }), Up/Down with repeat, the same
 // bounce tween. Select is left to the containing view (it times the press for
 // hold-Select); a tap on a row selects and picks it.
 //
@@ -220,16 +220,16 @@ const MenuContainer = Container.template($ => ({
 		Content($, { left:0, right:0, top:0, height:0, skin:$.skins.ink }),
 		Column($, {
 			left:0, right:0, top:0,
-			contents: $.data.items.map($$ => new $.constructor.Item({ title:$$.title, meta:$$.meta, styles:$.styles }))
+			contents: $.data.items.map($$ => new $.constructor.Item({ title:$$.title, meta:$$.meta, dim:$$.dim, styles:$.styles }))
 		}),
 	]
 }));
 
-// $.styles.row / $.styles.rowMeta are Style instances with [normal, selected] colours.
+// $.styles.row / rowDim / rowMeta are Style instances with [normal, selected] colours.
 const MenuItemRow = Container.template($ => ({
 	left:0, right:0, height:$.meta ? METRICS.row2 : METRICS.row, active:true, Behavior:MenuItemBehavior,
 	contents: [
-		Label($, { left:6, right:6, top:$.meta ? 2 : 5, height:22, style:$.styles.row, string:$.title }),
+		Label($, { left:6, right:6, top:$.meta ? 2 : 5, height:22, style:$.dim ? $.styles.rowDim : $.styles.row, string:$.title }),
 		$.meta ? Label($, { left:6, right:6, top:24, height:18, style:$.styles.rowMeta, string:$.meta }) : null,
 	],
 }));
@@ -239,7 +239,7 @@ export default class MenuView extends View {
 	static get ItemBehavior() { return MenuItemBehavior }
 	static get Item() { return MenuItemRow }
 
-	// data: { items: [{ title, meta? }], styles, skins, selection? }
+	// data: { items: [{ title, meta?, dim? }], styles, skins, selection? }
 	constructor(data) {
 		super(data);
 		this.selection = data?.selection ?? 0;

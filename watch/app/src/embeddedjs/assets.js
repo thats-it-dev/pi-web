@@ -28,7 +28,7 @@ export function theme(dark) {
 			small: { font: small, color: ink, horizontal: "left" },
 			smallRight: { font: small, color: ink, horizontal: "right" },
 			body: { font: body, color: ink, horizontal: "left", leading: Math.round(SIZES.body * 1.2) },
-			bodyRight: { font: body, color: ink, horizontal: "right" },
+			bodyRight: { font: body, color: ink, horizontal: "right", leading: Math.round(SIZES.body * 1.2) },
 			meta: { font: small, color: dim, horizontal: "left" },
 		},
 	};

@@ -62,7 +62,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ### With the stub hub
 
-`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. `GET /dev/settings` answers `{ "DARK": <--dark> }`, which the phone side fetches at launch in the emulator so screenshots can switch theme.
+`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. `--delay <ms>` holds every POST's answer that long, to see the watch's `sending…` state. `GET /dev/settings` answers `{ "DARK": <--dark> }`, which the phone side fetches at launch in the emulator so screenshots can switch theme.
 
 | Scene | What the watch gets |
 | --- | --- |
@@ -73,7 +73,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
-node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1]
+node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms]
 
 # in another shell
 cd watch/app
@@ -89,9 +89,11 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **What the `dialog` scene shows.** The watch sends `hello` on launch and the phone answers with `cfg`, `net` and `home`, then `stats`. The Home screen shows `PI-WEB 1/2` and the time, the toolbar for `notesky sync` (`CTX` bar, `18%`, `--` for speed, `QWEN3`), the query `bash: Allow bash?` / `git push origin main`, and the rows `allow` `deny` `say it` with `allow` selected. `pebble emu-button --emulator emery click down` then `click select` answers `deny`: the row shows `…`, then `sent` for a second (the stub logs `POST /api/watch/answer`), then the finished turn on `pi-web watch` (`PI-WEB 1/1`, rows `say it` `dismiss`). `click back` dismisses it (`POST /api/watch/dismiss`) and exits to the watchface. Hold Select (`push select`, wait, `release select`) logs `pi-web: hold select -> MenuView` until the menu exists. Touch (tap a row to pick it) has no `pebble` command; it is untested in the emulator. Screenshots are in `watch/screenshots/`.
 
+**Say it in the emulator.** Picking `say it` opens the firmware's dictation screen (a pulsing dot), but the emulator cannot transcribe: after a press of Select it shows `Dictation is not available.` and the app logs `pi-web: dictation error 3`, then returns to the same rows. The transcript states (`sending…`, `sent`, `didn't match: allow, deny`) were checked with a temporary hook that fed a transcript in place of dictation (since removed): on the `dialog` scene the stub answers `no_match`, on `finished` and with nothing pending (a `prompt`) it answers ok. Run the stub with `--delay 5000` to see `sending…`.
+
 **Pacing.** The watch's `pebble/message` holds one unread dict; one that lands before the JS has read the previous is overwritten, and the firmware acks on receipt. The phone side therefore waits 100 ms after each ack before the next send (`ACK_GAP_MS` in `src/pkjs/index.js`). Without it, `net` and `stats` sent right after `cfg`/`home` were lost.
 
-**Memory.** The VM runs with `stack 5120, slot 40960, chunk 19456` (`src/c/mdbl.c`; the words example's `slot 31744` aborts with `memory full` once the Home screen is built, and a larger total fails `fxMapArchive` at launch). AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. At exit the firmware reports about 105 KB of 122 KB heap used.
+**Memory.** The VM runs with `stack 5120, slot 40960, chunk 23552` (`src/c/mdbl.c`; the words example's `slot 31744` aborts with `memory full` once the Home screen is built, and a larger total fails `fxMapArchive` at launch). AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. At exit the firmware reports about 105 KB of 122 KB heap used; after a say-it round (transcript screens, the firmware's dictation screen and its error dialog) about 116 KB. The chunk heap went from 19456 to 23552 for the transcript screens: a Piu `Text` is chunk-heavy, and the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456.
 
 ### With the real hub
 
@@ -109,6 +111,8 @@ Mute pi-web notifications in the Pebble phone app so they do not duplicate the w
 ## Hardware checklist
 
 (Filled in Task 11.)
+
+- dictation: hardware only (the emulator shows the dictation screen but cannot transcribe; check `say it` end to end on the watch: confirm screen, `sending…`, `sent`, and `didn't match` on a dialog).
 
 ## Known issues
 

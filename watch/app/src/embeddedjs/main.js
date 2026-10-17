@@ -39,6 +39,7 @@ function makeTheme(dark) {
 	// Menu rows: [normal, selected] colours; the selected row sits on an ink bar (Menu.js).
 	styles.row = new Style({ ...t.styles.body, color: [t.ink, t.paper] });
 	styles.rowMeta = new Style({ ...t.styles.meta, color: [t.dim, t.paper] });
+	styles.rowDim = new Style({ ...t.styles.body, color: [t.dim, t.paper] });
 	return { paper: t.paper, ink: t.ink, dim: t.dim, skins, styles };
 }
 

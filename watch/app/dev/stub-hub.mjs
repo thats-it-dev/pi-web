@@ -1,6 +1,7 @@
 // A stand-in hub for the emulator: canned watch data, no auth.
 // Run from the repo root (ws resolves from the root node_modules):
-//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1]
+//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms]
+// --delay holds every POST's answer that long (to see the watch's `sending…` state).
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -100,6 +101,7 @@ function arg(name, fallback) {
 const PORT = Number(arg("port", "5173"));
 const SCENE = arg("scene", "dialog");
 const DARK = Number(arg("dark", "1")) ? 1 : 0;
+const DELAY = Number(arg("delay", "0")) || 0;
 if (!SCENES[SCENE]) {
 	console.error(`unknown scene ${SCENE}; use dialog, finished, empty or stream`);
 	process.exit(2);
@@ -197,6 +199,7 @@ async function handle(req, res) {
 		const body = await readBody(req);
 		if (!body) return json(res, 400, { error: "bad body" });
 		console.log("  body", JSON.stringify(body));
+		if (DELAY) await new Promise((done) => setTimeout(done, DELAY));
 		if (path === "/api/watch/showing") {
 			showing = body.requestId ?? null;
 			return json(res, 200, { ok: true });
