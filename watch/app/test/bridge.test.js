@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createBridge, selectRequest, selectSession, packRows, packHome, packStats, clean, ageLabel } = require("../src/pkjs/bridge.js");
+const { createBridge, selectRequest, selectSession, packRows, packHome, packStats, clean, ageLabel, dictBytes } = require("../src/pkjs/bridge.js");
 const { FakeTimers } = require("./support/fakes.js");
 
 const HOUR = 3600 * 1000;
@@ -642,4 +642,105 @@ test("packHome and packStats with nothing known use empty strings and -1", () =>
 	assert.equal(h2.REQ_TEXT.slice(0, 3), "a\nb", "request text keeps its newlines");
 	assert.equal(h2.REQ_OPTIONS, "x y\nz");
 	assert.equal(h2.TEXT, "t");
+});
+
+test("the last reply is refetched when the session becomes current again; a failed fetch is not cached", () => {
+	const t = setup();
+	const historyGets = () => t.hub.of("get").filter((c) => c.path.indexOf("/api/watch/history?session=s1&limit=4") === 0);
+	const show = (sid) => t.bridge.onAppMessage({ CMD: "show", CMD_ID: 1, SESSION_ID: sid });
+	t.bridge.onPending(pending([], SESSIONS)); // s1 current
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "reply A" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("home").TEXT, "reply A");
+	show("s2");
+	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
+	t.drain();
+	assert.equal(t.bridge.current().sessionId, "s2");
+	show("s1");
+	assert.equal(historyGets().length, 2, "switching back fetches again");
+	t.drain();
+	assert.equal(t.last("home").TEXT, "", "the stale reply A is not shown");
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "reply B" }], total: 2 });
+	t.drain();
+	assert.equal(t.last("home").TEXT, "reply B");
+
+	// A failed fetch, then a re-switch: fetch again.
+	show("s2");
+	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
+	show("s1");
+	assert.equal(historyGets().length, 3);
+	t.hub.reply(new Error("network error"));
+	t.drain();
+	t.bridge.onPending(pending([], SESSIONS));
+	t.drain();
+	assert.equal(historyGets().length, 3, "no retry on every frame while current");
+	show("s2");
+	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
+	show("s1");
+	assert.equal(historyGets().length, 4, "a failed fetch is retried on the next switch");
+});
+
+test("a final text frame for a non-current session is cached (no dict) and saves the fetch on switching", () => {
+	const t = setup();
+	t.bridge.onPending(pending([r2], SESSIONS)); // s2 current
+	t.drain();
+	const before = t.dicts.length;
+	t.bridge.onText({ sessionId: "s1", text: "finished elsewhere", streaming: false });
+	t.bridge.onText({ sessionId: "s1", text: "streaming elsewhere", streaming: true });
+	assert.equal(t.dicts.length, before, "no text dict for a non-current session");
+	const gets = t.hub.of("get").length;
+	t.bridge.onAppMessage({ CMD: "show", CMD_ID: 1, SESSION_ID: "s1" });
+	t.drain();
+	assert.equal(t.hub.of("get").length, gets, "no fetch: a final frame arrived while away");
+	assert.equal(t.last("home").SESSION_ID, "s1");
+	assert.equal(t.last("home").TEXT, "finished elsewhere");
+});
+
+test("dictBytes follows the Pebble cost model; every list dict fits 1000 bytes, even with a 36-char session id", () => {
+	assert.equal(dictBytes({ A: 1 }), 1 + 7 + 4);
+	assert.equal(dictBytes({ A: "ab" }), 1 + 7 + 3);
+	assert.equal(dictBytes({ A: "é" }), 1 + 7 + 3);
+	const longId = "0123456789abcdef0123456789abcdef0123"; // 36
+	const t = setup();
+	const longSessions = [session(longId, { title: "t".repeat(200), model: "m".repeat(100) })];
+	for (let i = 0; i < 26; i++) longSessions.push(session("c" + i + "-" + longId.slice(0, 30), { live: false, updatedAt: NOW - i * HOUR, title: "é".repeat(80) }));
+	t.bridge.onPending(pending([], longSessions));
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 2, LIST: "history", SESSION_ID: longId, OFFSET: -1 });
+	const turns = [];
+	for (let i = 28; i < 40; i++) turns.push({ i: i, role: "agent", text: "é".repeat(240) });
+	t.hub.reply(null, { turns: turns, total: 40 }, "/api/watch/history?session=" + longId + "&limit=12");
+	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "sessions" });
+	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: longId });
+	const models = [];
+	for (let i = 0; i < 30; i++) models.push({ provider: "provider" + i, id: "model-id-" + i + "-" + "x".repeat(40), name: "N".repeat(90) });
+	t.hub.reply(null, { current: null, models: models }, "/api/watch/models");
+	const lists = t.drain().filter((d) => d.MSG === "list");
+	assert.ok(lists.filter((d) => d.LIST === "history").length > 1);
+	assert.ok(lists.filter((d) => d.LIST === "sessions").length > 1);
+	assert.ok(lists.filter((d) => d.LIST === "models").length > 1);
+	for (const d of lists) assert.ok(dictBytes(d) <= 1000, d.LIST + " dict is " + dictBytes(d) + " bytes");
+	// Rows survive whole across chunks.
+	const hist = lists.filter((d) => d.LIST === "history");
+	assert.equal(hist.map((d) => d.ROWS).join("\n").split("\n").length, 12);
+});
+
+test("titles clip to 60 and model names to 40 in rows, home and stats", () => {
+	const t = setup();
+	const longS = session("s1", { title: "T".repeat(100), model: "M".repeat(100) });
+	t.bridge.onPending(pending([], [longS]));
+	t.drain();
+	assert.equal(t.last("home").SESSION_TITLE.length, 60);
+	assert.equal(t.last("stats").MODEL.length, 40);
+	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "sessions" });
+	const row = t.drain().filter((d) => d.MSG === "list")[0].ROWS.split("\t");
+	assert.equal(row[1].length, 60);
+	assert.equal(row[4].length, 40);
+	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: "s1" });
+	t.hub.reply(null, { current: null, models: [{ provider: "p", id: "i", name: "N".repeat(100) }] }, "/api/watch/models");
+	const mrow = t.drain().filter((d) => d.MSG === "list")[0].ROWS.split("\t");
+	assert.equal(mrow[2].length, 40);
+	const h = packHome(Object.assign({}, r1, { sessionTitle: "x".repeat(100), tool: "y".repeat(100) }), 1, 1, null, "");
+	assert.equal(h.SESSION_TITLE.length, 60);
+	assert.equal(h.REQ_TOOL.length, 40);
 });

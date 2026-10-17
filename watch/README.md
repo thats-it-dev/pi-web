@@ -23,17 +23,17 @@ uv pip install --python ~/.local/share/uv/tools/pebble-tool/bin/python \
 # 3. The SDK and its own venv, which must be the same Python minor version as pebble-tool.
 pebble sdk install latest                               # SDK 4.33.1 (active)
 SDK=~/.local/share/pebble-sdk/SDKs/4.33.1
-rm -rf $SDK/.venv
-~/.local/share/uv/tools/pebble-tool/bin/python -m venv $SDK/.venv
+~/.local/share/uv/tools/pebble-tool/bin/python -m venv --upgrade $SDK/.venv
+(cd $SDK/.venv/bin && ln -sf python3.13 python && ln -sf python3.13 python3)
 $SDK/.venv/bin/python -m pip install -r $SDK/sdk-core/requirements.txt
 pebble sdk list
 ```
 
-On the spark the SDK venv was upgraded in place instead of recreated (`pebble-tool/bin/python -m venv --upgrade $SDK/.venv`, then `python` and `python3` in `$SDK/.venv/bin` symlinked to `python3.13`); either gives a 3.13 SDK venv.
+Step 3 is the route verified on the spark. Untried alternative: `rm -rf $SDK/.venv`, recreate it with `~/.local/share/uv/tools/pebble-tool/bin/python -m venv $SDK/.venv`, then the same `pip install -r`.
 
 Gotchas:
 
-- **`AssertionError: SRE module mismatch`** from `pebble build`: pebble-tool sets `PYTHONHOME` to the SDK's `.venv` and `PYTHONPATH` to its own `sys.path`, so the two venvs must be the same Python minor version. Recreate (or repoint) the SDK venv at 3.13 as in step 3.
+- **`AssertionError: SRE module mismatch`** from `pebble build`: pebble-tool sets `PYTHONHOME` to the SDK's `.venv` and `PYTHONPATH` to its own `sys.path`, so the two venvs must be the same Python minor version. Repoint the SDK venv at 3.13 as in step 3.
 - Reinstalling or upgrading pebble-tool drops the wheel; repeat step 2 afterwards.
 - `STPyV8.JSContext().eval(...)` outside a `with` block segfaults. pypkjs uses it correctly; this only matters when poking at STPyV8 by hand.
 
@@ -87,20 +87,7 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **Transport in the emulator: `ws`.** The emulator's phone simulator (pypkjs) provides `WebSocket`, so the phone side streams from `/api/watch/stream` and logs `pi-web: ws online`. The long-poll fallback is not exercised there.
 
-State after Task 5 (no watch-side code yet): the logs show the phone side start, connect and report `showing`, and try to send `cfg`, `net`, `home` and `stats` in that order. Every send fails because nothing on the watch opens AppMessage, so each is retried once after 500 ms and then dropped:
-
-```
-pkjs> pi-web: ready (emulator)
-pkjs> pi-web: send cfg
-pkjs> pi-web: send cfg failed
-pkjs> pi-web: ws online
-...
-pkjs> pi-web: send home
-pkjs> pi-web: send home failed
-pkjs> pi-web: drop home after 2 tries
-```
-
-The stub logs `ws open`, `GET /dev/settings`, the `showing` frame for the selected request, and `GET /api/watch/history?session=…&limit=4` (the last reply for home).
+Until the watch side opens AppMessage, each send fails, is retried once after 500 ms, and is dropped with a log line (`pi-web: drop <MSG> after 2 tries`).
 
 ### With the real hub
 

@@ -121,7 +121,14 @@ Pebble.addEventListener("showConfiguration", function () {
 Pebble.addEventListener("webviewclosed", function (e) {
 	if (!e || !e.response) return;
 	// Unconverted: keys stay names and values stay strings/booleans (converted keys are numeric message keys).
-	var raw = clay.getSettings(e.response, false);
+	var raw;
+	try {
+		raw = clay.getSettings(e.response, false);
+	} catch (err) {
+		// A cancelled or malformed response: keep the current settings.
+		log("pi-web: settings ignored: " + err.message);
+		return;
+	}
 	var s = {};
 	for (var k in raw) s[k] = raw[k] && typeof raw[k] === "object" ? raw[k].value : raw[k];
 	var newUrl = typeof s.HUB_URL === "string" ? s.HUB_URL.replace(/^\s+|\s+$/g, "") : "";

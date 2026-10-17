@@ -2,7 +2,9 @@
 // and watch commands into hub calls. ES5 only; all dependencies are injected.
 
 var TEXT_MAX = 240;
-var ROW_BYTES = 900;
+var MSG_BYTES = 1000; // spec §6.4: one AppMessage, whole dict
+var TITLE_MAX = 60;
+var NAME_MAX = 40;
 var STATS_MS = 1000;
 var RETRY_MS = 500;
 var HISTORY_PAGE = 12;
@@ -19,9 +21,13 @@ function clean(s) {
 	return str(s).replace(/[\t\n\r]/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
-function clip(s) {
+function clipTo(s, n) {
 	s = str(s);
-	return s.length > TEXT_MAX ? s.slice(0, TEXT_MAX) : s;
+	return s.length > n ? s.slice(0, n) : s;
+}
+
+function clip(s) {
+	return clipTo(s, TEXT_MAX);
 }
 
 function num(n) {
@@ -46,6 +52,17 @@ function utf8Length(s) {
 			n += 4;
 			i++;
 		} else n += 3;
+	}
+	return n;
+}
+
+// Pebble's dict cost: a 1-byte count, then per tuple 7 bytes (key 4, type 1, length 2)
+// plus the value (int32: 4; string: UTF-8 bytes plus NUL).
+function dictBytes(dict) {
+	var n = 1;
+	for (var k in dict) {
+		var v = dict[k];
+		n += 7 + (typeof v === "string" ? utf8Length(v) + 1 : 4);
 	}
 	return n;
 }
@@ -116,13 +133,13 @@ function packHome(req, index, count, session, lastText) {
 		MSG: "home",
 		REQ_ID: req ? str(req.id) : "",
 		REQ_KIND: req ? str(req.kind) : "",
-		REQ_TOOL: req ? str(req.tool) : "",
+		REQ_TOOL: req ? clipTo(req.tool, NAME_MAX) : "",
 		REQ_TEXT: req ? clip(req.message) : "",
 		REQ_OPTIONS: req ? (req.options || []).map(clean).join("\n") : "",
 		REQ_INDEX: index,
 		REQ_COUNT: count,
 		SESSION_ID: req ? str(req.sessionId) : session ? str(session.id) : "",
-		SESSION_TITLE: req ? str(req.sessionTitle) : session ? str(session.title) : "",
+		SESSION_TITLE: clipTo(req ? req.sessionTitle : session ? session.title : "", TITLE_MAX),
 		STATE: session ? stateOf(session) : req && req.kind === "dialog" ? "needs_you" : "idle",
 		TEXT: clip(lastText),
 	};
@@ -133,7 +150,7 @@ function packStats(session) {
 		MSG: "stats",
 		SESSION_ID: str(session.id),
 		STATE: stateOf(session),
-		MODEL: str(session.model),
+		MODEL: clipTo(session.model, NAME_MAX),
 		CTX_PERCENT: num(session.contextPercent),
 		CTX_TOKENS: num(session.contextTokens),
 		CTX_WINDOW: num(session.contextWindow),
@@ -144,7 +161,7 @@ function packStats(session) {
 function sessionRow(s, now) {
 	var ctx = typeof s.contextPercent === "number" ? String(Math.round(s.contextPercent)) : "-";
 	var age = s.live === false ? ageLabel(now - s.updatedAt) : "-";
-	return [clean(s.id), clean(s.title), stateOf(s), s.live === false ? "0" : "1", clean(s.model), ctx, age].join("\t");
+	return [clean(s.id), clipTo(clean(s.title), TITLE_MAX), stateOf(s), s.live === false ? "0" : "1", clipTo(clean(s.model), NAME_MAX), ctx, age].join("\t");
 }
 
 function darkValue(d) {
@@ -159,8 +176,12 @@ function createBridge(deps) {
 	var currentReq = null;
 	var currentSession = null;
 	var pin = null; // a session the watch chose with nothing selected, and the requests it saw then
+	// The last reply per session. It is dropped when a session becomes current again,
+	// unless a final text frame for it arrived while it was not current (fresh).
 	var lastText = {};
+	var fresh = {};
 	var textFetching = {};
+	var fetchFailed = {};
 	var net = "connecting";
 	var dark = storage.getItem(DARK_KEY) !== "0";
 
@@ -284,13 +305,19 @@ function createBridge(deps) {
 	}
 
 	function ensureText(sid) {
-		if (!sid || lastText[sid] !== undefined || textFetching[sid]) return;
+		if (!sid || lastText[sid] !== undefined || textFetching[sid] || fetchFailed[sid]) return;
 		textFetching[sid] = true;
 		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=4", function (err, json) {
 			textFetching[sid] = false;
+			if (err || !json) {
+				// Not cached: the next switch to this session tries again.
+				fetchFailed[sid] = true;
+				log("pi-web: history for " + sid + " failed: " + (err && err.message));
+				return;
+			}
 			if (lastText[sid] !== undefined) return;
 			var text = "";
-			var turns = (!err && json && json.turns) || [];
+			var turns = json.turns || [];
 			for (var i = turns.length - 1; i >= 0; i--) {
 				if (turns[i].role === "agent") {
 					text = str(turns[i].text);
@@ -298,7 +325,6 @@ function createBridge(deps) {
 				}
 			}
 			lastText[sid] = text;
-			if (err) log("pi-web: history for " + sid + " failed: " + err.message);
 			if (sid === currentSession) sendHome();
 		});
 	}
@@ -325,6 +351,11 @@ function createBridge(deps) {
 		var reqId = req ? req.id : null;
 		if (reqId !== currentReq || sid !== currentSession) {
 			currentReq = reqId;
+			if (sid !== currentSession && sid) {
+				if (fresh[sid]) delete fresh[sid];
+				else delete lastText[sid];
+				delete fetchFailed[sid];
+			}
 			currentSession = sid;
 			if (sid) storage.setItem(LAST_SESSION, sid);
 			if (sid || reqId) hub.showing(reqId, sid);
@@ -378,9 +409,10 @@ function createBridge(deps) {
 	}
 
 	function sendList(list, sid, rows, firstOffset, offsetOf, total) {
-		var chunks = packRows(rows, ROW_BYTES);
 		var base = { MSG: "list", LIST: list };
 		if (sid !== null) base.SESSION_ID = sid;
+		// The rows get what the other tuples of this message leave of MSG_BYTES.
+		var chunks = packRows(rows, MSG_BYTES - dictBytes(dict("", 0, 0)));
 		function dict(rowsStr, offset, more) {
 			var d = {};
 			for (var k in base) d[k] = base[k];
@@ -448,7 +480,7 @@ function createBridge(deps) {
 				var models = json.models || [];
 				var rows = models.map(function (m) {
 					var isCur = cur && cur.provider === m.provider && cur.id === m.id ? "1" : "0";
-					return [clean(m.provider), clean(m.id), clean(m.name), isCur].join("\t");
+					return [clean(m.provider), clean(m.id), clipTo(clean(m.name), NAME_MAX), isCur].join("\t");
 				});
 				sendList(list, sid, rows, 0, function (at) {
 					return at;
@@ -524,8 +556,16 @@ function createBridge(deps) {
 			update();
 		},
 		onText: function (f) {
-			if (!f || f.sessionId !== currentSession) return;
+			if (!f || !f.sessionId) return;
 			var streaming = f.streaming ? 1 : 0;
+			if (f.sessionId !== currentSession) {
+				// Never shown (Review Focus 5); a final reply is kept for when the session is current again.
+				if (!streaming) {
+					lastText[f.sessionId] = str(f.text);
+					fresh[f.sessionId] = true;
+				}
+				return;
+			}
 			if (!streaming) lastText[f.sessionId] = str(f.text);
 			enqueue({ MSG: "text", SESSION_ID: str(f.sessionId), TEXT: clip(f.text), STREAMING: streaming });
 		},
@@ -556,4 +596,5 @@ module.exports = {
 	packStats: packStats,
 	clean: clean,
 	ageLabel: ageLabel,
+	dictBytes: dictBytes,
 };
