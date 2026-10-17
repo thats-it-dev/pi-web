@@ -12,6 +12,7 @@ import { Registry } from "../src/registry.ts";
 import { createHubServer } from "../src/server.ts";
 import { SessionIndex } from "../src/sessions.ts";
 import { WatchService } from "../src/watch.ts";
+import type { launchOnPhone } from "../src/watch-launch.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 import { call } from "./support/http.ts";
 
@@ -192,4 +193,70 @@ test("the watch prefix boundary: paths that resolve outside /api/watch/ still ne
 	assert.equal((await call(port, "GET", "/api/watch/../sessions", WATCH)).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch/%2e%2e/sessions", WATCH)).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch", WATCH)).status, 403);
+});
+
+test("launch uses the last X-Forwarded-For (else the socket's address) and passes launchFn's answer through", async () => {
+	const w = new WatchService({ registry, index, viewers: new Viewers(), home: root });
+	const calls: [string, string][] = [];
+	let answer: { ok: true } | { ok: false; reason: "unreachable" } = { ok: true };
+	const launchFn = (async (host: string, uuid: string) => (calls.push([host, uuid]), answer)) as typeof launchOnPhone;
+	const s = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch: w, launchFn });
+	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+	const p = (s.address() as AddressInfo).port;
+	const uuid = "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b";
+	const fwd = { ...WATCH, "x-forwarded-for": "100.64.0.9, 10.0.0.1" };
+	try {
+		// A rejected request never records an address.
+		assert.equal((await call(p, "POST", "/api/watch/launch", { ...WATCH, "tailscale-user-login": undefined }, { uuid })).status, 403);
+		assert.equal(w.phone, null);
+		assert.equal(calls.length, 0);
+		assert.equal((await call(p, "GET", "/api/watch/health", fwd)).status, 200);
+		assert.deepEqual((await call(p, "POST", "/api/watch/launch", fwd, { uuid })).body, { ok: true });
+		assert.deepEqual(calls, [["100.64.0.9", uuid]]);
+		assert.deepEqual((await call(p, "POST", "/api/watch/launch", WATCH, { uuid })).body, { ok: true });
+		assert.deepEqual(calls[1], ["127.0.0.1", uuid]);
+		answer = { ok: false, reason: "unreachable" };
+		const r = await call(p, "POST", "/api/watch/launch", WATCH, { uuid });
+		assert.equal(r.status, 200);
+		assert.deepEqual(r.body, { ok: false, reason: "unreachable" });
+		for (const body of [{}, { uuid: "nope" }, { uuid: 5 }]) assert.equal((await call(p, "POST", "/api/watch/launch", WATCH, body)).status, 400);
+		assert.equal(calls.length, 3);
+	} finally {
+		w.close();
+		s.close();
+	}
+});
+
+test("launch answers no_phone while no address is known, without calling launchFn", async () => {
+	const w = new WatchService({ registry, index, viewers: new Viewers(), home: root });
+	let called = false;
+	const launchFn = (async () => ((called = true), { ok: true })) as typeof launchOnPhone;
+	const s = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch: w, launchFn });
+	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+	const p = (s.address() as AddressInfo).port;
+	try {
+		// Over HTTP the request itself records the socket's address, so force the unknown case.
+		w.notePhone = () => {};
+		assert.deepEqual((await call(p, "POST", "/api/watch/launch", WATCH, { uuid: "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b" })).body, { ok: false, reason: "no_phone" });
+		assert.equal(called, false);
+	} finally {
+		w.close();
+		s.close();
+	}
+});
+
+test("notePhone prefers the first X-Forwarded-For entry, strips ::ffff:", () => {
+	const w = new WatchService({ registry, index, viewers: new Viewers(), home: root });
+	try {
+		w.notePhone({}, undefined);
+		assert.equal(w.phone, null);
+		w.notePhone({}, "::ffff:100.64.0.5");
+		assert.equal(w.phone, "100.64.0.5");
+		w.notePhone({ "x-forwarded-for": " 100.64.0.9 , 1.1.1.1" }, "127.0.0.1");
+		assert.equal(w.phone, "100.64.0.9");
+		w.notePhone({}, "fd7a::1");
+		assert.equal(w.phone, "fd7a::1");
+	} finally {
+		w.close();
+	}
 });

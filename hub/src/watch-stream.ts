@@ -41,6 +41,7 @@ export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchS
 			log(`rejected UPGRADE ${req.url}: ${auth.reason}`);
 			return refuse(socket, "403 Forbidden");
 		}
+		watch.notePhone(req.headers, req.socket.remoteAddress);
 		wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws));
 	};
 	server.on("upgrade", onUpgrade);

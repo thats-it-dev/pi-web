@@ -3,6 +3,7 @@
 // that finished or errored while no app was open. The service also keeps the
 // watch's dismissals and what it reports as on screen, and wakes long-pollers.
 
+import type { IncomingHttpHeaders } from "node:http";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
@@ -75,6 +76,14 @@ export class WatchService {
 	private offs: (() => void)[];
 	private tracked = new Map<SessionHandle, Tracked>();
 	private closedFiles: FileSummary[] = []; // the index as last read, newest first
+	phone: string | null = null; // the last address a watch request came from (the phone, via the tailnet)
+
+	notePhone(h: IncomingHttpHeaders, remote: string | undefined): void {
+		const fwd = h["x-forwarded-for"];
+		const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+		const addr = first || remote?.replace(/^::ffff:/, "");
+		if (addr) this.phone = addr;
+	}
 
 	constructor(deps: WatchDeps) {
 		this.deps = deps;

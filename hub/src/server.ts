@@ -19,6 +19,7 @@ import type { Viewers } from "./push-watch.ts";
 import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 import type { Updater } from "./update.ts";
 import type { WatchService } from "./watch.ts";
+import type { launchOnPhone } from "./watch-launch.ts";
 import { routeWatch } from "./watch-routes.ts";
 
 export interface HubDeps {
@@ -34,6 +35,7 @@ export interface HubDeps {
 	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
 	watch?: WatchService; // the Pebble watch API; absent means /api/watch/* answers 503
 	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
+	launchFn?: typeof launchOnPhone; // watch launch relay; tests stub it
 	now?: () => number;
 }
 
@@ -235,8 +237,9 @@ export function createHubServer(deps: HubDeps): Server {
 					throw new HttpError(403, "Forbidden");
 				}
 				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
+				deps.watch.notePhone(req.headers, req.socket.remoteAddress);
 				const url = new URL(req.url ?? "/", "http://hub");
-				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
+				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, launchFn: deps.launchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
 				return;
 			}
 			if (req.method === "POST" && path === "/api/index/webhook") {

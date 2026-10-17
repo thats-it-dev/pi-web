@@ -27,6 +27,7 @@ All bodies are JSON. Success is `200`. A bad body or query answers `400`.
 | POST | `/api/watch/dismiss` | `{ requestId }` | `{ ok: true }` | |
 | POST | `/api/watch/prompt` | `{ sessionId, text }` | same as answer | |
 | POST | `/api/watch/model` | `{ sessionId, provider, modelId }` | `{ ok: true }` | `409` if the session refuses |
+| POST | `/api/watch/launch` | `{ uuid }` (the watchapp's uuid) | `{ ok: true }` or `{ ok: false, reason: "no_phone" \| "unreachable" }` | `400` bad uuid |
 | POST | `/api/index/webhook` | multipart | empty `200` | `400`, `409`, `413` |
 
 A `WatchRequest` is `{ id, kind, sessionId, sessionTitle, tool, message, options, method, createdAt }`. `kind` is `dialog`, `finished` or `error`, and `id` is `dialog:<sessionId>:<dialogId>`, `finished:<sessionId>:<messageIndex>` or `error:<sessionId>:<messageIndex>`. A `WatchSession` is `{ id, title, state, live, model, contextPercent, contextTokens, contextWindow, tps, updatedAt }`.
@@ -62,6 +63,16 @@ From a tailnet device tailscale serve adds the identity headers, so a browser's 
 ```bash
 node -e 'const ws = new (require("ws"))(process.argv[1], { headers: { host: "<hostname>", "tailscale-user-login": "<login>" } }); ws.on("message", (m) => console.log(String(m)))' wss://<hostname>/api/watch/stream
 ```
+
+## Launch
+
+The watchface calls `POST /api/watch/launch` with `{ uuid }` when the phone's own loopback path to the Developer Connection fails. The hub opens `ws://<phone>:9000/` and sends one binary frame, then closes. The frame is 22 bytes: `01` (RelayToWatch), `0011` (payload length 17), `0034` (AppRunState endpoint), `01` (start), then the 16 uuid bytes.
+
+- `{ ok: true }`: the frame was sent.
+- `{ ok: false, reason: "no_phone" }`: the hub has not yet seen a watch request, so it has no address.
+- `{ ok: false, reason: "unreachable" }`: the connection failed or timed out after 5 s. Both are `200`.
+
+The phone must have Developer Connection switched on in the Pebble app and be reachable from the hub over the tailnet. The hub targets the first entry of the last `X-Forwarded-For` it saw on any watch request or stream upgrade, falling back to the socket's address (a leading `::ffff:` is stripped).
 
 ## Long-poll
 

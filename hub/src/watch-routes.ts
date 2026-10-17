@@ -5,11 +5,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { HttpError } from "./errors.ts";
 import { readJson, sendJson } from "./http.ts";
 import type { WatchService } from "./watch.ts";
+import { launchOnPhone, UUID_RE } from "./watch-launch.ts";
 
 export interface WatchRouteDeps {
 	watch: WatchService;
 	version: string;
 	fetchFn?: typeof fetch;
+	launchFn?: typeof launchOnPhone;
 	now?: () => number;
 	log?: (m: string) => void;
 }
@@ -71,7 +73,7 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 	}
 
 	if (m === "POST") {
-		const known = ["showing", "answer", "dismiss", "prompt", "model"].map((a) => `/api/watch/${a}`);
+		const known = ["showing", "answer", "dismiss", "prompt", "model", "launch"].map((a) => `/api/watch/${a}`);
 		if (!known.includes(p)) return false;
 		const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
 		if (p === "/api/watch/showing") {
@@ -92,6 +94,17 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 			if (!str(body.requestId)) throw new HttpError(400, "A requestId is required");
 			watch.dismiss(body.requestId);
 			return reply({ ok: true }), true;
+		}
+		if (p === "/api/watch/launch") {
+			const { uuid } = body;
+			if (typeof uuid !== "string" || !UUID_RE.test(uuid)) throw new HttpError(400, "A uuid is required");
+			if (watch.phone === null) {
+				deps.log?.(`watch: launch ${uuid}: no phone`);
+				return reply({ ok: false, reason: "no_phone" }), true;
+			}
+			const r = await (deps.launchFn ?? launchOnPhone)(watch.phone, uuid);
+			deps.log?.(`watch: launch ${uuid} on ${watch.phone}: ${r.ok ? "ok" : r.reason}`);
+			return reply(r), true;
 		}
 		if (p === "/api/watch/prompt") {
 			if (!str(body.sessionId) || typeof body.text !== "string") throw new HttpError(400, "A sessionId and text are required");
