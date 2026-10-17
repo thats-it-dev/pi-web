@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createHubClient, socketUrl } = require("../src/pkjs/hub.js");
+const { createHubClient, socketUrl, normalizeHubUrl } = require("../src/pkjs/hub.js");
 const { FakeSocket, FakeXhr, FakeTimers } = require("./support/fakes.js");
 
 function setup(opts) {
@@ -11,17 +11,22 @@ function setup(opts) {
 	const pending = [];
 	const texts = [];
 	const statuses = [];
+	const logs = [];
 	const hub = createHubClient({
 		url: "https://h:7878",
-		WebSocket: opts.noWs ? null : FakeSocket,
+		WebSocket: opts.noWs ? null : opts.WebSocket || FakeSocket,
 		XMLHttpRequest: FakeXhr,
 		setTimeout: timers.setTimeout,
 		clearTimeout: timers.clearTimeout,
-		onPending: (f) => pending.push(f),
+		onPending: (f) => {
+			pending.push(f);
+			if (opts.throwPending) throw new Error("boom");
+		},
 		onText: (f) => texts.push(f),
 		onStatus: (s) => statuses.push(s),
+		log: (m) => logs.push(m),
 	});
-	return { hub, timers, pending, texts, statuses };
+	return { hub, timers, pending, texts, statuses, logs };
 }
 const sock = () => FakeSocket.instances[FakeSocket.instances.length - 1];
 const xhr = () => FakeXhr.instances[FakeXhr.instances.length - 1];
@@ -168,4 +173,50 @@ test("close() stops reconnects and polling and closes the socket", () => {
 	xhr().fail();
 	q.hub.close();
 	assert.deepEqual(q.timers.pending(), []);
+});
+
+test("normalizeHubUrl accepts only http(s), lower-cases the scheme and strips trailing slashes", () => {
+	assert.equal(normalizeHubUrl("https://h.ts.net/"), "https://h.ts.net");
+	assert.equal(normalizeHubUrl("  Https://H.ts.net:7878///  "), "https://H.ts.net:7878");
+	assert.equal(normalizeHubUrl("HTTP://127.0.0.1:5173"), "http://127.0.0.1:5173");
+	assert.equal(normalizeHubUrl("h.ts.net"), null);
+	assert.equal(normalizeHubUrl("ws://h"), null);
+	assert.equal(normalizeHubUrl("https://"), null);
+	assert.equal(normalizeHubUrl("https:///x"), null);
+	assert.equal(normalizeHubUrl(""), null);
+	assert.equal(normalizeHubUrl(null), null);
+	assert.equal(socketUrl(normalizeHubUrl("Https://h")), "wss://h/api/watch/stream");
+});
+
+test("a WebSocket constructor that throws → offline and a scheduled retry, not a wedge at connecting", () => {
+	let tries = 0;
+	function Throwing() {
+		tries++;
+		throw new SyntaxError("bad url");
+	}
+	const t = setup({ WebSocket: Throwing });
+	assert.doesNotThrow(() => t.hub.connect());
+	assert.deepEqual(t.statuses, ["connecting", "offline"]);
+	assert.deepEqual(t.timers.pending(), [1000]);
+	t.timers.fire(0);
+	assert.equal(tries, 2);
+	assert.deepEqual(t.timers.pending(), [2000]);
+	assert.ok(t.logs.some((m) => /socket failed/.test(m)));
+});
+
+test("a throwing onPending does not end the poll loop or the socket handler", () => {
+	const p = setup({ noWs: true, throwPending: true });
+	p.hub.connect();
+	assert.doesNotThrow(() => xhr().respond(200, '{"cursor":4}'));
+	assert.equal(p.pending.length, 1);
+	assert.equal(FakeXhr.instances.length, 2, "the next poll went out");
+	assert.equal(xhr().url, "https://h:7878/api/watch/pending?since=4&wait=1");
+	assert.ok(p.logs.some((m) => /pending handler failed: boom/.test(m)));
+
+	const w = setup({ throwPending: true });
+	w.hub.connect();
+	sock().onopen();
+	assert.doesNotThrow(() => sock().onmessage({ data: '{"type":"pending","cursor":1}' }));
+	sock().onmessage({ data: '{"type":"pending","cursor":2}' });
+	assert.equal(w.pending.length, 2);
 });

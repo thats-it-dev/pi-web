@@ -128,21 +128,75 @@ function stateOf(session) {
 	return session.live === false ? "closed" : str(session.state) || "idle";
 }
 
-function packHome(req, index, count, session, lastText) {
-	return {
+var ELLIPSIS = "\u2026";
+var OPTION_MIN = 12; // options are clipped no shorter than this before the request text gives way entirely
+var REQ_TEXT_MIN = 40;
+
+// At most n UTF-16 units, never ending inside a surrogate pair.
+function cut(s, n) {
+	s = s.slice(0, Math.max(0, n));
+	var c = s.charCodeAt(s.length - 1);
+	return c >= 0xd800 && c <= 0xdbff ? s.slice(0, -1) : s;
+}
+
+// The longest option loses one character (keeping a trailing ellipsis); false when none is longer than min.
+function clipLongest(shown, min) {
+	var at = -1;
+	for (var i = 0; i < shown.length; i++) if (shown[i].length > min && (at < 0 || shown[i].length > shown[at].length)) at = i;
+	if (at < 0) return false;
+	var s = shown[at];
+	if (s.charAt(s.length - 1) === ELLIPSIS) s = s.slice(0, -1);
+	shown[at] = cut(s, s.length - 1) + ELLIPSIS;
+	return true;
+}
+
+// Fits dict[key] (a "\n"-joined list of shown) and, when textKey is given, dict[textKey]
+// into MSG_BYTES: the text trims to REQ_TEXT_MIN, then options clip to OPTION_MIN, then the
+// text trims away, then trailing options drop. Returns the shown options (index i is option i).
+function fitOptions(dict, key, shown, textKey) {
+	var text = textKey ? dict[textKey] : "";
+	var trimmed = false;
+	function fits() {
+		dict[key] = shown.join("\n");
+		if (textKey) dict[textKey] = trimmed ? text + ELLIPSIS : text;
+		return dictBytes(dict) <= MSG_BYTES;
+	}
+	function trimText(min) {
+		while (!fits() && text.length > min) {
+			text = cut(text, text.length - Math.max(1, Math.ceil((text.length - min) / 8)));
+			trimmed = true;
+		}
+	}
+	if (textKey) trimText(REQ_TEXT_MIN);
+	while (!fits() && clipLongest(shown, OPTION_MIN)) {}
+	if (textKey) trimText(0);
+	while (!fits() && shown.length > 0) shown.pop();
+	return shown;
+}
+
+// The home dict and the options it shows. With a request, TEXT is empty (Home shows
+// the request, not the last reply), so the dict always fits the watch's inbox.
+function fitHome(req, index, count, session, lastText) {
+	var dict = {
 		MSG: "home",
 		REQ_ID: req ? str(req.id) : "",
 		REQ_KIND: req ? str(req.kind) : "",
 		REQ_TOOL: req ? clipTo(req.tool, NAME_MAX) : "",
 		REQ_TEXT: req ? clip(req.message) : "",
-		REQ_OPTIONS: req ? (req.options || []).map(clean).join("\n") : "",
+		REQ_OPTIONS: "",
 		REQ_INDEX: index,
 		REQ_COUNT: count,
 		SESSION_ID: req ? str(req.sessionId) : session ? str(session.id) : "",
 		SESSION_TITLE: clipTo(req ? req.sessionTitle : session ? session.title : "", TITLE_MAX),
 		STATE: session ? stateOf(session) : req && req.kind === "dialog" ? "needs_you" : "idle",
-		TEXT: clip(lastText),
+		TEXT: req ? "" : clip(lastText),
 	};
+	var shown = req ? fitOptions(dict, "REQ_OPTIONS", (req.options || []).map(clean), "REQ_TEXT") : [];
+	return { dict: dict, shown: shown };
+}
+
+function packHome(req, index, count, session, lastText) {
+	return fitHome(req, index, count, session, lastText).dict;
 }
 
 function packStats(session) {
@@ -183,6 +237,8 @@ function createBridge(deps) {
 	var textFetching = {};
 	var fetchFailed = {};
 	var net = "connecting";
+	// Per request id, the options last shown on the watch and the hub's options they stand for.
+	var shownOptions = {};
 	var dark = storage.getItem(DARK_KEY) !== "0";
 
 	var queue = [];
@@ -253,6 +309,25 @@ function createBridge(deps) {
 		);
 	}
 
+	// Options ----------------------------------------------------------------
+
+	function remember(reqId, shown, full) {
+		shownOptions[reqId] = { shown: shown.slice(), full: (full || []).slice() };
+	}
+
+	// The watch sends the option text it shows; the hub wants its own option string.
+	function hubOption(reqId, option) {
+		var m = shownOptions[reqId];
+		if (m) {
+			var i = m.shown.indexOf(option);
+			if (i >= 0 && i < m.full.length) return str(m.full[i]);
+		}
+		var req = findById(frame.requests, reqId);
+		var opts = (req && req.options) || [];
+		for (var k = 0; k < opts.length; k++) if (clean(opts[k]) === option) return str(opts[k]);
+		return option;
+	}
+
 	// Model ----------------------------------------------------------------
 
 	function sessionById(id) {
@@ -301,7 +376,9 @@ function createBridge(deps) {
 		for (var i = 0; i < sorted.length; i++) if (req && sorted[i].id === req.id) index = i + 1;
 		var session = sessionById(currentSession);
 		if (!session && !req && currentSession) session = { id: currentSession, title: "", live: true, state: "idle" };
-		enqueue(packHome(req, index, sorted.length, session, lastText[currentSession] || ""), force);
+		var home = fitHome(req, index, sorted.length, session, lastText[currentSession] || "");
+		if (req) remember(req.id, home.shown, req.options);
+		enqueue(home.dict, force);
 	}
 
 	function ensureText(sid) {
@@ -370,6 +447,7 @@ function createBridge(deps) {
 			return r.id !== id;
 		});
 		if (frame.showing === id) frame.showing = null;
+		delete shownOptions[id];
 	}
 
 	function sendAll() {
@@ -380,7 +458,7 @@ function createBridge(deps) {
 
 	// Commands -------------------------------------------------------------
 
-	function result(cmdId, err, json) {
+	function result(cmdId, err, json, requestId) {
 		var dict = { MSG: "result", CMD_ID: num(cmdId) };
 		if (err) {
 			dict.OK = 0;
@@ -391,7 +469,9 @@ function createBridge(deps) {
 		} else {
 			dict.OK = 0;
 			dict.REASON = json && (json.reason === "gone" || json.reason === "no_match") ? json.reason : "error";
-			dict.OPTIONS = ((json && json.options) || []).map(clean).join("\n");
+			var full = (json && json.options) || [];
+			var shown = fitOptions(dict, "OPTIONS", full.map(clean), null);
+			if (requestId && shown.length) remember(requestId, shown, full);
 		}
 		enqueue(dict);
 	}
@@ -399,7 +479,7 @@ function createBridge(deps) {
 	// Posts a command; a request that is answered (ok) or gone leaves locally at once.
 	function postCommand(path, body, cmdId, requestId) {
 		hub.post(path, body, function (err, json) {
-			result(cmdId, err, json);
+			result(cmdId, err, json, requestId);
 			if (err) log("pi-web: " + path + " failed: " + err.message);
 			if (!err && requestId && json && (json.ok || json.reason === "gone")) {
 				removeRequest(requestId);
@@ -525,7 +605,7 @@ function createBridge(deps) {
 			sendAll();
 		} else if (cmd === "answer") {
 			var body = { requestId: str(p.REQ_ID) };
-			if (p.OPTION !== undefined && p.OPTION !== null && p.OPTION !== "") body.option = str(p.OPTION);
+			if (p.OPTION !== undefined && p.OPTION !== null && p.OPTION !== "") body.option = hubOption(body.requestId, str(p.OPTION));
 			else body.text = str(p.TEXT);
 			postCommand("/api/watch/answer", body, p.CMD_ID, body.requestId);
 		} else if (cmd === "dismiss") {
@@ -553,6 +633,7 @@ function createBridge(deps) {
 		onPending: function (f) {
 			if (!f) return;
 			frame = { requests: f.requests || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
+			for (var id in shownOptions) if (!findById(frame.requests, id)) delete shownOptions[id];
 			update();
 		},
 		onText: function (f) {

@@ -1,5 +1,6 @@
 // Wiring only: Pebble events, the hub client, the bridge and Clay.
 var createHubClient = require("./hub").createHubClient;
+var normalizeHubUrl = require("./hub").normalizeHubUrl;
 var createBridge = require("./bridge").createBridge;
 var Clay = require("@rebble/clay");
 var clay = new Clay(require("./config"), null, { autoHandleEvents: false });
@@ -75,15 +76,16 @@ function onStatus(s) {
 function connect(newUrl) {
 	if (client) client.close();
 	client = null;
-	url = newUrl || null;
+	url = normalizeHubUrl(newUrl);
 	announced = false;
 	if (!url) {
+		if (newUrl) log("pi-web: hub URL ignored (needs http:// or https://): " + newUrl);
 		bridge.setHub(noHub());
 		bridge.onStatus("unconfigured");
 		return;
 	}
 	client = createHubClient({
-		url: url.replace(/\/+$/, ""),
+		url: url,
 		WebSocket: typeof WebSocket === "function" ? WebSocket : null,
 		XMLHttpRequest: XMLHttpRequest,
 		setTimeout: function (fn, ms) {
@@ -95,6 +97,7 @@ function connect(newUrl) {
 		onPending: bridge.onPending,
 		onText: bridge.onText,
 		onStatus: onStatus,
+		log: log,
 	});
 	bridge.setHub(client);
 	client.connect();
@@ -140,5 +143,5 @@ Pebble.addEventListener("webviewclosed", function (e) {
 	localStorage.setItem(URL_KEY, newUrl);
 	localStorage.setItem(DARK_KEY, s.DARK ? "1" : "0");
 	bridge.onSettings({ HUB_URL: newUrl, DARK: !!s.DARK });
-	if ((newUrl || null) !== url) connect(newUrl);
+	if (normalizeHubUrl(newUrl) !== url) connect(newUrl);
 });

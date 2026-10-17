@@ -6,6 +6,16 @@ var MAX_DELAY = 30000;
 var POLL_TIMEOUT = 35000;
 var POST_TIMEOUT = 15000;
 
+// An http(s) URL with a lower-case scheme and no trailing slash, or null for anything else.
+function normalizeHubUrl(s) {
+	s = s === null || s === undefined ? "" : String(s).replace(/^\s+|\s+$/g, "");
+	var m = /^(https?):\/\/(.+)$/i.exec(s);
+	if (!m) return null;
+	var rest = m[2].replace(/\/+$/, "");
+	if (!rest || rest.charAt(0) === "/") return null;
+	return m[1].toLowerCase() + "://" + rest;
+}
+
 function socketUrl(base) {
 	return base.replace(/^http/, "ws") + "/api/watch/stream";
 }
@@ -24,6 +34,20 @@ function createHubClient(opts) {
 	var pollXhr = null;
 	var cursor = 0;
 	var lastStatus = null;
+
+	function log(m) {
+		if (opts.log) opts.log(m);
+	}
+
+	// A callback that throws must not end the poll loop or the socket handler.
+	function deliver(fn, arg, what) {
+		if (!fn) return;
+		try {
+			fn(arg);
+		} catch (err) {
+			log("pi-web: " + what + " handler failed: " + (err && err.message));
+		}
+	}
 
 	function status(s) {
 		if (s === lastStatus) return;
@@ -82,7 +106,17 @@ function createHubClient(opts) {
 	}
 
 	function openSocket() {
-		var s = new WS(socketUrl(base));
+		var s;
+		try {
+			s = new WS(socketUrl(base));
+		} catch (err) {
+			log("pi-web: socket failed: " + (err && err.message));
+			socket = null;
+			socketOpen = false;
+			status("offline");
+			schedule(openSocket);
+			return;
+		}
 		socket = s;
 		socketOpen = false;
 		s.onopen = function () {
@@ -102,11 +136,9 @@ function createHubClient(opts) {
 			if (!frame) return;
 			if (frame.type === "pending") {
 				delete frame.type;
-				if (opts.onPending) opts.onPending(frame);
+				deliver(opts.onPending, frame, "pending");
 			} else if (frame.type === "text") {
-				if (opts.onText) {
-					opts.onText({ sessionId: frame.sessionId, text: frame.text, streaming: frame.streaming });
-				}
+				deliver(opts.onText, { sessionId: frame.sessionId, text: frame.text, streaming: frame.streaming }, "text");
 			}
 		};
 		s.onerror = function () {};
@@ -131,7 +163,7 @@ function createHubClient(opts) {
 			delay = MIN_DELAY;
 			status("online");
 			if (json && typeof json.cursor === "number") cursor = json.cursor;
-			if (opts.onPending) opts.onPending(json);
+			deliver(opts.onPending, json, "pending");
 			if (!closed) poll();
 		});
 	}
@@ -184,4 +216,4 @@ function createHubClient(opts) {
 	};
 }
 
-module.exports = { createHubClient: createHubClient, socketUrl: socketUrl };
+module.exports = { createHubClient: createHubClient, socketUrl: socketUrl, normalizeHubUrl: normalizeHubUrl };

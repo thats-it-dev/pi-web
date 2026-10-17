@@ -641,7 +641,8 @@ test("packHome and packStats with nothing known use empty strings and -1", () =>
 	assert.equal(h2.REQ_TEXT.length, 240);
 	assert.equal(h2.REQ_TEXT.slice(0, 3), "a\nb", "request text keeps its newlines");
 	assert.equal(h2.REQ_OPTIONS, "x y\nz");
-	assert.equal(h2.TEXT, "t");
+	assert.equal(h2.TEXT, "", "with a request the last reply is not sent");
+	assert.equal(packHome(null, 0, 0, s1, "t").TEXT, "t");
 });
 
 test("the last reply is refetched when the session becomes current again; a failed fetch is not cached", () => {
@@ -743,4 +744,60 @@ test("titles clip to 60 and model names to 40 in rows, home and stats", () => {
 	const h = packHome(Object.assign({}, r1, { sessionTitle: "x".repeat(100), tool: "y".repeat(100) }), 1, 1, null, "");
 	assert.equal(h.SESSION_TITLE.length, 60);
 	assert.equal(h.REQ_TOOL.length, 40);
+});
+
+test("home fits 1000 bytes with worst-case fields; the request text trims first, keeping an ellipsis", () => {
+	const sid = "0123456789abcdef0123456789abcdef0123"; // 36 chars
+	const big = {
+		id: "dialog:" + sid + ":0123456789abcdef0123456789abcdef0123",
+		kind: "dialog",
+		sessionId: sid,
+		sessionTitle: "\u00e9".repeat(100),
+		tool: "\u4e2d".repeat(100),
+		message: "\u4e2d".repeat(300),
+		options: ["a".repeat(60), "b".repeat(60), "c".repeat(60), "d".repeat(60)],
+		method: "select",
+		createdAt: 0,
+	};
+	const home = packHome(big, 1, 1, session(sid), "\u4e2d".repeat(240));
+	assert.ok(dictBytes(home) <= 1000, "home is " + dictBytes(home) + " bytes");
+	assert.equal(home.TEXT, "");
+	assert.equal(home.REQ_OPTIONS, big.options.join("\n"), "ASCII options fit unclipped");
+	assert.ok(home.REQ_TEXT.length < 240 && home.REQ_TEXT.length >= 40);
+	assert.equal(home.REQ_TEXT.slice(-1), "\u2026");
+
+	// Four 60-char 3-byte options cannot all fit with the rest: they clip, still four, still under 1000.
+	const wide = Object.assign({}, big, { options: ["\u4e2d", "\u6587", "\u5b57", "\u7b26"].map((c) => c.repeat(60)) });
+	const h2 = packHome(wide, 1, 1, session(sid), "");
+	assert.ok(dictBytes(h2) <= 1000, "home is " + dictBytes(h2) + " bytes");
+	const shown = h2.REQ_OPTIONS.split("\n");
+	assert.equal(shown.length, 4);
+	shown.forEach((o) => assert.ok(o.length >= 12));
+	assert.ok(shown.some((o) => o.slice(-1) === "\u2026"));
+});
+
+test("a shown (cleaned or clipped) option maps back to the hub's exact option string by index", () => {
+	const t = setup();
+	const long = "x".repeat(55) + "\u4e2d".repeat(300);
+	const r = Object.assign(req("r9", "dialog", "s1", 0, ["  run\nthis", long, "deny"]), { message: "\u4e2d".repeat(240) });
+	t.bridge.onPending(pending([r]));
+	t.drain();
+	const shown = t.last("home").REQ_OPTIONS.split("\n");
+	assert.equal(shown[0], "run this");
+	assert.notEqual(shown[1], long);
+	assert.ok(dictBytes(t.last("home")) <= 1000);
+
+	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 1, REQ_ID: "r9", OPTION: shown[0] });
+	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: "  run\nthis" });
+	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 2, REQ_ID: "r9", OPTION: shown[1] });
+	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: long });
+
+	// Options that come back with no_match map back the same way.
+	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 3, REQ_ID: "r9", TEXT: "hm" });
+	t.hub.reply(null, { ok: false, reason: "no_match", options: r.options });
+	t.drain();
+	const back = t.last("result").OPTIONS.split("\n");
+	assert.equal(back[0], "run this");
+	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 4, REQ_ID: "r9", OPTION: back[0] });
+	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: "  run\nthis" });
 });
