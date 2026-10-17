@@ -68,7 +68,7 @@ for (const s of SESSIONS) {
 	const turns = [];
 	for (let i = 0; i < 40; i++) {
 		const role = i % 5 === 3 ? "tool" : i % 2 ? "agent" : "you";
-		const text = role === "tool" ? "bash npm test" : i % 4 === 1 ? LONG : `${role === "you" ? "Question" : "Answer"} ${i} for ${s.title}.`;
+		const text = role === "tool" ? "bash · npm test" : i % 4 === 1 ? LONG : `${role === "you" ? "Question" : "Answer"} ${i} for ${s.title}.`;
 		turns.push({ i, role, text });
 	}
 	HISTORY[s.id] = turns;
@@ -114,6 +114,8 @@ if (!SCENES[SCENE]) {
 let cursor = 1;
 let requests = SCENES[SCENE].slice();
 let showing = null;
+// The session the client reports on screen; like the real hub, text frames go only for it.
+let showingSession = null;
 const waiters = new Set();
 const sockets = new Set();
 
@@ -127,6 +129,12 @@ function changed() {
 	for (const w of waiters) w(p);
 	waiters.clear();
 	for (const ws of sockets) ws.send(JSON.stringify({ type: "pending", ...p }));
+}
+
+function setShowing(f) {
+	showing = f.requestId ?? null;
+	const r = showing ? requests.find((x) => x.id === showing) : null;
+	showingSession = f.sessionId ?? (r ? r.sessionId : null);
 }
 
 function removeRequest(id) {
@@ -203,7 +211,7 @@ async function handle(req, res) {
 		console.log("  body", JSON.stringify(body));
 		if (DELAY) await new Promise((done) => setTimeout(done, DELAY));
 		if (path === "/api/watch/showing") {
-			showing = body.requestId ?? null;
+			setShowing(body);
 			return json(res, 200, { ok: true });
 		}
 		if (path === "/api/watch/answer") {
@@ -258,21 +266,21 @@ wss.on("connection", (ws) => {
 			if (Date.now() - start >= 6000) {
 				clearInterval(streamTimer);
 				streamTimer = null;
-				ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: false }));
+				if (showingSession === "s1") ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: false }));
 				// The turn is over: s1 goes idle (the watch's speed figure stops blinking).
 				LIVE[0].state = "idle";
 				changed();
 				return;
 			}
 			text += (n ? " " : "") + STREAM_SENTENCES[n++ % STREAM_SENTENCES.length].trim();
-			ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: true }));
+			if (showingSession === "s1") ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: true }));
 		}, 250);
 	}
 	ws.on("message", (m) => {
 		console.log("ws <", String(m));
 		try {
 			const f = JSON.parse(String(m));
-			if (f && f.type === "showing") showing = f.requestId ?? null;
+			if (f && f.type === "showing") setShowing(f);
 		} catch {}
 	});
 	ws.on("close", () => {

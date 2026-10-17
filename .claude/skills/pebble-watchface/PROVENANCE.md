@@ -1,0 +1,3 @@
+# Provenance
+
+This skill is a verbatim copy of `skills/pebble-watchface/` from the upstream repository https://github.com/coredevices/pebble-watchface-agent-skill, at commit `ea2e01e85ac47a5e48fdb6e58376a55ff3e64299` ("Describe screenshot --scale and emulator recovery", 2026-10-07), copied on 2026-10-16 (pi-web commit `06f666a`); the copy matches that commit file for file. Upstream publishes no LICENSE file (GitHub's licence API answers 404 for the repository) and so no open-source licence; its README's "License" section says only: "The skill and templates are provided for creating Pebble watchfaces and watchapps. Watchfaces and apps you create with it are your own." Redistribution terms for the skill itself are therefore unstated; it is kept here for local agent use.

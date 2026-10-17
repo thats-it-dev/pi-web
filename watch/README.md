@@ -62,14 +62,14 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ### With the stub hub
 
-`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. `--delay <ms>` holds every POST's answer that long, to see the watch's `sending…` state. `GET /dev/settings` answers `{ "DARK": <--dark> }`, which the phone side fetches at launch in the emulator so screenshots can switch theme.
+`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. History tool lines read `name · line` (`bash · npm test`), as the hub's `turnsFrom` writes them. `--delay <ms>` holds every POST's answer that long, to see the watch's `sending…` state. `GET /dev/settings` answers `{ "DARK": <--dark> }`, which the phone side fetches at launch in the emulator so screenshots can switch theme.
 
 | Scene | What the watch gets |
 | --- | --- |
 | `dialog` (default) | a `bash` permission dialog on `notesky sync` (`allow`/`deny`) and a finished turn on `pi-web watch` |
 | `finished` | the finished turn only |
 | `empty` | nothing pending: home shows the current session's last reply |
-| `stream` | nothing pending; on each socket open, `s1` runs and a `text` tail for it grows by a sentence every 250 ms for 6 s, then `streaming: false` and `s1` goes idle |
+| `stream` | nothing pending; on each socket open, `s1` runs and a `text` tail for it grows by a sentence every 250 ms for 6 s, then `streaming: false` and `s1` goes idle. As on the real hub, text frames go out only while the client's `showing` reports `s1` |
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
@@ -97,6 +97,8 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 - The phone sends one dict at a time (the outbox in `src/pkjs/bridge.js`: `home`, `stats` and `text` coalesce to the latest) and waits 100 ms after each ack before the next (`ACK_GAP_MS` in `src/pkjs/index.js`). The launch burst after `hello` (`cfg`, `net`, `home`, `stats`) goes through the same outbox. Without the gap, `net` and `stats` sent right after `cfg`/`home` were lost.
 - The watch reads and applies a dict inside `onReadable` and returns at once; the screens update afterwards in one deferred pass for all the kinds that arrived meanwhile (`onMessage`/`onModelChanged` in `main.js`), so a slow screen rebuild does not hold the read callback.
+
+The outbox also drops a `home`, `stats`, `text`, `net` or `cfg` identical to the last one queued of its kind, so a `home` lost after its retry is not resent until its content changes; the sequence-number and `hello` resync follow-up below covers that too.
 
 A lost dict would show as a stale screen until the next frame, or, for a lost `result`, as `failed` after 10 s for an answer that went through. If that is seen on hardware, the fix is sequence numbers plus a `hello` resync.
 
@@ -174,6 +176,7 @@ For Michael's Pebble Time 2 and iPhone. Note the outcome of each item here.
 - [ ] Back on a request dismisses it and exits to the watchface; Back with nothing pending just exits.
 - [ ] Watch for lost AppMessages: a screen that stays stale, or `failed` after 10 s for an answer that did go through (a lost `result`). If seen, add sequence numbers and a `hello` resync (see Pacing above).
 - [ ] Touch: tap a row to pick it (untested in the emulator).
+- [ ] A dialog with long or non-ASCII options shows on the watch (the phone trims the request text and clips options to fit the 1000-byte budget), and picking a clipped option answers it.
 
 ## Known issues
 
@@ -188,3 +191,8 @@ For Michael's Pebble Time 2 and iPhone. Note the outcome of each item here.
 - **Round 2 rim.** The rim cuts the first and last characters of a full-width history line at the very top and bottom of the view, and the free-centred Sessions list leaves paper above its first row.
 - **A lost `list` dict on History** leaves the page marked as loading until Back: Down does nothing, and Up scrolls but loads no older turns.
 - **Menu selection.** Coming back to the Menu from a screen starts the selection on `sessions` again.
+- **Models on a closed session.** ModelView shows an empty screen when the models fetch fails; for a closed current session it always fails (the hub answers 404).
+- **History cap.** History keeps at most 24 turns; scrolling back past that drops the newest turns from the window. Back and reopen History to see them again.
+- **Last reply after relaunch.** The fetched last reply is the hub's history text, clipped by the hub to its first 240 characters; Home shows the end of that, so after a relaunch a long reply shows its middle where streaming showed its real end.
+- **`showing` outlives the app.** The phone does not clear `showing` when the watch app exits, so the hub keeps sending speed ticks for that session until the phone's socket closes.
+- **Sessions list is a snapshot.** The Sessions list does not refresh in place while open; Back and reopen it for new state.
