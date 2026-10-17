@@ -69,7 +69,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 | `dialog` (default) | a `bash` permission dialog on `notesky sync` (`allow`/`deny`) and a finished turn on `pi-web watch` |
 | `finished` | the finished turn only |
 | `empty` | nothing pending: home shows the current session's last reply |
-| `stream` | nothing pending; on each socket open, a `text` tail for `s1` grows by a sentence every 250 ms for 6 s, then `streaming: false` |
+| `stream` | nothing pending; on each socket open, `s1` runs and a `text` tail for it grows by a sentence every 250 ms for 6 s, then `streaming: false` and `s1` goes idle |
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
@@ -87,24 +87,50 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **Transport in the emulator: `ws`.** The emulator's phone simulator (pypkjs) provides `WebSocket`, so the phone side streams from `/api/watch/stream` and logs `pi-web: ws online`. The long-poll fallback is not exercised there.
 
-**What the `dialog` scene shows.** The watch sends `hello` on launch and the phone answers with `cfg`, `net` and `home`, then `stats`. The Home screen shows `PI-WEB 1/2` and the time, the toolbar for `notesky sync` (`CTX` bar, `18%`, `--` for speed, `QWEN3`), the query `bash: Allow bash?` / `git push origin main`, and the rows `allow` `deny` `say it` with `allow` selected. `pebble emu-button --emulator emery click down` then `click select` answers `deny`: the row shows `…`, then `sent` for a second (the stub logs `POST /api/watch/answer`), then the finished turn on `pi-web watch` (`PI-WEB 1/1`, rows `say it` `dismiss`). `click back` dismisses it (`POST /api/watch/dismiss`) and exits to the watchface. Hold Select (`push select`, wait, `release select`) logs `pi-web: hold select -> MenuView` until the menu exists. Touch (tap a row to pick it) has no `pebble` command; it is untested in the emulator. Screenshots are in `watch/screenshots/`.
+**What the `dialog` scene shows.** The watch sends `hello` on launch and the phone answers with `cfg`, `net` and `home`, then `stats`. The Home screen shows `PI-WEB 1/2` and the time, the toolbar for `notesky sync` (`CTX` bar, `18%`, `--` for speed, `QWEN3`), the query `bash: Allow bash?` / `git push origin main`, and the rows `allow` `deny` `say it` with `allow` selected. `pebble emu-button --emulator emery click down` then `click select` answers `deny`: the row shows `…`, then `sent` for a second (the stub logs `POST /api/watch/answer`), then the finished turn on `pi-web watch` (`PI-WEB 1/1`, rows `say it` `dismiss`). `click back` dismisses it (`POST /api/watch/dismiss`) and exits to the watchface. Hold Select (`push select`, wait, `release select`) opens the menu. Touch (tap a row to pick it) has no `pebble` command; it is untested in the emulator. Screenshots are in `watch/screenshots/`.
+
+**What the `stream` scene shows.** The stream goes to `s1` (`pi-web watch`), so that session must be current. The emulator's phone remembers the current session across launches; if Home shows another one, pick `pi-web watch` under Menu → sessions, then relaunch. The query block then shows the end of the reply, growing a sentence at a time. The speed figure (`62 T/S`) blinks every 500 ms while `s1` runs. After 6 s the final tail stays as the last reply, the hint reads `PI-WEB WATCH · IDLE`, and the speed stops blinking. A later `home` with an older `lastText` does not replace it; only a change of current session does. No AppMessages were dropped with 240-character `TEXT` payloads.
 
 **Say it in the emulator.** Picking `say it` opens the firmware's dictation screen (a pulsing dot), but the emulator cannot transcribe: after a press of Select it shows `Dictation is not available.` and the app logs `pi-web: dictation error 3`, then returns to the same rows. The transcript states (`sending…`, `sent`, `didn't match: allow, deny`) were checked with a temporary hook that fed a transcript in place of dictation (since removed): on the `dialog` scene the stub answers `no_match`, on `finished` and with nothing pending (a `prompt`) it answers ok. Run the stub with `--delay 5000` to see `sending…`.
 
-**Pacing.** The watch's `pebble/message` holds one unread dict; one that lands before the JS has read the previous is overwritten, and the firmware acks on receipt. The phone side therefore waits 100 ms after each ack before the next send (`ACK_GAP_MS` in `src/pkjs/index.js`). Without it, `net` and `stats` sent right after `cfg`/`home` were lost.
+**Pacing and lost messages.** The watch's `pebble/message` holds one unread dict; one that lands before the JS has read the previous is overwritten, and the firmware acks on receipt. Two mitigations, neither a guarantee:
+
+- The phone sends one dict at a time (the outbox in `src/pkjs/bridge.js`: `home`, `stats` and `text` coalesce to the latest) and waits 100 ms after each ack before the next (`ACK_GAP_MS` in `src/pkjs/index.js`). The launch burst after `hello` (`cfg`, `net`, `home`, `stats`) goes through the same outbox. Without the gap, `net` and `stats` sent right after `cfg`/`home` were lost.
+- The watch reads and applies a dict inside `onReadable` and returns at once; the screens update afterwards in one deferred pass for all the kinds that arrived meanwhile (`onMessage`/`onModelChanged` in `main.js`), so a slow screen rebuild does not hold the read callback.
+
+A lost dict would show as a stale screen until the next frame, or, for a lost `result`, as `failed` after 10 s for an answer that went through. If that is seen on hardware, the fix is sequence numbers plus a `hello` resync.
 
 **Memory.** The VM runs with `stack 5120, slot 43008, chunk 23552` (`src/c/mdbl.c`, mirrored in `manifest.json`). The words example's `slot 31744` aborts with `memory full` once the Home screen is built. Slot went from 40960 to 43008 for the menu screens: at 40960, picking a model aborted with `# Slot allocation: failed in fixed size heap` (every loaded screen module keeps its functions resident), and 41984 passed with under 1 KB to spare. The chunk heap went from 19456 to 23552 for the transcript screens: a Piu `Text` is chunk-heavy, and the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456. AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. With the menu screens, `heap_bytes_free()` reads 8.1 KB on every screen, and the firmware's high-water mark at exit is 119.6 KB of 122.1 KB.
 
-**Code size is memory (emulator).** The emulator copies the mod archive (`build/mods/<platform>/mc.xsa`) into RAM, and at launch the runtime mallocs a table the size of the archive's `MAPS` atom (2 bytes per identifier reference in the bytecode). A 51 KB archive with `MAPS` 7636 B failed at launch with `fxMapArchive failed` or `fxAbort memory full`; 41.5 KB with `MAPS` 5836 B boots. Keep the archive near 42 KB: screens swap without transitions (`piuView.js`), the Menu has no tweens, and list screens share `modules/ListScreen.js`. Lists are virtualised (`Menu.js` keeps only the rows that fit plus one, re-bound on scroll), and sessions/models rows stay raw strings until drawn (`m.rowAt`). On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 install.
+**Code size is memory (emulator).** The emulator copies the mod archive (`build/mods/<platform>/mc.xsa`) into RAM, and at launch the runtime mallocs a table the size of the archive's `MAPS` atom (2 bytes per identifier reference in the bytecode). Too big and launch stops at `fxMapArchive failed` or `fxAbort memory full`. Measured on emery: a 42.8 KB archive boots, 42.9 KB does not, so the ceiling is about 42.8 KB with the current VM sizes. Every byte of the archive copy is also a byte less C heap.
 
-**The full build does not boot in the emulator (emulator-only limitation, since History).** With History the full archive is 45.7 KB (`MAPS` 6496 B) and launch stops at `fxMapArchive failed`. Measured on emery: a 42.8 KB archive boots, 42.9 KB does not, so the ceiling is about 42.8 KB with the current VM sizes; it also costs runtime heap, since every byte of the archive copy is a byte less C heap (the firmware's high-water mark was 120.0 KB of 122.1 KB with a 42.0 KB archive). To check a screen in the emulator, build a subset of the views and install it:
+**The full build boots in both emulators.** The final archive is 42334 B (`MAPS` 5940 B), the same for emery and gabbro, about 450 B under the ceiling. The full build of Task 10 was 45702 B (`MAPS` 6496 B) and did not boot. The diet:
+
+- Home's query block is whole lines of Labels (`wrapLines`/`tailLines`), not a Piu `Text`.
+- The say-it and row feedback share one timer.
+- The status line keeps its own clock.
+- Skins and styles are made in `assets.js`.
+- The words `Controller` is folded into `main.js`.
+- The 12/24 h FFI call gave way to `watch.hour12`.
+- `KEYS` is a single string.
+
+Free heap with the full build on emery (temporary `heap_bytes_free()` probe, since removed): 9.7 KB at `main.js`, 7.4 to 7.6 KB with Home built, and the firmware's high-water mark at exit was 120.4 KB of 122.3 KB. Keep the archive under about 42.5 KB:
+
+- Screens swap without transitions (`piuView.js`), and the Menu has no tweens.
+- List screens share `modules/ListScreen.js`.
+- Lists are virtualised: `Menu.js` keeps only the rows that fit plus one, re-bound on scroll.
+- Sessions/models rows stay raw strings until drawn (`m.rowAt`).
+
+On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 install.
+
+When a change pushes the full build over the ceiling, check a screen with a subset of the views:
 
 ```bash
 cd watch/app
 node dev/build-subset.mjs MenuView History    # Home is always in; then pebble install as usual
 ```
 
-`dev/build-subset.mjs` writes a temporary manifest that lists only the named views, runs `pebble build`, and restores the real manifest (also on failure; never commit the temporary one). It removes `build/mods` before and after, so the next full `pebble build` relinks. Opening a screen that was left out aborts the app. `MenuView History` is 42.8 KB, just under the ceiling; `Sessions`/`ModelView` were verified in their own task with the build of that time. On hardware the archive is mapped from flash, so whether the full build boots on a Time 2 is the first hardware check.
+`dev/build-subset.mjs` writes a temporary manifest that lists only the named views, then runs `pebble build`. It restores the real manifest afterwards, also on failure; never commit the temporary one. It removes `build/mods` before and after, so the next full `pebble build` relinks. Opening a screen that was left out aborts the app.
 
 ### With the real hub
 
@@ -117,15 +143,37 @@ The emulator's default hub URL is `http://127.0.0.1:5173`, the same address; Vit
 
 ## Pebble app setup
 
-Mute pi-web notifications in the Pebble phone app so they do not duplicate the watch app's own. (Remaining steps in Task 11.)
+On the iPhone, in the Pebble app:
+
+1. Install the app (`pebble install --phone <ip>` from `watch/app`, or the `.pbw` from `build/`). The phone's Developer Connection toggle is only for installing from the spark; the app itself does not need it.
+2. **Notifications → pi-web → off**, so pi-web's push notifications do not duplicate what the app shows.
+3. Open the app's settings page (the gear next to pi-web in the Pebble app). Set **Hub URL** to the hub's tailnet URL, for example `https://<hostname>` (what `tailscale serve` publishes), and **Dark** as wanted (default on). Save. With no URL the status line reads `NO HUB URL`.
+
+The status line's left text is the connection cue: `CONNECTING` until the phone reaches the hub, `OFFLINE` while it cannot, `NO HUB URL` with nothing set, and `PI-WEB n/m` otherwise.
 
 ## Hardware checklist
 
-(Filled in Task 11.)
+For Michael's Pebble Time 2 and iPhone. Note the outcome of each item here.
 
-- Full build boots on the Time 2? (The emulator copies the archive into RAM, and the full build no longer boots there; hardware maps it from flash.) Also note the firmware's `Heap Usage for App` line at exit; it was 119.6 KB of 122.1 KB in the emulator.
-- dictation: hardware only (the emulator shows the dictation screen but cannot transcribe; check `say it` end to end on the watch: confirm screen, `sending…`, `sent`, and `didn't match` on a dialog).
+- [ ] The full build installs and launches on the Time 2. The emulator copies the archive into RAM; hardware maps it from flash. Note the firmware's `Heap Usage for App` line at exit (`pebble logs`); in the emulator it was 120.4 KB of 122.3 KB.
+- [ ] The settings page opens from the Pebble app, saves Hub URL and Dark, and the theme switches on the watch without a relaunch.
+- [ ] The socket connects. Note which transport the phone reports: `pi-web: ws online`, or long-poll in `pebble logs`. The iOS PebbleKit JS may not offer `WebSocket`.
+- [ ] Lock the phone for 30 min with a session running, then unlock it and open the app. Note how long the status line takes to go from `OFFLINE`/`CONNECTING` back to `PI-WEB n/m`.
+- [ ] Dictation round trip. `say it` → speak → the firmware's confirm screen → `sending…` → `sent`, with the prompt arriving in the session. On a select dialog, saying something that matches no option gives `didn't match: …` and the options come back.
+- [ ] Answer a real dialog with a button (`…`, then `sent`), and watch a reply stream live into the home screen. The speed figure should blink while the session runs and stop when it ends.
+- [ ] Back on a request dismisses it and exits to the watchface; Back with nothing pending just exits.
+- [ ] Watch for lost AppMessages: a screen that stays stale, or `failed` after 10 s for an answer that did go through (a lost `result`). If seen, add sequence numbers and a `hello` resync (see Pacing above).
+- [ ] Touch: tap a row to pick it (untested in the emulator).
 
 ## Known issues
 
-- The LECO 1976 font could not be fetched (fontlibrary.org serves no download for it), so the UI uses the system `Gothic` font (`FONT_FAMILY` in `app/src/embeddedjs/assets.js`). Dropping a licensed TTF into `app/src/embeddedjs/assets/fonts/` and a `resources` entry in the manifest would restore it.
+- **Font.** The LECO 1976 font could not be fetched (fontlibrary.org serves no download for it), so the UI uses the system `Gothic` font (`makeTheme` in `app/src/embeddedjs/assets.js`). Dropping a licensed TTF into `app/src/embeddedjs/assets/fonts/` and adding a `resources` entry in the manifest would restore it.
+- **Dictation is hardware only.** The emulator shows the dictation screen but cannot transcribe (error 2 or 3, then back to the rows). The transcript states were checked with a temporary hook.
+- **Touch is untested.** `pebble` has no touch injection.
+- **Emulator code-size ceiling.** The full build boots, with about 450 B to spare (see Code size is memory above). Past the ceiling, use `dev/build-subset.mjs`.
+- **Message loss is mitigated, not ruled out** (see Pacing above).
+- **Native PKJS-ready message.** At launch the native module's PKJS-ready message reaches the phone as a dict with no `CMD`, and the phone logs `pi-web: unknown command ` (harmless). The watch's first `hello` write can fail there with `output_begin failed`; it is retried.
+- **Stats switch early.** After an answer the phone switches `stats` to the next session at once, so for about a second the toolbar can show the next session's figures under the answered request.
+- **History.** A theme change on History reloads the newest page and loses the scroll position. A failed page shows `/-1` in the status until the next Up retries it. There is no touch drag.
+- **Round 2 rim.** The rim cuts the first and last characters of a full-width history line at the very top and bottom of the view, and the free-centred Sessions list leaves paper above its first row.
+- **Menu selection.** Coming back to the Menu from a screen starts the selection on `sessions` again.
