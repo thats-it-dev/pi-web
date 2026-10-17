@@ -1,7 +1,11 @@
 // A stand-in hub for the emulator: canned watch data, no auth.
 // Run from the repo root (ws resolves from the root node_modules):
 //   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--options 1-4]
+//     [--platform emery|gabbro] [--no-launch-port]
 // --delay holds every POST's answer that long (to see the watch's `sending…` state).
+// --platform picks the emulator whose phone simulator port /dev/settings reports as LAUNCH_PORT
+// (for the face's launch); --no-launch-port reports 0 instead.
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -102,11 +106,26 @@ const PORT = Number(arg("port", "5173"));
 const SCENE = arg("scene", "dialog");
 const DARK = Number(arg("dark", "1")) ? 1 : 0;
 const DELAY = Number(arg("delay", "0")) || 0;
+const PLATFORM = arg("platform", "emery");
+const NO_LAUNCH_PORT = process.argv.includes("--no-launch-port");
 // --options <n>: the dialog offers n options (2 by default; 4 fills Home with five rows).
 DIALOG.options = ["allow", "deny", "allow always", "deny always"].slice(0, Math.max(1, Math.min(4, Number(arg("options", "2")) || 2)));
 if (!SCENES[SCENE]) {
 	console.error(`unknown scene ${SCENE}; use dialog, finished, empty or stream`);
 	process.exit(2);
+}
+
+// The emulator's phone simulator (pypkjs) port, read per request (the emulator may start after the stub).
+// /tmp/pb-emulator.json: { <platform>: { <sdk version>: { qemu, pypkjs: { pid, port } } } }.
+function launchPort() {
+	if (NO_LAUNCH_PORT) return 0;
+	try {
+		const byVersion = JSON.parse(readFileSync("/tmp/pb-emulator.json", "utf8"))[PLATFORM];
+		const port = byVersion[Object.keys(byVersion)[0]].pypkjs.port;
+		return Number.isInteger(port) ? port : 0;
+	} catch {
+		return 0;
+	}
 }
 
 // --- State ------------------------------------------------------------------
@@ -173,7 +192,8 @@ async function handle(req, res) {
 	console.log(`${req.method} ${url.pathname}${url.search}`);
 
 	if (req.method === "GET") {
-		if (path === "/dev/settings") return json(res, 200, { DARK });
+		if (path === "/dev/settings") return json(res, 200, { DARK, CORNER_TL: "date", CORNER_TR: "pi", CORNER_BL: "hr", CORNER_BR: "steps", UNIT: "C", LAUNCH_PORT: launchPort() });
+		if (path === "/api/watch/weather") return json(res, 200, { tempC: 11.5, code: 3 });
 		if (path === "/api/watch/health") return json(res, 200, { ok: true, hubVersion: "stub", sessions: { running: 1, pending: requests.length } });
 		if (path === "/api/watch/sessions") return json(res, 200, { sessions: SESSIONS });
 		if (path === "/api/watch/pending") {
@@ -227,6 +247,10 @@ async function handle(req, res) {
 			return json(res, 200, { ok: true });
 		}
 		if (path === "/api/watch/prompt" || path === "/api/watch/model") return json(res, 200, { ok: true });
+		if (path === "/api/watch/launch") {
+			console.log(`  launch ${body.uuid} (stub: nothing launches)`);
+			return json(res, 200, { ok: true });
+		}
 		return json(res, 404, { error: "not found" });
 	}
 
@@ -291,5 +315,5 @@ wss.on("connection", (ws) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK}`);
+	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK} launch port=${launchPort()} (${NO_LAUNCH_PORT ? "off" : PLATFORM})`);
 });

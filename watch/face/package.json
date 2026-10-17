@@ -1,0 +1,58 @@
+{
+  "name": "pi-web-face",
+  "author": "Michael Gutensohn",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "pi-web face",
+    "uuid": "4adac39e-f1b8-4fc6-9390-321d694dfe15",
+    "projectType": "moddable",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "MSG",
+      "CMD",
+      "CMD_ID",
+      "REQ_ID",
+      "REQ_KIND",
+      "REQ_TOOL",
+      "REQ_TEXT",
+      "REQ_INDEX",
+      "REQ_COUNT",
+      "VIBE",
+      "PI_RUNNING",
+      "PI_PENDING",
+      "TEMP",
+      "NET",
+      "OK",
+      "DARK",
+      "CORNER_TL",
+      "CORNER_TR",
+      "CORNER_BL",
+      "CORNER_BR",
+      "UNIT",
+      "HUB_URL"
+    ],
+    "resources": {
+      "media": []
+    },
+    "capabilities": [
+      "configurable",
+      "health",
+      "location"
+    ]
+  },
+  "dependencies": {
+    "@rebble/clay": "1.1.0"
+  }
+}

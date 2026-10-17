@@ -1,0 +1,85 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { cornerText, dateLabel, layout, createFaceModel, KEYS } from "../src/embeddedjs/modules/face.js";
+
+const M = (o) => new Map(Object.entries(o));
+
+test("KEYS match package.json messageKeys in order (pebble/message maps index n to 10000 + n)", () => {
+	const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+	assert.deepEqual(KEYS, pkg.pebble.messageKeys);
+});
+
+test("dateLabel is the weekday and the day of the month", () => {
+	assert.equal(dateLabel(new Date(2026, 9, 15, 9, 41)), "THU 15");
+	assert.equal(dateLabel(new Date(2026, 9, 4)), "SUN 4");
+});
+
+test("cornerText formats each widget and shows -- without data", () => {
+	assert.equal(cornerText("date", { date: new Date(2026, 9, 15, 9, 41) }), "THU 15");
+	assert.equal(cornerText("pi", { pi: { running: 2, pending: 1 } }), "2/1");
+	assert.equal(cornerText("pi", {}), "--");
+	assert.equal(cornerText("hr", { hr: 72 }), "72");
+	assert.equal(cornerText("hr", { hr: 0 }), "--");
+	assert.equal(cornerText("steps", { steps: 4210 }), "4210");
+	assert.equal(cornerText("battery", { battery: 80 }), "80%");
+	assert.equal(cornerText("weather", { temp: "12°" }), "12°");
+	assert.equal(cornerText("weather", {}), "--");
+	assert.equal(cornerText("none", {}), "");
+});
+
+test("cornerText: missing health readings and the date show --; an unknown id draws nothing", () => {
+	assert.equal(cornerText("date", {}), "--");
+	assert.equal(cornerText("hr", {}), "--");
+	assert.equal(cornerText("steps", {}), "--");
+	assert.equal(cornerText("battery", {}), "--");
+	assert.equal(cornerText("weather", { temp: "" }), "--");
+	assert.equal(cornerText("bogus", { hr: 72 }), "");
+});
+
+test("layout: emery idle and sheet heights; gabbro insets", () => {
+	assert.deepEqual(layout(200, 228, false), { time: { top: 90, height: 48 }, corners: { inset: 8, top: 6, height: 22 } });
+	assert.deepEqual(layout(200, 144, false), { time: { top: 48, height: 48 }, corners: { inset: 8, top: 6, height: 22 } });
+	assert.deepEqual(layout(260, 260, true), { time: { top: 106, height: 48 }, corners: { inset: 65, top: 44, height: 22 } });
+	assert.deepEqual(layout(260, 176, true), { time: { top: 64, height: 48 }, corners: { inset: 65, top: 30, height: 22 } });
+});
+
+test("the model applies sheet, pi, weather, cfg and net dicts and reports the kind", () => {
+	const m = createFaceModel();
+	assert.equal(m.sheet, null);
+	assert.equal(m.pi, null);
+	assert.equal(m.temp, null);
+	assert.equal(m.net, "connecting");
+	assert.deepEqual(m.cfg, { dark: true, corners: ["date", "pi", "hr", "steps"], unit: "C" });
+
+	const kind = m.apply(new Map([["MSG", "sheet"], ["REQ_ID", "d1"], ["REQ_KIND", "dialog"], ["REQ_TOOL", "bash"], ["REQ_TEXT", "Allow?"], ["REQ_INDEX", 1], ["REQ_COUNT", 2]]));
+	assert.equal(kind, "sheet");
+	assert.deepEqual(m.sheet, { id: "d1", kind: "dialog", tool: "bash", text: "Allow?", index: 1, count: 2 });
+	assert.equal(m.apply(M({ MSG: "sheet", REQ_ID: "", REQ_KIND: "", REQ_TOOL: "", REQ_TEXT: "", REQ_INDEX: 0, REQ_COUNT: 0 })), "sheet");
+	assert.equal(m.sheet, null);
+
+	assert.equal(m.apply(M({ MSG: "pi", PI_RUNNING: 2, PI_PENDING: 1 })), "pi");
+	assert.deepEqual(m.pi, { running: 2, pending: 1 });
+	m.apply(M({ MSG: "pi", PI_RUNNING: -1, PI_PENDING: -1 }));
+	assert.equal(m.pi, null);
+
+	assert.equal(m.apply(M({ MSG: "weather", TEMP: "12°" })), "weather");
+	assert.equal(m.temp, "12°");
+	m.apply(M({ MSG: "weather", TEMP: "" }));
+	assert.equal(m.temp, null);
+
+	assert.equal(m.apply(M({ MSG: "cfg", DARK: 0, CORNER_TL: "battery", CORNER_TR: "weather", CORNER_BL: "none", CORNER_BR: "pi", UNIT: "F" })), "cfg");
+	assert.deepEqual(m.cfg, { dark: false, corners: ["battery", "weather", "none", "pi"], unit: "F" });
+	// A cfg with only DARK (the stub's /dev/settings, an older phone) keeps the corners.
+	m.apply(M({ MSG: "cfg", DARK: 1 }));
+	assert.deepEqual(m.cfg, { dark: true, corners: ["battery", "weather", "none", "pi"], unit: "F" });
+	// An unknown widget id falls back to the default for that corner.
+	m.apply(M({ MSG: "cfg", DARK: 1, CORNER_TL: "moon" }));
+	assert.equal(m.cfg.corners[0], "date");
+
+	assert.equal(m.apply(M({ MSG: "net", NET: "idle" })), "net");
+	assert.equal(m.net, "idle");
+
+	assert.equal(m.apply(M({ MSG: "bogus" })), null);
+	assert.equal(m.apply(new Map()), null);
+});

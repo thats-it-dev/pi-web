@@ -1,0 +1,14 @@
+{
+ 	"include":  [
+		"$(MODDABLE)/examples/manifest_mod.json"
+	],
+	"config": {
+		"watchface": true,
+		"creation": { "stack": 5120, "slot": 43008, "chunk": 23552 }
+	},
+	"modules": {
+		"format": "../../../shared/js/format",
+		"link": "../../../shared/js/link",
+		"*": [ "./assets", "./main", "./idle", "./modules/face" ]
+	}
+}

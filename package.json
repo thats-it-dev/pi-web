@@ -6,7 +6,7 @@
 	"engines": { "node": ">=22.18" },
 	"scripts": {
 		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app && npm run test:watch",
-		"test:watch": "node --test watch/app/test/",
+		"test:watch": "node --test watch/app/test/ watch/face/test/",
 		"typecheck": "npm run typecheck -w shared && npm run typecheck -w hub && npm run typecheck -w bridge && npm run typecheck -w app",
 		"hub": "npm run start -w hub",
 		"dev": "npm run dev -w app"

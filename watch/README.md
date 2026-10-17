@@ -64,7 +64,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ### With the stub hub
 
-`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. History tool lines read `name · line` (`bash · npm test`), as the hub's `turnsFrom` writes them. `--delay <ms>` holds every POST's answer that long, to see the watch's `sending…` state. `GET /dev/settings` answers `{ "DARK": <--dark> }`, which the phone side fetches at launch in the emulator so screenshots can switch theme.
+`watch/app/dev/stub-hub.mjs` is a stand-in hub with canned data and no auth: three live sessions and twenty-three closed ones (so the sessions list pages), 40 history turns per session (some 240 characters), four models, and POSTs that answer `{ ok: true }`. On the `dialog` scene, an `answer` with dictated `text` answers `no_match` with the dialog's options; answered and dismissed requests leave the scene and a new `pending` frame goes out. History tool lines read `name · line` (`bash · npm test`), as the hub's `turnsFrom` writes them. `--delay <ms>` holds every POST's answer that long, to see the watch's `sending…` state. `GET /dev/settings` answers `{ "DARK": <--dark>, "CORNER_TL": "date", "CORNER_TR": "pi", "CORNER_BL": "hr", "CORNER_BR": "steps", "UNIT": "C", "LAUNCH_PORT": <port> }`, which the phone side (app and face) fetches at launch in the emulator so screenshots can switch theme; the app reads only `DARK`. `LAUNCH_PORT` is the emulator's phone simulator (pypkjs) port from `/tmp/pb-emulator.json` for `--platform` (default `emery`), or `0` when unreadable or with `--no-launch-port`. For the face, `GET /api/watch/weather` answers `{ "tempC": 11.5, "code": 3 }` and `POST /api/watch/launch` answers `{ ok: true }` (logged; nothing launches).
 
 | Scene | What the watch gets |
 | --- | --- |
@@ -75,7 +75,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
-node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms]
+node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--platform emery|gabbro] [--no-launch-port]
 
 # in another shell
 cd watch/app
@@ -141,6 +141,24 @@ node dev/build-subset.mjs MenuView History    # Home is always in; then pebble i
 ```
 
 `dev/build-subset.mjs` writes a temporary manifest that lists only the named views, then runs `pebble build`. It restores the real manifest afterwards, also on failure; never commit the temporary one. It removes `build/mods` before and after, so the next full `pebble build` relinks. Opening a screen that was left out aborts the app.
+
+### The watchface
+
+`watch/face/` is the second Alloy project (the face; see `face/CLAUDE.md`). Same toolchain and commands, run in `watch/face`:
+
+```bash
+node watch/app/dev/stub-hub.mjs --port 5173 --scene empty     # from the repo root
+cd watch/face && pebble build && pebble install --emulator emery --logs
+```
+
+On `--scene empty` the face shows the time, `SAT 17` top left, `1/0` top right (`s1` is running, nothing pending) and `--` in the bottom corners: heart rate and steps are not wired yet (plan 3, Task 4), and the emulator's health reads 0 until `pebble emu-steps`/`emu-heart-rate` set it. `pi` reads `--` until the phone's first `pending` frame. Screenshots: `screenshots/face-idle-emery-dark.png`, `screenshots/face-idle-gabbro-dark.png`.
+
+- **Archive size.** `face/build/mods/emery/mc.xsa` is 13618 B (the same for gabbro) with the idle screen, far under the 42.8 KB ceiling. The VM sizes are the app's.
+- **The phone speaks first.** The watch's `pebble/message` can write only after it has received a dict (`pkjsReady` is set in `messageReceived`, `pebble-appmessage.c`), so the face's phone side sends `cfg`, `net`, `pi`, `sheet` on `ready`, and again when the watch's `hello` arrives, as the app's bridge does. Waiting for `hello` first deadlocks.
+- **Hub URL, twice.** PebbleKit JS `localStorage` is per app on a phone, so the face cannot read the app's stored hub URL even though both use the key `pi-web.hubUrl`. Set **Hub URL** in the face's settings page too (spec §12: entered twice in v1). The face's page also has the four corners, Dark and the temperature unit.
+- **Idle.** With nothing pending and no session running for 10 minutes, the face's phone side closes the socket and polls `GET /api/watch/pending` once a minute; the watch's `NET` reads `idle`. The first poll that sees a request or a running session reopens the socket (unit-tested; not run in the emulator).
+- **Font strings.** Piu font strings are CSS-like: `"bold 18px Gothic"`. `"18px bold Gothic"` looks for `boldGothic-Regular-18.fnt` and the face fails to load (the firmware then shows `face is not responding`).
+- **A wedged emulator.** Twice during the face work the emery emulator stopped answering (`pebble screenshot` and `install` time out with `libpebble2.exceptions.TimeoutError`), and after killing it the firmware no longer booted (`Waiting for the firmware to boot.` forever). Moving the persisted flash aside (`~/.local/share/pebble-sdk/4.33.1/emery/qemu_spi_flash.bin`) gave a clean boot; the face then ran for several minutes without trouble.
 
 ### With the real hub
 
