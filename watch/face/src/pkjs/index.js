@@ -67,6 +67,7 @@ var weather = createWeather({
 		},
 	},
 	geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null,
+	storage: localStorage,
 	setTimeout: function (fn, ms) {
 		return setTimeout(fn, ms);
 	},

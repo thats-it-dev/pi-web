@@ -42,6 +42,7 @@ function setup(opts) {
 	const dicts = [];
 	const logs = [];
 	let inFlight = null;
+	let now = 0;
 	const face = createFace({
 		send: (dict, onAck, onFail) => {
 			assert.equal(inFlight, null, "a second dict was sent while one is in flight");
@@ -51,7 +52,7 @@ function setup(opts) {
 		storage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => (store[k] = String(v)) },
 		setTimeout: timers.setTimeout,
 		clearTimeout: timers.clearTimeout,
-		now: () => 0,
+		now: () => now,
 		log: (m) => logs.push(m),
 		WebSocket: opts.WebSocket === undefined ? null : opts.WebSocket,
 		launchPort: () => (opts.launchPort === undefined ? 9000 : opts.launchPort),
@@ -65,6 +66,9 @@ function setup(opts) {
 		logs,
 		store,
 		inFlight: () => inFlight,
+		advance(ms) {
+			now += ms;
+		},
 		ack() {
 			const f = inFlight;
 			assert.ok(f, "nothing in flight to ack");
@@ -157,7 +161,8 @@ test("a new request on an empty list sends a sheet with index/count and reports 
 		{ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow bash?\ngit push", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 1 },
 		{ MSG: "pi", PI_RUNNING: 0, PI_PENDING: 1 },
 	]);
-	assert.deepEqual(t.hub.of("showing"), [{ kind: "showing", requestId: "d1", sessionId: null }]);
+	// The first frame after start reports its (empty) sheet too; then only the change.
+	assert.deepEqual(t.hub.of("showing").map((c) => [c.requestId, c.sessionId]), [[null, null], ["d1", null]]);
 	assert.equal(t.face.shown(), "d1");
 });
 
@@ -434,4 +439,93 @@ test("result dicts are FIFO, not coalesced: two launches answer in order, both s
 		{ MSG: "result", CMD_ID: 1, OK: 1 },
 		{ MSG: "result", CMD_ID: 2, OK: 0 },
 	]);
+});
+
+test("showing(null, null) on the first frame after start and after every (re)open: it clears the app's showing on the hub", () => {
+	const t = setup();
+	t.hello();
+	t.face.onStatus("online");
+	t.face.onPending({ requests: [], sessions: [] });
+	assert.deepEqual(t.hub.of("showing").map((c) => [c.requestId, c.sessionId]), [[null, null]]);
+	t.face.onPending({ requests: [], sessions: [session("s1", "idle")] });
+	assert.equal(t.hub.of("showing").length, 1, "an unchanged sheet is not reported again on the same socket");
+	// A reconnect.
+	t.face.onStatus("offline");
+	t.face.onStatus("connecting");
+	t.face.onStatus("online");
+	t.face.onPending({ requests: [], sessions: [] });
+	assert.deepEqual(t.hub.of("showing").map((c) => [c.requestId, c.sessionId]), [[null, null], [null, null]]);
+	// A new hub (settings) reports again as well.
+	t.face.setHub(t.hub);
+	t.face.onPending({ requests: [], sessions: [] });
+	assert.equal(t.hub.of("showing").length, 3);
+});
+
+test("idle: a failed poll shows offline, a quiet poll after it shows idle again", () => {
+	const t = setup();
+	t.hello();
+	t.face.onPending({ requests: [], sessions: [] });
+	t.drain();
+	t.timers.fire(0); // idle
+	assert.deepEqual(t.drain(), [{ MSG: "net", NET: "idle" }]);
+	t.timers.fire(0); // poll
+	t.hub.of("get")[0].cb(new Error("network error"));
+	assert.deepEqual(t.drain(), [{ MSG: "net", NET: "offline" }]);
+	t.timers.fire(0);
+	t.hub.of("get")[1].cb(null, { requests: [], sessions: [] });
+	assert.deepEqual(t.drain(), [{ MSG: "net", NET: "idle" }]);
+	// hello repeats the current one.
+	t.face.onAppMessage({ CMD: "hello" });
+	assert.equal(t.drain().find((d) => d.MSG === "net").NET, "idle");
+	assert.deepEqual(t.timers.pending(), [MIN]);
+});
+
+test("idle: a poll reply that throws in the frame handler is logged, not thrown", () => {
+	const t = setup();
+	t.hello();
+	t.face.onPending({ requests: [], sessions: [] });
+	t.drain();
+	t.timers.fire(0); // idle
+	t.timers.fire(0); // poll
+	assert.doesNotThrow(() => t.hub.of("get")[0].cb(null, { requests: 5, sessions: [] }));
+	assert.ok(t.logs.some((m) => m.indexOf("pi-web: poll handler failed: ") === 0));
+	assert.equal(t.hub.of("connect").length, 1);
+});
+
+test("a vibing sheet dropped after failing with a newer sheet queued hands its VIBE to that sheet", () => {
+	const t = setup();
+	t.hello();
+	t.face.onPending({ requests: [], sessions: [] });
+	t.drain();
+	t.face.onPending({ requests: [req("a", 10)], sessions: [] });
+	assert.deepEqual([t.dicts[t.dicts.length - 1].REQ_ID, t.dicts[t.dicts.length - 1].VIBE], ["a", 1]); // in flight
+	t.face.onPending({ requests: [req("a", 10, { message: "Allow a, edited?" })], sessions: [] });
+	t.fail(); // dropped at once: a newer sheet is queued
+	assert.deepEqual(t.timers.pending(), []);
+	const sheets = t.drain().filter((d) => d.MSG === "sheet");
+	assert.deepEqual(sheets.map((d) => [d.REQ_ID, d.REQ_TEXT, d.VIBE]), [["a", "Allow a, edited?", 1]]);
+});
+
+test("a sheet unchanged for 5 minutes is sent again with the next frame (a lost sheet dict is not durable)", () => {
+	const t = setup();
+	t.hello();
+	t.face.onPending({ requests: [req("a", 10)], sessions: [session("s1", "running")] });
+	t.drain();
+	t.advance(4 * MIN);
+	t.face.onPending({ requests: [req("a", 10)], sessions: [session("s1", "idle")] });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet"), []);
+	t.advance(MIN);
+	t.face.onPending({ requests: [req("a", 10)], sessions: [session("s1", "running")] });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet").map((d) => [d.REQ_ID, d.VIBE]), [["a", 0]]);
+	// The clock restarts: the next frame within 5 minutes sends nothing.
+	t.advance(MIN);
+	t.face.onPending({ requests: [req("a", 10)], sessions: [session("s1", "idle")] });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet"), []);
+	// A changed sheet restarts it as well.
+	t.advance(4 * MIN);
+	t.face.onPending({ requests: [], sessions: [] });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet").map((d) => d.REQ_ID), [""]);
+	t.advance(4 * MIN);
+	t.face.onPending({ requests: [], sessions: [session("s1", "idle")] });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "sheet"), []);
 });

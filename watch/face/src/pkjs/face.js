@@ -8,6 +8,10 @@ var NAME_MAX = 40;
 var RETRY_MS = 500;
 var IDLE_MS = 10 * 60 * 1000;
 var POLL_MS = 60 * 1000;
+// A sheet unchanged this long is sent again with the next frame: the watch acks a
+// dict even when its one unread slot was overwritten, so a lost sheet is otherwise
+// durable. The watch ignores a sheet identical to the one it shows.
+var RESEND_MS = 5 * 60 * 1000;
 var CORNERS_KEY = "pi-web.face.corners";
 var DARK_KEY = "pi-web.dark";
 var URL_KEY = "pi-web.hubUrl";
@@ -91,6 +95,10 @@ function createFace(deps) {
 	var hub = null;
 	var frame = null;
 	var shownId = null;
+	// Report showing on the next frame even if shownId did not change: after a
+	// start, a new hub or a (re)opened socket the hub may still hold the app's.
+	var report = true;
+	var sheetAt = deps.now();
 	var net = "connecting";
 	var temp = null;
 	var idle = false;
@@ -158,6 +166,8 @@ function createFace(deps) {
 					return;
 				}
 				log("pi-web: drop " + msg + " after " + item.tries + " tries");
+				// A vibe that never arrived rides on the newer sheet queued behind it.
+				if (item.dict.VIBE) for (var i = 0; i < queue.length; i++) if (queue[i].MSG === msg) queue[i].VIBE = 1;
 				if (lastQueued[msg] === content(item.dict)) delete lastQueued[msg];
 				inFlight = null;
 				pump();
@@ -233,13 +243,20 @@ function createFace(deps) {
 			hub.get("/api/watch/pending", function (err, json) {
 				if (!idle) return;
 				if (err || !json || quiet(json)) {
+					// The OFF cue: a failed poll shows offline, a quiet one idle again.
+					net = err || !json ? "offline" : "idle";
+					enqueue({ MSG: "net", NET: net });
 					schedulePoll();
 					return;
 				}
 				idle = false;
 				log("pi-web: activity, reopening the socket");
 				hub.connect();
-				onPending(json);
+				try {
+					onPending(json);
+				} catch (e) {
+					log("pi-web: poll handler failed: " + (e && e.message));
+				}
 			});
 		}, POLL_MS);
 	}
@@ -260,12 +277,16 @@ function createFace(deps) {
 		var vibe = previous !== null && arrived(previous.requests, frame.requests);
 		var r = selectSheet(frame.requests, shownId);
 		var id = r ? r.id : null;
-		if (id !== shownId) {
+		if (id !== shownId || report) {
 			shownId = id;
+			report = false;
 			if (hub) hub.showing(id, null);
 		}
 		// enqueue drops a sheet or pi identical to the last one queued: only changes go out.
-		enqueue(sheetDict(vibe));
+		var sheet = sheetDict(vibe);
+		var stale = deps.now() - sheetAt >= RESEND_MS;
+		if (stale || content(sheet) !== lastQueued.sheet) sheetAt = deps.now();
+		enqueue(sheet, stale);
 		enqueue(piDict());
 		if (!quiet(frame)) {
 			if (idleTimer !== null) deps.clearTimeout(idleTimer);
@@ -294,15 +315,18 @@ function createFace(deps) {
 		// received a dict (pebble-appmessage.c: pkjsReady is set in messageReceived),
 		// so the phone speaks first; the watch's hello then asks for it again.
 		start: function () {
+			report = true;
 			sendAll();
 		},
 		setHub: function (h) {
 			wake();
 			hub = h;
+			report = true;
 		},
 		onPending: onPending,
 		onStatus: function (s) {
 			if (idle || !NETS[s]) return;
+			if (s === "online") report = true;
 			net = s;
 			enqueue({ MSG: "net", NET: s });
 		},

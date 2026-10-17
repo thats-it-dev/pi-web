@@ -139,7 +139,8 @@ class FaceBehavior extends Behavior {
 		if (kinds.includes("result") && r && r.id === this.launchId) {
 			// OK 1: the app takes over the screen; the footer stays until the timer.
 			console.log("pi-web: launch " + (r.ok ? "ok" : "failed"));
-			if (!r.ok) this.endOpening();
+			if (r.ok) this.launchId = null;
+			else this.endOpening();
 		}
 		if (kinds.includes("sheet")) {
 			const m = this.model;
@@ -185,20 +186,21 @@ class FaceBehavior extends Behavior {
 			this.accel = null;
 		}
 	}
+	// A flick is ignored while the footer shows and until the launch's result (or
+	// the sheet falls): a second flick mid-POST would launch twice.
 	flick() {
-		if (this.launchId !== null || !this.sheet) return;
+		if (this.launchId !== null || this.openTimer !== null || !this.sheet) return;
 		console.log("pi-web: flick");
 		this.sheet.delegate("onOpening", true);
 		this.launchId = this.link.send("launch");
 		this.openTimer = Timer.set(() => {
 			this.openTimer = null;
-			this.endOpening();
+			if (this.sheet) this.sheet.delegate("onOpening", false);
 		}, OPENING_MS);
 	}
 	endOpening() {
 		if (this.openTimer !== null) Timer.clear(this.openTimer);
 		this.openTimer = null;
-		if (this.launchId === null) return;
 		this.launchId = null;
 		if (this.sheet) this.sheet.delegate("onOpening", false);
 	}
