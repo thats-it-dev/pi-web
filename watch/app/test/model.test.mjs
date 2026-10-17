@@ -162,3 +162,14 @@ test("a final page shorter than the list truncates it to TOTAL", () => {
 	m.apply(M({ MSG: "list", LIST: "models", ROWS: "", OFFSET: 0, TOTAL: -1, MORE: 0 }));
 	assert.equal(m.lists.models.rows.length, 1);
 });
+
+test("the live text stays as the last reply until the current session changes; a request from another session keeps it", () => {
+	const m = createModel();
+	m.apply(M({ MSG: "text", SESSION_ID: "s1", TEXT: "final tail", STREAMING: 0 }));
+	m.apply(M({ MSG: "home", REQ_ID: "", SESSION_ID: "s1", TEXT: "older" }));
+	assert.equal(m.text.text, "final tail");
+	m.apply(M({ MSG: "home", REQ_ID: "r9", REQ_KIND: "dialog", SESSION_ID: "s2", TEXT: "" }));
+	assert.equal(m.text.text, "final tail");
+	m.apply(M({ MSG: "home", REQ_ID: "", SESSION_ID: "s2", TEXT: "s2 reply" }));
+	assert.equal(m.text, null);
+});

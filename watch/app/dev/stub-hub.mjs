@@ -248,6 +248,7 @@ wss.on("connection", (ws) => {
 	ws.send(JSON.stringify({ type: "pending", ...pendingNow() }));
 	let streamTimer = null;
 	if (SCENE === "stream") {
+		LIVE[0].state = "running";
 		const start = Date.now();
 		let text = "";
 		let n = 0;
@@ -256,9 +257,12 @@ wss.on("connection", (ws) => {
 				clearInterval(streamTimer);
 				streamTimer = null;
 				ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: false }));
+				// The turn is over: s1 goes idle (the watch's speed figure stops blinking).
+				LIVE[0].state = "idle";
+				changed();
 				return;
 			}
-			text += STREAM_SENTENCES[n++ % STREAM_SENTENCES.length];
+			text += (n ? " " : "") + STREAM_SENTENCES[n++ % STREAM_SENTENCES.length].trim();
 			ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: true }));
 		}, 250);
 	}

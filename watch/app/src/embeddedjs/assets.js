@@ -1,35 +1,37 @@
-export const FONT_FAMILY = "Gothic";
-export const FONT = FONT_FAMILY;
-export const SIZES = { small: 14, body: 18 };
-export const METRICS = { status: 18, toolbar: 16, rule: 2, row: 32, row2: 44, bar: 60 };
+// Type and colour (spec §7.1). The UI uses the system Gothic font (LECO 1976
+// could not be fetched; see watch/README.md, Known issues). Round 2 (§7.10):
+// the status line takes two centred lines, text is centred and inset from the rim.
+export const ROUND = screen.round;
+export const METRICS = {
+	status: ROUND ? 38 : 18, toolbar: 16, rule: 2, row: 32, row2: 44, bar: 60,
+	pad: ROUND ? 18 : 4, // the inset of text from the screen's edge
+	bottom: ROUND ? 18 : 0, // paper under the rows, where the rim cuts them
+};
 
-export function theme(dark) {
+// Dark is paper black, ink white. Dim on light paper is darker than on black to
+// keep contrast; the context-bar track sits under an ink fill, so it contrasts with ink.
+export function makeTheme(dark) {
 	const paper = dark ? "#000000" : "#FFFFFF";
 	const ink = dark ? "#FFFFFF" : "#000000";
-	// Dim on light paper needs to be darker than on black to keep contrast.
 	const dim = dark ? "#AAAAAA" : "#555555";
-	// The context-bar track sits under an ink fill, so it contrasts with ink, not paper.
-	const track = dark ? "#555555" : "#AAAAAA";
-	const small = SIZES.small + "px " + FONT;
-	const body = SIZES.body + "px " + FONT;
+	const align = ROUND ? "center" : "left";
+	const style = (size, color, horizontal = "left") => new Style({ font: size + "px Gothic", color, horizontal });
 	return {
-		paper,
-		ink,
-		dim,
-		track,
-		skins: {
-			paper: { fill: paper },
-			ink: { fill: ink },
-			dim: { fill: dim },
-			track: { fill: track },
-			rule: { fill: ink },
-		},
+		skins: { paper: new Skin({ fill: paper }), ink: new Skin({ fill: ink }), track: new Skin({ fill: dark ? "#555555" : "#AAAAAA" }) },
 		styles: {
-			small: { font: small, color: ink, horizontal: "left" },
-			smallRight: { font: small, color: ink, horizontal: "right" },
-			body: { font: body, color: ink, horizontal: "left", leading: Math.round(SIZES.body * 1.2) },
-			bodyRight: { font: body, color: ink, horizontal: "right", leading: Math.round(SIZES.body * 1.2) },
-			meta: { font: small, color: dim, horizontal: "left" },
+			small: style(14, ink),
+			smallRight: style(14, ink, "right"),
+			status: style(14, ink, align),
+			body: style(18, ink),
+			bodyRight: style(18, ink, "right"),
+			query: style(18, ink, align),
+			meta: style(14, dim),
+			hint: style(14, dim, align),
+			// Menu rows: [normal, selected] colours; the selected row sits on an ink bar (Menu.js).
+			row: style(18, [ink, paper], align),
+			rowMeta: style(14, [dim, paper], align),
+			rowDim: style(18, [dim, paper], align),
+			rowValue: style(14, [dim, paper], "right"),
 		},
 	};
 }

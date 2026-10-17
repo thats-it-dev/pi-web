@@ -66,3 +66,9 @@ test("wrapLines wraps words forward into lines of `width`; a word too long keeps
 	assert.deepEqual(wrapLines("a supercalifragilistic b", 100, w), ["a", "supercalifragilistic", "b"]);
 	assert.deepEqual(wrapLines("aaaa bbbbb", 100, w), ["aaaa bbbbb"]); // exactly 100
 });
+
+test("wrapLines starts a line at a newline; tailLines with no room gives no lines", () => {
+	const w = (s) => s.length * 10;
+	assert.deepEqual(wrapLines("bash: Allow bash?\ngit push origin main", 170, w), ["bash: Allow bash?", "git push origin", "main"]);
+	assert.deepEqual(tailLines("one two three", 100, w, 0), []);
+});

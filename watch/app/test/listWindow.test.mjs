@@ -75,3 +75,10 @@ test("scrollTurns: down steps move by d and stop at the bottom; short lists stay
 	assert.deepEqual(scrollTurns(0, 0, 0, 0, 210, H), { top: 0, dy: 0 });
 });
 
+
+test("scrollFor with free (Round 2): a list longer than the view keeps the selection centred at its ends; a short list stays clamped", () => {
+	assert.equal(scrollFor(0, 26, 176, 44, true), -66);
+	assert.equal(scrollFor(25, 26, 176, 44, true), 25 * 44 - 66);
+	assert.equal(scrollFor(0, 3, 96, 32, true), 0);
+	assert.equal(scrollFor(2, 3, 96, 32, true), 0);
+});

@@ -15,8 +15,8 @@ test("targets emery and gabbro", () => {
 test("main.js KEYS match messageKeys in order (pebble/message maps index n to 10000 + n)", () => {
   const fs = require("node:fs");
   const src = fs.readFileSync(path.join(__dirname, "..", "src", "embeddedjs", "main.js"), "utf8");
-  const block = src.match(/export const KEYS = \[([\s\S]*?)\];/);
-  assert.ok(block, "KEYS array in main.js");
-  const keys = [...block[1].matchAll(/"([A-Z_]+)"/g)].map((m) => m[1]);
+  const block = src.match(/export const KEYS = \(([\s\S]*?)\)\.split\(" "\);/);
+  assert.ok(block, "KEYS in main.js");
+  const keys = [...block[1].matchAll(/"([A-Z_ ]+)"/g)].map((m) => m[1]).join("").split(" ");
   assert.deepEqual(keys, pkg.pebble.messageKeys);
 });

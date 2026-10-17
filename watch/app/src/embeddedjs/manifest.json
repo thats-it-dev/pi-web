@@ -6,7 +6,6 @@
 		"creation": { "stack": 5120, "slot": 43008, "chunk": 23552 }
 	},
 	"modules": {
-		"piu/Controller": "./modules/piuController",
 		"piu/View": "./modules/piuView",
 		"Menu": "./modules/Menu",
 		"*": [ "./assets", "./main", "./modules/model", "./modules/format", "./modules/link", "./modules/listWindow", "./modules/ListScreen", "./views/*" ]
@@ -14,8 +13,7 @@
 	"ffi": {
 		"sources": [ "./exit.c" ],
 		"functions": {
-			"pi_exit": { "arguments": [], "returns": "void" },
-			"pi_clock_24h": { "arguments": [], "returns": "int32_t" }
+			"pi_exit": { "arguments": [], "returns": "void" }
 		}
 	}
 }

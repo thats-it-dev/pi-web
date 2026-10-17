@@ -74,6 +74,9 @@ export function createModel() {
 						sessionTitle: g("SESSION_TITLE") || "",
 						lastText: g("TEXT") || "",
 					};
+					// The live reply stays as the last one until the current session changes
+					// (a request from another session is not a change).
+					if (!m.home.requestId && m.text && m.text.sessionId !== m.home.sessionId) m.text = null;
 					return kind;
 				case "stats":
 					m.stats = {

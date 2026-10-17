@@ -1,41 +1,40 @@
-// The pieces every screen shares (spec §7.1): the status line and the rule,
-// and a list screen built from them: status with the time, an optional query
+// The pieces every screen shares (spec §7.1): the status line (its own clock)
+// and the rule, and a list screen built from them: status, an optional query
 // block (title in 14 over 18 px lines) and rule, then a virtualised Menu.
 // A screen supplies status(), count(), item(i), and optionally lines() (the
 // query block), rows (menu height in rows when there is a query block),
 // rowHeight, values, load() (on display) and onSelect.
-import { METRICS } from "assets";
+import { METRICS, ROUND } from "assets";
 import { clock } from "format";
 import Menu from "Menu";
 import View from "piu/View";
 
-const PAD = 4;
+const PAD = METRICS.pad;
 const SMALL = 16; // 14 px type on a 16 px line
 const LINE = 22; // 18 px type, 22 px leading
 
+const now = () => clock(new Date(), !watch.hour12);
+
+class StatusBehavior extends Behavior {
+	onClockChanged(status) {
+		status.last.string = now();
+	}
+}
+
+// $ is the left text (first), the time is last. Round: the time centred on top, the text under it.
 export const Status = Container.template($ => ({
-	left:0, right:0, top:0, height:METRICS.status,
+	left:0, right:0, top:0, height:METRICS.status, Behavior:StatusBehavior,
 	contents: [
-		Label($, { left:PAD, right:60, top:1, style:$.styles.small, string:$.left }),
-		Label($, { right:PAD, width:56, top:1, style:$.styles.smallRight, string:$.right }),
+		Label($, { left:PAD, right:ROUND ? PAD : 60, top:ROUND ? 19 : 1, style:controller.theme.styles.status, string:$ }),
+		Label($, ROUND ? { left:0, right:0, top:3, style:controller.theme.styles.status, string:now() } : { right:PAD, width:56, top:1, style:controller.theme.styles.smallRight, string:now() }),
 	],
 }));
 
 export const Rule = Content.template($ => ({
-	left:0, right:0, top:$.top, height:METRICS.rule, skin:$.skins.rule,
+	left:0, right:0, top:$, height:METRICS.rule, skin:controller.theme.skins.ink,
 }));
 
-const Query = Container.template($ => ({
-	left:0, right:0, top:$.top, height:$.height, clip:true,
-	contents: [
-		Label($, { left:PAD, right:PAD, top:0, height:SMALL, style:$.styles.meta, string:$.title }),
-		...$.lines.map((line, k) => Label($, { left:PAD, right:PAD, top:SMALL + k * LINE, height:LINE, style:$.styles.body, string:line })),
-	],
-}));
-
-export function sessionTitle(m) {
-	return ((m.home && m.home.sessionTitle) || "").toUpperCase();
-}
+const label = (top, height, style, string) => new Label(null, { left:PAD, right:PAD, top, height, style, string });
 
 export class ListBehavior extends View.Behavior {
 	get m() {
@@ -47,18 +46,21 @@ export class ListBehavior extends View.Behavior {
 	}
 	onDisplaying(container) {
 		if (this.load) this.load();
-		const theme = controller.theme;
+		const styles = controller.theme.styles;
 		const top = METRICS.status;
-		let height = container.height - top;
-		container.add(new Status({ styles:theme.styles, left:this.status(), right:clock(new Date(), controller.h24) }));
+		let height = container.height - top - METRICS.bottom;
+		container.add(new Status(this.status()));
 		if (this.lines) {
 			height = this.rows * METRICS.row;
-			const ruleTop = container.height - height - 2 - METRICS.rule;
-			container.add(new Query({ styles:theme.styles, top:top + 2, height:ruleTop - top - 2, title:sessionTitle(this.m), lines:this.lines() }));
-			container.add(new Rule({ skins:theme.skins, top:ruleTop }));
+			const ruleTop = container.height - METRICS.bottom - height - 2 - METRICS.rule;
+			container.add(new Container(null, { left:0, right:0, top:top + 2, height:ruleTop - top - 2, clip:true, contents:[
+				label(0, SMALL, styles.hint, (this.m.home && this.m.home.sessionTitle || "").toUpperCase()),
+				...this.lines().map((line, k) => label(SMALL + k * LINE, LINE, styles.query, line)),
+			] }));
+			container.add(new Rule(ruleTop));
 		}
-		this.list = new Menu({ count:this.count(), item:i => this.item(i), rowHeight:this.rowHeight, values:this.values, styles:theme.styles, skins:theme.skins });
-		this.menu = new this.list.Template(this.list, { left:0, right:0, bottom:0, height });
+		this.list = new Menu({ count:this.count(), item:i => this.item(i), rowHeight:this.rowHeight, values:this.values });
+		this.menu = new this.list.Template(this.list, { left:0, right:0, bottom:METRICS.bottom, height });
 		container.add(this.menu);
 	}
 	// Re-read status, query and rows from the model.
@@ -66,7 +68,7 @@ export class ListBehavior extends View.Behavior {
 		container.first.first.string = this.status();
 		if (this.lines) {
 			const query = container.content(1);
-			query.first.string = sessionTitle(this.m);
+			query.first.string = (this.m.home && this.m.home.sessionTitle || "").toUpperCase();
 			this.lines().forEach((line, k) => { query.content(k + 1).string = line; });
 		}
 		this.list.count = this.count();
@@ -74,9 +76,6 @@ export class ListBehavior extends View.Behavior {
 	}
 	onDisplayed(container) {
 		if (this.menu && controller.view === this.view) this.menu.focus();
-	}
-	onClockChanged(container) {
-		container.first.last.string = clock(new Date(), controller.h24);
 	}
 	// The press that opened this screen (hold Select on Home) ends here: only a
 	// press seen on this screen picks on release.

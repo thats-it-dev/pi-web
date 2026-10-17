@@ -15,12 +15,15 @@
 // Data: { items: [{ title, meta?, value?, dim? }] } or { count, item(i) } read
 // at bind time; rowHeight (METRICS.row, or row2 for title + meta line);
 // values: true for a right-aligned 14 px value. Needs its height up front.
-import { METRICS } from "assets";
+// Round 2: rows are inset from the rim, and a list longer than the view keeps
+// the selected row centred, also at its ends (§7.10).
+import { METRICS, ROUND } from "assets";
 import { poolSize, scrollFor, windowFirst, stepIndex } from "listWindow";
 import Timer from "timer";
 import View from "piu/View";
 
-const INSET = 6;
+const INSET = ROUND ? 24 : 6;
+const VALUE = ROUND ? 48 : INSET; // a value's right inset: on Round 2 it clears the rim on a bottom row
 
 class MenuBehavior extends View.Behavior {
 	onCreate(menu, view) {
@@ -45,7 +48,7 @@ class MenuBehavior extends View.Behavior {
 		const h = view.rowHeight;
 		const column = menu.last;
 		const height = menu.height || menu.coordinates.height;
-		const scroll = scrollFor(view.selection, view.count, height, h);
+		const scroll = scrollFor(view.selection, view.count, height, h, ROUND);
 		const first = windowFirst(scroll, view.count, column.length, h);
 		column.coordinates = { left:0, right:0, top:first * h - scroll };
 		column.previous.coordinates = { left:0, right:0, top:view.selection * h - scroll, height:view.count ? h : 0 };
@@ -61,7 +64,7 @@ class MenuBehavior extends View.Behavior {
 	}
 	bind(row, i) {
 		const view = this.view;
-		const styles = view.styles;
+		const styles = controller.theme.styles;
 		const item = view.item(i);
 		let label = row.first;
 		label.string = item.title;
@@ -75,9 +78,9 @@ class MenuBehavior extends View.Behavior {
 			label = label.next;
 			const value = item.value || "";
 			const w = value ? styles.rowValue.measure(value).width : 0;
-			label.coordinates = { right:INSET, width:w, top:8, height:18 };
+			label.coordinates = { right:VALUE, width:w, top:8, height:18 };
 			label.string = value;
-			title.coordinates = { left:INSET, right:w ? 2 * INSET + w : INSET, top:5, height:22 };
+			title.coordinates = { left:INSET, right:w ? VALUE + INSET + w : INSET, top:5, height:22 };
 		}
 	}
 	onPress(menu, direction) {
@@ -139,19 +142,19 @@ class MenuItemBehavior extends Behavior {
 const MenuContainer = Container.template($ => ({
 	Behavior:MenuBehavior, clip:true,
 	contents: [
-		Content($, { left:0, right:0, top:0, height:0, skin:$.skins.ink }),
+		Content($, { left:0, right:0, top:0, height:0, skin:controller.theme.skins.ink }),
 		Column($, { left:0, right:0, top:0, contents:[] }),
 	]
 }));
 
 // One pooled row ($ is the menu's view); bind() sets its strings and states.
-// $.styles.row / rowDim / rowMeta / rowValue have [normal, selected] colours.
+// The styles row / rowDim / rowMeta / rowValue have [normal, selected] colours.
 const MenuItemRow = Container.template($ => ({
 	left:0, right:0, height:$.rowHeight, active:true, Behavior:MenuItemBehavior,
 	contents: [
-		Label($, { left:INSET, right:INSET, top:$.rowHeight === METRICS.row2 ? 2 : 5, height:22, style:$.styles.row }),
-		$.rowHeight === METRICS.row2 ? Label($, { left:INSET, right:INSET, top:24, height:18, style:$.styles.rowMeta }) : null,
-		$.values ? Label($, { right:INSET, width:0, top:8, height:18, style:$.styles.rowValue }) : null,
+		Label($, { left:INSET, right:INSET, top:$.rowHeight === METRICS.row2 ? 2 : 5, height:22, style:controller.theme.styles.row }),
+		$.rowHeight === METRICS.row2 ? Label($, { left:INSET, right:INSET, top:24, height:18, style:controller.theme.styles.rowMeta }) : null,
+		$.values ? Label($, { right:INSET, width:0, top:8, height:18, style:controller.theme.styles.rowValue }) : null,
 	],
 }));
 
@@ -164,8 +167,6 @@ export default class MenuView extends View {
 		this.rowHeight = data.rowHeight ?? METRICS.row;
 		this.values = !!data.values;
 		this.selection = data.selection ?? 0;
-		this.styles = data.styles;
-		this.skins = data.skins;
 	}
 	get Template() { return MenuContainer }
 };

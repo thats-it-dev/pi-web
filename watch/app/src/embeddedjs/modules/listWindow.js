@@ -7,10 +7,13 @@ export function poolSize(count, viewHeight, rowHeight) {
 	return Math.max(0, Math.min(count, Math.ceil(viewHeight / rowHeight) + 1));
 }
 
-// The list's scroll offset (px) that centres the selected row, clamped to the list.
-export function scrollFor(selection, count, viewHeight, rowHeight) {
+// The list's scroll offset (px) that centres the selected row, clamped to the
+// list; with `free` (Round 2), a list longer than the view is not clamped, so the
+// selected row stays centred at the ends too.
+export function scrollFor(selection, count, viewHeight, rowHeight, free) {
 	const max = count * rowHeight - viewHeight;
-	return Math.max(0, Math.min(max, selection * rowHeight - ((viewHeight - rowHeight) >> 1)));
+	const centred = selection * rowHeight - ((viewHeight - rowHeight) >> 1);
+	return free && max > 0 ? centred : Math.max(0, Math.min(max, centred));
 }
 
 // The first row bound to the pool at a scroll offset (which a bounce can take past either end).

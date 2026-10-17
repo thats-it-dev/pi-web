@@ -8,25 +8,26 @@
 // lines (wrapLines) and only the turns on screen exist, a Label a line in a
 // Column moved by the scroll offset and re-bound as the view scrolls.
 // Turn heights are cached per row until the rows change.
-import { METRICS } from "assets";
-import { clock, wrapLines } from "format";
+import { METRICS, ROUND } from "assets";
+import { wrapLines } from "format";
 import { ListBehavior, Status } from "ListScreen";
 import { scrollTurns } from "listWindow";
 import View from "piu/View";
 
-const PAD = 4;
+const PAD = METRICS.pad;
+const R = ROUND ? 14 : 0; // Round 2: turns sit further in from the rim, and end higher
 const GAP = 6; // paper above each turn
 const LINE = 22; // 18 px type, 22 px leading
 const TOOL = 16; // a tool call: one 14 px line
 
-const inset = role => role === "you" ? { left:32, right:PAD } : { left:PAD, right:24 };
+const inset = role => role === "you" ? { left:32 + R, right:PAD + R } : { left:PAD + R, right:24 + R };
 
 class HistoryBehavior extends ListBehavior {
 	onDisplaying(container) {
 		this.styles = controller.theme.styles;
 		this.menu = container; // focused by ListBehavior; Select does nothing
-		container.add(this.status = new Status({ styles:this.styles, left:"HISTORY", right:clock(new Date(), controller.h24) }));
-		container.add(this.port = new Container(null, { left:0, right:0, top:METRICS.status, bottom:0, clip:true, contents:[
+		container.add(this.status = new Status("HISTORY"));
+		container.add(this.port = new Container(null, { left:0, right:0, top:METRICS.status, bottom:ROUND ? 34 : 0, clip:true, contents:[
 			this.column = new Column(null, { left:0, right:0, top:0 }),
 		] }));
 		this.top = this.dy = 0;
@@ -110,8 +111,9 @@ class HistoryBehavior extends ListBehavior {
 	onPressUp() {
 		return this.step(-1);
 	}
+	// Not while a page loads: its rows would move the view to the trimmed bottom.
 	onPressDown() {
-		return this.step(1);
+		return this.loading || this.step(1);
 	}
 }
 
