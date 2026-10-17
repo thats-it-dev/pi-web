@@ -8,16 +8,20 @@ export function theme(dark) {
 	const ink = dark ? "#FFFFFF" : "#000000";
 	// Dim on light paper needs to be darker than on black to keep contrast.
 	const dim = dark ? "#AAAAAA" : "#555555";
+	// The context-bar track sits under an ink fill, so it contrasts with ink, not paper.
+	const track = dark ? "#555555" : "#AAAAAA";
 	const small = SIZES.small + "px " + FONT;
 	const body = SIZES.body + "px " + FONT;
 	return {
 		paper,
 		ink,
 		dim,
+		track,
 		skins: {
 			paper: { fill: paper },
 			ink: { fill: ink },
 			dim: { fill: dim },
+			track: { fill: track },
 			rule: { fill: ink },
 		},
 		styles: {

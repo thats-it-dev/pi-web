@@ -10,6 +10,7 @@ import View from "piu/View";
 
 const PAD = 4;
 const HINT = 16; // 14 px type on a 16 px line
+const GAP = 2; // paper between the rule and the rows, so a selected first row does not fuse with the rule
 const HOLD_MS = 500;
 const FLASH_MS = 1000;
 const WAIT_MS = 10000; // no result by then: treat as failed
@@ -28,7 +29,7 @@ const Toolbar = Row.template($ => ({
 	contents: [
 		Label($, { style:$.styles.small, string:"CTX" }),
 		Container($, {
-			left:4, width:METRICS.bar, height:8, skin:$.skins.dim,
+			left:4, width:METRICS.bar, height:8, skin:$.skins.track,
 			contents: [
 				Content($, { left:0, top:0, bottom:0, width:$.fill, skin:$.skins.ink }),
 			],
@@ -73,6 +74,7 @@ class HomeBehavior extends View.Behavior {
 		this.pending = null; // { cmdId, index, title, timer }
 		this.stale = false;
 		this.exiting = false;
+		this.shownId = null; // the request on screen; m.home may already hold the next one
 	}
 	onDisplaying(container) {
 		this.build(container);
@@ -91,8 +93,7 @@ class HomeBehavior extends View.Behavior {
 		return controller.model;
 	}
 	pendingRequest() {
-		const home = this.m.home;
-		return !!(home && home.requestId);
+		return !!this.shownId;
 	}
 	queryString() {
 		const m = this.m;
@@ -109,8 +110,9 @@ class HomeBehavior extends View.Behavior {
 		const rows = homeRows(m.home);
 		const items = rows.map(title => ({ title }));
 		const menuHeight = rows.length * METRICS.row;
-		const ruleTop = container.height - menuHeight - METRICS.rule;
+		const ruleTop = container.height - menuHeight - GAP - METRICS.rule;
 		const top = METRICS.status + METRICS.toolbar + 2;
+		this.shownId = (m.home && m.home.requestId) || null;
 		const withHint = !this.pendingRequest();
 		const queryHeight = ruleTop - top - (withHint ? HINT : 0);
 
@@ -190,12 +192,13 @@ class HomeBehavior extends View.Behavior {
 		if (this.pending || this.exiting) return true;
 		const home = this.m.home;
 		const title = item.title;
-		const isOption = home && home.kind === "dialog" && home.requestId && index < home.options.length;
+		const id = this.shownId;
+		const isOption = id && home && home.kind === "dialog" && index < home.options.length;
 		if (isOption) {
-			this.wait(container, index, title, controller.link.send("answer", { REQ_ID:home.requestId, OPTION:title }));
+			this.wait(container, index, title, controller.link.send("answer", { REQ_ID:id, OPTION:title }));
 		}
-		else if (title === "dismiss" && home && home.requestId) {
-			this.wait(container, index, title, controller.link.send("dismiss", { REQ_ID:home.requestId }));
+		else if (title === "dismiss" && id) {
+			this.wait(container, index, title, controller.link.send("dismiss", { REQ_ID:id }));
 		}
 		else if (title === "say it") {
 			console.log("pi-web: say it (Task 8)");
@@ -259,23 +262,30 @@ class HomeBehavior extends View.Behavior {
 	}
 	onPressBack(container) {
 		if (this.exiting) return true;
-		const home = this.m.home;
-		if (!(home && home.requestId))
+		const id = this.shownId;
+		// Nothing shown, or the shown request was just answered/dismissed (row feedback
+		// still up, m.home may already be the next request): exit without a dismiss.
+		// A false return lets the firmware pop the app if the FFI exit is unavailable.
+		if (!id || this.pending || this.stale)
 			return controller.exit();
 		this.exiting = true;
-		controller.link.send("dismiss", { REQ_ID:home.requestId });
+		controller.link.send("dismiss", { REQ_ID:id });
 		// Exit once the dismiss has gone out (next onWritable) or after EXIT_MS, whichever is first.
 		let done = false;
+		const leave = () => {
+			// If the FFI exit fails, let the next Back through (it then returns false to the firmware).
+			if (!controller.exit()) this.exiting = false;
+		};
 		const timer = Timer.set(() => {
 			if (done) return;
 			done = true;
-			controller.exit();
+			leave();
 		}, EXIT_MS);
 		controller.link.onFlushed(() => {
 			if (done) return;
 			done = true;
 			Timer.clear(timer);
-			controller.exit();
+			leave();
 		});
 		return true;
 	}
