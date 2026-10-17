@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -162,13 +163,21 @@ test("the hub pings on the configured interval", async () => {
 	c.ws.close();
 });
 
-test("a socket that misses two pongs is dropped, one miss is not", async () => {
-	const c = await connect(WATCH, { autoPong: false });
-	await new Promise((r) => setTimeout(r, 15));
-	assert.equal(c.ws.readyState, WebSocket.OPEN);
-	await new Promise((r) => setTimeout(r, 100));
-	assert.equal(c.ws.readyState, WebSocket.CLOSED);
-	assert.equal(stream.clientCount(), 0);
+test("a socket is dropped after two unanswered pings, not one", async () => {
+	const slow = createServer();
+	const slowStream = attachWatchStream(slow, { watch, cfg, log: () => {}, pingMs: 100 });
+	await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+	const ws = new WebSocket(`ws://127.0.0.1:${(slow.address() as AddressInfo).port}/api/watch/stream`, { headers: WATCH, autoPong: false });
+	const pings: number[] = [];
+	ws.on("ping", () => pings.push(Date.now()));
+	try {
+		const closedAt = await new Promise<number>((r) => ws.on("close", () => r(Date.now())));
+		assert.equal(pings.length, 2);
+		assert.ok(closedAt - pings[0] >= 160, `closed ${closedAt - pings[0]} ms after the first ping`);
+	} finally {
+		slowStream.close();
+		slow.close();
+	}
 });
 
 test("stream.close() closes every client with 1001", async () => {

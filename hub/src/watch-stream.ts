@@ -77,12 +77,12 @@ export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchS
 
 	const timer = setInterval(() => {
 		for (const ws of clients) {
-			const n = (missed.get(ws) ?? 0) + 1;
+			const n = missed.get(ws) ?? 0;
 			if (n >= 2) {
 				ws.terminate();
 				continue;
 			}
-			missed.set(ws, n);
+			missed.set(ws, n + 1);
 			ws.ping();
 		}
 	}, pingMs);
