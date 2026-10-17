@@ -2,6 +2,7 @@
 // Run from the repo root (ws resolves from the root node_modules):
 //   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--options 1-4]
 //     [--platform emery|gabbro] [--no-launch-port]
+//     [--corners date,pi,hr,steps]
 // --delay holds every POST's answer that long (to see the watch's `sending…` state).
 // --platform picks the emulator whose phone simulator port /dev/settings reports as LAUNCH_PORT
 // (for the face's launch); --no-launch-port reports 0 instead.
@@ -107,6 +108,8 @@ const SCENE = arg("scene", "dialog");
 const DARK = Number(arg("dark", "1")) ? 1 : 0;
 const DELAY = Number(arg("delay", "0")) || 0;
 const PLATFORM = arg("platform", "emery");
+// --corners tl,tr,bl,br: the four widget ids /dev/settings reports (default date,pi,hr,steps).
+const CORNERS = arg("corners", "date,pi,hr,steps").split(",");
 const NO_LAUNCH_PORT = process.argv.includes("--no-launch-port");
 // --options <n>: the dialog offers n options (2 by default; 4 fills Home with five rows).
 DIALOG.options = ["allow", "deny", "allow always", "deny always"].slice(0, Math.max(1, Math.min(4, Number(arg("options", "2")) || 2)));
@@ -192,7 +195,7 @@ async function handle(req, res) {
 	console.log(`${req.method} ${url.pathname}${url.search}`);
 
 	if (req.method === "GET") {
-		if (path === "/dev/settings") return json(res, 200, { DARK, CORNER_TL: "date", CORNER_TR: "pi", CORNER_BL: "hr", CORNER_BR: "steps", UNIT: "C", LAUNCH_PORT: launchPort() });
+		if (path === "/dev/settings") return json(res, 200, { DARK, CORNER_TL: CORNERS[0], CORNER_TR: CORNERS[1], CORNER_BL: CORNERS[2], CORNER_BR: CORNERS[3], UNIT: "C", LAUNCH_PORT: launchPort() });
 		if (path === "/api/watch/weather") return json(res, 200, { tempC: 11.5, code: 3 });
 		if (path === "/api/watch/health") return json(res, 200, { ok: true, hubVersion: "stub", sessions: { running: 1, pending: requests.length } });
 		if (path === "/api/watch/sessions") return json(res, 200, { sessions: SESSIONS });

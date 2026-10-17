@@ -75,7 +75,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
-node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--platform emery|gabbro] [--no-launch-port]
+node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--platform emery|gabbro] [--no-launch-port] [--corners date,pi,hr,steps]
 
 # in another shell
 cd watch/app
@@ -151,11 +151,13 @@ node watch/app/dev/stub-hub.mjs --port 5173 --scene empty     # from the repo ro
 cd watch/face && pebble build && pebble install --emulator emery --logs
 ```
 
-On `--scene empty` the face shows the time, `SAT 17` top left, `1/0` top right (`s1` is running, nothing pending) and `--` in the bottom corners: heart rate and steps are not wired yet (plan 3, Task 4), and the emulator's health reads 0 until `pebble emu-steps`/`emu-heart-rate` set it. `pi` reads `--` until the phone's first `pending` frame. Screenshots: `screenshots/face-idle-emery-dark.png`, `screenshots/face-idle-gabbro-dark.png`.
+On `--scene empty` the face shows the time, `SAT 17` top left, `1/0` top right (`s1` is running, nothing pending), and heart rate and steps at the bottom once the emulator has values: `pebble emu-heart-rate 72`, `pebble emu-steps 4210`, `pebble emu-battery --percent 80` (all with `--emulator emery`). `pi` reads `--` until the phone's first `pending` frame. Screenshots: `screenshots/face-idle-emery-dark.png`, `-gabbro-dark.png`, `face-idle-emery-light.png` (stub `--dark 0`).
 
-- **Archive size.** `face/build/mods/emery/mc.xsa` is 13618 B (the same for gabbro) with the idle screen, far under the 42.8 KB ceiling. The VM sizes are the app's.
+- **Archive size.** `face/build/mods/emery/mc.xsa` is 14876 B with the idle screen and the corner readings, far under the 42.8 KB ceiling. The VM sizes are the app's.
 - **The phone speaks first.** The watch's `pebble/message` can write only after it has received a dict (`pkjsReady` is set in `messageReceived`, `pebble-appmessage.c`), so the face's phone side sends `cfg`, `net`, `pi`, `sheet` on `ready`, and again when the watch's `hello` arrives, as the app's bridge does. Waiting for `hello` first deadlocks.
 - **Hub URL, twice.** PebbleKit JS `localStorage` is per app on a phone, so the face cannot read the app's stored hub URL even though both use the key `pi-web.hubUrl`. Set **Hub URL** in the face's settings page too (spec §12: entered twice in v1). The face's page also has the four corners, Dark and the temperature unit.
+- **Corner readings.** Steps come from `Health.metric.get("step count")` on `minutechange` and on `health` events; in QEMU the live value stays 0, so the face falls back to the day's sum (`Health.metric.query`, since local midnight), which `emu-steps` does set. Heart rate and steps show `--` when 0, battery is `Battery.sample().percent`. Weather is phone-side (`src/pkjs/weather.js`): position, then `GET /api/watch/weather?lat=&lon=` every 20 minutes, sent as the `weather` dict; `12°` in the emulator from the stub. The stub's `--corners weather,battery,hr,steps` reassigns the corners.
+- **Testing the Clay page.** `pebble emu-app-config` opens a browser, which the headless machine does not have. The page's effect is the settings dict the phone applies, and the stub serves that at `/dev/settings` (`--dark`, `--corners`; `UNIT` is `C`), so restart the stub with other flags and reinstall to test corner assignment and theme.
 - **Idle.** With nothing pending and no session running for 10 minutes, the face's phone side closes the socket and polls `GET /api/watch/pending` once a minute; the watch's `NET` reads `idle`. The first poll that sees a request or a running session reopens the socket (unit-tested; not run in the emulator).
 - **Font strings.** Piu font strings are CSS-like: `"bold 18px Gothic"`. `"18px bold Gothic"` looks for `boldGothic-Regular-18.fnt` and the face fails to load (the firmware then shows `face is not responding`).
 - **A wedged emulator.** Twice during the face work the emery emulator stopped answering (`pebble screenshot` and `install` time out with `libpebble2.exceptions.TimeoutError`), and after killing it the firmware no longer booted (`Waiting for the firmware to boot.` forever). Moving the persisted flash aside (`~/.local/share/pebble-sdk/4.33.1/emery/qemu_spi_flash.bin`) gave a clean boot; the face then ran for several minutes without trouble.

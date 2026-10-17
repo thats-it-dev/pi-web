@@ -83,3 +83,15 @@ test("the model applies sheet, pi, weather, cfg and net dicts and reports the ki
 	assert.equal(m.apply(M({ MSG: "bogus" })), null);
 	assert.equal(m.apply(new Map()), null);
 });
+
+test("cornerText gives every widget id its string from one data object", () => {
+	const data = { date: new Date(2026, 9, 15, 9, 41), pi: { running: 1, pending: 3 }, hr: 72, steps: 4210, battery: 80, temp: "12°" };
+	const ids = ["date", "pi", "hr", "steps", "battery", "weather", "none"];
+	assert.deepEqual(ids.map((id) => cornerText(id, data)), ["THU 15", "1/3", "72", "4210", "80%", "12°", ""]);
+});
+
+test("a cfg dict assigns the four corners and the unit; unknown ids fall back to the slot default", () => {
+	const m = createFaceModel();
+	assert.equal(m.apply(M({ MSG: "cfg", DARK: 0, CORNER_TL: "battery", CORNER_TR: "none", CORNER_BL: "weather", CORNER_BR: "bogus", UNIT: "F" })), "cfg");
+	assert.deepEqual(m.cfg, { dark: false, corners: ["battery", "none", "weather", "steps"], unit: "F" });
+});

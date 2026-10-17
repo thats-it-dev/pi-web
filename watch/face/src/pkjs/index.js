@@ -2,6 +2,7 @@
 var createHubClient = require("../../../shared/pkjs/hub").createHubClient;
 var normalizeHubUrl = require("../../../shared/pkjs/hub").normalizeHubUrl;
 var createFace = require("./face").createFace;
+var createWeather = require("./weather").createWeather;
 var Clay = require("@rebble/clay");
 var clay = new Clay(require("./config"), null, { autoHandleEvents: false });
 
@@ -47,6 +48,27 @@ var face = createFace({
 		return Date.now();
 	},
 	log: log,
+});
+
+var weather = createWeather({
+	hub: {
+		get: function (path, cb) {
+			if (client) client.get(path, cb);
+			else cb(new Error("no hub URL"));
+		},
+	},
+	geolocation: typeof navigator !== "undefined" ? navigator.geolocation : null,
+	setTimeout: function (fn, ms) {
+		return setTimeout(fn, ms);
+	},
+	clearTimeout: function (id) {
+		clearTimeout(id);
+	},
+	now: function () {
+		return Date.now();
+	},
+	log: log,
+	onTemp: face.onWeather,
 });
 
 function onStatus(s) {
@@ -119,10 +141,14 @@ Pebble.addEventListener("ready", function () {
 	log("pi-web: face ready" + (qemu ? " (emulator)" : ""));
 	face.start();
 	connect(stored || (qemu ? "http://127.0.0.1:5173" : null));
+	weather.start(localStorage.getItem("pi-web.unit") === "F" ? "F" : "C");
 	if (qemu && client) {
 		// The stub hub serves the theme and corners here, so screenshots can switch them.
 		client.get("/dev/settings", function (err, json) {
-			if (!err && json) face.onSettings(json);
+			if (!err && json) {
+				face.onSettings(json);
+				weather.setUnit(json.UNIT);
+			}
 		});
 	}
 });
@@ -151,5 +177,10 @@ Pebble.addEventListener("webviewclosed", function (e) {
 	s.HUB_URL = typeof s.HUB_URL === "string" ? s.HUB_URL.replace(/^\s+|\s+$/g, "") : "";
 	s.DARK = !!s.DARK;
 	face.onSettings(s);
-	if (normalizeHubUrl(s.HUB_URL) !== url) connect(s.HUB_URL);
+	weather.setUnit(s.UNIT);
+	if (normalizeHubUrl(s.HUB_URL) !== url) {
+		connect(s.HUB_URL);
+		// The hub changed: ask again now rather than at the next 20-minute tick.
+		weather.start(s.UNIT);
+	}
 });
