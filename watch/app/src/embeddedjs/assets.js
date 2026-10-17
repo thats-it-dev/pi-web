@@ -6,7 +6,8 @@ export const METRICS = { status: 18, toolbar: 16, rule: 2, row: 32, row2: 44, ba
 export function theme(dark) {
 	const paper = dark ? "#000000" : "#FFFFFF";
 	const ink = dark ? "#FFFFFF" : "#000000";
-	const dim = "#AAAAAA";
+	// Dim on light paper needs to be darker than on black to keep contrast.
+	const dim = dark ? "#AAAAAA" : "#555555";
 	const small = SIZES.small + "px " + FONT;
 	const body = SIZES.body + "px " + FONT;
 	return {

@@ -87,7 +87,11 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **Transport in the emulator: `ws`.** The emulator's phone simulator (pypkjs) provides `WebSocket`, so the phone side streams from `/api/watch/stream` and logs `pi-web: ws online`. The long-poll fallback is not exercised there.
 
-Until the watch side opens AppMessage, each send fails, is retried once after 500 ms, and is dropped with a log line (`pi-web: drop <MSG> after 2 tries`).
+**What the `dialog` scene shows.** The watch sends `hello` on launch and the phone answers with `cfg`, `net` and `home`, then `stats`. The Home screen shows `PI-WEB 1/2` and the time, the toolbar for `notesky sync` (`CTX` bar, `18%`, `--` for speed, `QWEN3`), the query `bash: Allow bash?` / `git push origin main`, and the rows `allow` `deny` `say it` with `allow` selected. `pebble emu-button --emulator emery click down` then `click select` answers `deny`: the row shows `…`, then `sent` for a second (the stub logs `POST /api/watch/answer`), then the finished turn on `pi-web watch` (`PI-WEB 1/1`, rows `say it` `dismiss`). `click back` dismisses it (`POST /api/watch/dismiss`) and exits to the watchface. Hold Select (`push select`, wait, `release select`) logs `pi-web: hold select -> MenuView` until the menu exists. Touch (tap a row to pick it) has no `pebble` command; it is untested in the emulator. Screenshots are in `watch/screenshots/`.
+
+**Pacing.** The watch's `pebble/message` holds one unread dict; one that lands before the JS has read the previous is overwritten, and the firmware acks on receipt. The phone side therefore waits 100 ms after each ack before the next send (`ACK_GAP_MS` in `src/pkjs/index.js`). Without it, `net` and `stats` sent right after `cfg`/`home` were lost.
+
+**Memory.** The VM runs with `stack 5120, slot 40960, chunk 19456` (`src/c/mdbl.c`; the words example's `slot 31744` aborts with `memory full` once the Home screen is built, and a larger total fails `fxMapArchive` at launch). AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. At exit the firmware reports about 105 KB of 122 KB heap used.
 
 ### With the real hub
 

@@ -27,6 +27,9 @@ test("queryText", () => {
 	assert.equal(queryText({ tool: "bash", text: "Allow git push?\norigin" }), "bash: Allow git push?\norigin");
 	assert.equal(queryText({ tool: "", text: "done" }), "done");
 	assert.equal(queryText(null), "");
+	assert.equal(queryText({ kind: "finished", tool: "question", text: "Done." }), "Done.");
+	assert.equal(queryText({ kind: "error", tool: "bash", text: "boom" }), "boom");
+	assert.equal(queryText({ kind: "dialog", tool: "bash", text: "Allow?" }), "bash: Allow?");
 });
 
 test("hint", () => {

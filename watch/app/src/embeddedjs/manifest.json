@@ -4,9 +4,19 @@
 		"$(MODDABLE)/examples/manifest_typings.json"
 	],
 	"config": {
-		"creation": { "stack": 5120, "slot": 31744, "chunk": 19456 }
+		"creation": { "stack": 5120, "slot": 40960, "chunk": 19456 }
 	},
 	"modules": {
-		"*": [ "./assets", "./main", "./modules/model", "./modules/format" ]
+		"piu/Controller": "./modules/piuController",
+		"piu/View": "./modules/piuView",
+		"Menu": "./modules/Menu",
+		"*": [ "./assets", "./main", "./modules/model", "./modules/format", "./modules/link", "./views/*" ]
+	},
+	"ffi": {
+		"sources": [ "./exit.c" ],
+		"functions": {
+			"pi_exit": { "arguments": [], "returns": "void" },
+			"pi_clock_24h": { "arguments": [], "returns": "int32_t" }
+		}
 	}
 }

@@ -29,7 +29,9 @@ export function clock(date, h24) {
 
 export function queryText(home) {
 	if (!home) return "";
-	return home.tool ? home.tool + ": " + home.text : home.text;
+	// Spec §7.2: a dialog reads `<tool>: <title>`; a finished turn or an error is just its text.
+	const plain = home.kind === "finished" || home.kind === "error";
+	return home.tool && !plain ? home.tool + ": " + home.text : home.text;
 }
 
 export function hint(home, stats) {

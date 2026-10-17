@@ -7,6 +7,11 @@ var clay = new Clay(require("./config"), null, { autoHandleEvents: false });
 var URL_KEY = "pi-web.hubUrl";
 var DARK_KEY = "pi-web.dark";
 var QUIET = { stats: true, text: true };
+// The watch's pebble/message keeps one unread dict: a dict that lands before the
+// JS has read the previous one overwrites it (pebble-appmessage.c messageReceived,
+// "overwrites unread message"), and the firmware acks on receipt. So the next
+// send waits this long after an ack, to give the watch time to read.
+var ACK_GAP_MS = 100;
 
 var client = null;
 var url = null;
@@ -22,7 +27,7 @@ function send(dict, onAck, onFail) {
 	Pebble.sendAppMessage(
 		dict,
 		function () {
-			onAck();
+			setTimeout(onAck, ACK_GAP_MS);
 		},
 		function (e) {
 			log("pi-web: send " + dict.MSG + " failed" + (e && e.error ? ": " + JSON.stringify(e.error) : ""));
