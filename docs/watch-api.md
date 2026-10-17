@@ -72,7 +72,7 @@ The watchface calls `POST /api/watch/launch` with `{ uuid }` when the phone's ow
 - `{ ok: false, reason: "no_phone" }`: the socket has no remote address, so the hub has nothing to connect to. (The launch request itself records the caller's address, so this does not happen for an ordinary request.)
 - `{ ok: false, reason: "unreachable" }`: the connection failed or timed out after 5 s. Both are `200`.
 
-The phone must have Developer Connection switched on in the Pebble app and be reachable from the hub over the tailnet. The hub targets the first entry of the last `X-Forwarded-For` it saw on any watch request or stream upgrade, falling back to the socket's address (a leading `::ffff:` is stripped).
+The phone must have Developer Connection switched on in the Pebble app and be reachable from the hub over the tailnet. The hub targets the first entry of the last `X-Forwarded-For` it saw on any watch request or stream upgrade when that entry is an IP address, falling back to the socket's address (a leading `::ffff:` is stripped).
 
 See also the face README, [Launch paths](../watch/README.md#launch-paths), for the phone-side paths and the Developer Connection toggle.
 

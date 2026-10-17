@@ -256,6 +256,8 @@ test("notePhone prefers the first X-Forwarded-For entry, strips ::ffff:", () => 
 		assert.equal(w.phone, "100.64.0.9");
 		w.notePhone({}, "fd7a::1");
 		assert.equal(w.phone, "fd7a::1");
+		w.notePhone({ "x-forwarded-for": "evil.example, 100.64.0.9" }, "::ffff:100.64.0.7");
+		assert.equal(w.phone, "100.64.0.7");
 	} finally {
 		w.close();
 	}

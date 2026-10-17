@@ -5,6 +5,7 @@
 
 import type { IncomingHttpHeaders } from "node:http";
 import { mkdirSync } from "node:fs";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
 import type { AppCommand, Dialog, WatchAnswerResult, WatchPending, WatchRequest, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
@@ -81,7 +82,8 @@ export class WatchService {
 	notePhone(h: IncomingHttpHeaders, remote: string | undefined): void {
 		const fwd = h["x-forwarded-for"];
 		const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
-		const addr = first || remote?.replace(/^::ffff:/, "");
+		// Only an address: anything else in the header falls back to the socket's.
+		const addr = (first && isIP(first) ? first : "") || remote?.replace(/^::ffff:/, "");
 		if (addr) this.phone = addr;
 	}
 
