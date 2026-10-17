@@ -140,7 +140,11 @@ export class WatchService {
 			const h = this.deps.registry.get(next);
 			if (h?.kind === "rpc") {
 				const conv = h.snapshot().conv;
-				if (conv.streaming) this.emitText(next, contentText(conv.partial?.content ?? ""), true);
+				if (conv.streaming) {
+					const t = this.tracked.get(h);
+					if (t) t.textAt = this.now();
+					this.emitText(next, contentText(conv.partial?.content ?? ""), true);
+				}
 			}
 		}
 	}
@@ -323,7 +327,7 @@ export class WatchService {
 					if (shown && m.event.type === "message_update" && this.now() - t.textAt >= TEXT_TICK_MS) {
 						t.textAt = this.now();
 						this.emitText(h.sessionId, contentText(h.snapshot().conv.partial?.content ?? ""), true);
-					} else if (shown && m.event.type === "message_end") {
+					} else if (shown && m.event.type === "message_end" && m.event.message?.role === "assistant") {
 						t.textAt = -Infinity;
 						this.emitText(h.sessionId, contentText(m.event.message?.content ?? ""), false);
 					}

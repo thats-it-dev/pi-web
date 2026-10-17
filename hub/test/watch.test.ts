@@ -791,5 +791,23 @@ test("moving showing onto a session mid-reply sends its tail at once", async () 
 	svc.showing(null, "s-1");
 	await tick();
 	assert.deepEqual(frames.filter((f) => f.type === "text"), [{ type: "text", sessionId: "s-1", text: "half a reply", streaming: true }]);
+	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } }));
+	await tick();
+	assert.equal(frames.filter((f) => f.type === "text").length, 1);
+	svc.close();
+});
+
+test("message_end for a user or toolResult message sends no text frame", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	await tick();
+	const frames: WatchStreamFrame[] = [];
+	svc.subscribe((f) => frames.push(f));
+	svc.showing(null, "s-1");
+	await tick();
+	h.push(ev({ type: "message_end", message: { role: "user", content: "hi" } }));
+	h.push(ev({ type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "out" }] } }));
+	await tick();
+	assert.equal(frames.filter((f) => f.type === "text").length, 0);
 	svc.close();
 });
