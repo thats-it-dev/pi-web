@@ -1,3 +1,4 @@
+import type { ClientRequest } from "node:http";
 import { cpSync, existsSync, readFileSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,11 +74,14 @@ export default defineConfig({
 			"/api": {
 				target: HUB,
 				changeOrigin: false,
+				ws: true,
 				configure(proxy) {
-					proxy.on("proxyReq", (req) => {
+					const stamp = (req: ClientRequest) => {
 						req.setHeader("tailscale-user-login", DEV_LOGIN);
 						if (!req.getHeader("origin")) req.setHeader("origin", DEV_ORIGIN);
-					});
+					};
+					proxy.on("proxyReq", stamp);
+					proxy.on("proxyReqWs", stamp);
 				},
 			},
 		},

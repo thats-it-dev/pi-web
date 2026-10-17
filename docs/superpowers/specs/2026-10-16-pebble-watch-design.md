@@ -325,8 +325,8 @@ Client → hub:
 
 Answers, dismissals, prompts and model changes stay HTTP POSTs: they are
 rare, they want a reply, and curl can do them. The hub pings every 30 s and
-drops a socket that misses two pongs; `WatchService.close()` closes every
-socket with code 1001.
+drops a socket that misses two pongs; hub shutdown closes every socket with
+code 1001.
 
 Resync is trivial: a reconnecting client gets a full `pending` frame, and the
 `text` frame is a tail, not a delta, so nothing is replayed. The long-poll's
