@@ -19,12 +19,15 @@ export function dateLabel(date) {
 
 const positive = (n) => (typeof n === "number" && n > 0 ? String(n) : "--");
 
-// data: { date, pi: { running, pending }, hr, steps, battery, temp }.
+// data: { date, pi: { running, pending }, net, hr, steps, battery, temp }.
+// The pi corner is the connection cue (spec §6.1, no status line): OFF while the
+// phone is offline or has no hub URL; idle keeps the last counts.
 export function cornerText(id, data) {
 	switch (id) {
 		case "date":
 			return data.date ? dateLabel(data.date) : "--";
 		case "pi":
+			if (data.net === "offline" || data.net === "unconfigured") return "OFF";
 			return data.pi ? data.pi.running + "/" + data.pi.pending : "--";
 		case "hr":
 			return positive(data.hr);

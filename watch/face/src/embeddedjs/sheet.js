@@ -3,12 +3,23 @@
 // footer. main moves it (the rise); this only fills it. A message longer than
 // two lines scrolls a line at a time (scrollNext): a 240-character message is
 // unreadable as a horizontal marquee, and the clip already wraps.
+//
+// On gabbro the sheet is the bottom 84 px segment of the circle, whose chord is
+// about 226 px under the rule, 160 px at the second message line and under 50 px
+// at the bottom. So the rows are tighter, the counter rides in the eyebrow (the
+// widest part), the footer is FLICK TO OPEN alone, and the message wraps to 148 px.
 import { sheetText, scrollNext, SHEET_HEIGHT } from "face";
 import Timer from "timer";
 
-const LINE = 22;
 const ROUND = screen.round;
+const LINE = ROUND ? 20 : 22;
 const INSET = ROUND ? 32 : 8;
+// The message's inset; on gabbro a full line keeps about 4 px off the rim at the second line's baseline.
+const BODY_INSET = ROUND ? 56 : 8;
+// The eyebrow's height, then where the clip and the footer start.
+const EYEBROW = ROUND ? 16 : 18;
+const BODY_TOP = 2 + EYEBROW;
+const FOOTER_TOP = BODY_TOP + 2 * LINE;
 
 class SheetBehavior extends Behavior {
 	onCreate(c, $) {
@@ -23,7 +34,6 @@ class SheetBehavior extends Behavior {
 	// text rebuilds the lines and restarts the scroll; a counter change does not.
 	onSheet(c, sheet) {
 		const t = (this.t = sheetText(sheet));
-		c.content(1).string = t.eyebrow;
 		this.footer(c);
 		if (sheet.id === this.id && sheet.text === this.text) return;
 		this.stop(c);
@@ -32,8 +42,8 @@ class SheetBehavior extends Behavior {
 		const col = this.column(c);
 		col.empty();
 		const style = ROUND ? this.styles.bodyCenter : this.styles.body;
-		const lines = t.lines(c.width - 2 * INSET, (s) => style.measure(s).width);
-		for (const string of lines) col.add(new Label(null, { left: INSET, right: INSET, height: LINE, style, string }));
+		const lines = t.lines(c.width - 2 * BODY_INSET, (s) => style.measure(s).width);
+		for (const string of lines) col.add(new Label(null, { left: BODY_INSET, right: BODY_INSET, height: LINE, style, string }));
 		this.max = lines.length - 2;
 		this.k = -1;
 		this.step(c);
@@ -43,11 +53,15 @@ class SheetBehavior extends Behavior {
 		this.opening = on;
 		if (this.t) this.footer(c);
 	}
+	// The eyebrow and the footer; on gabbro the counter is in the eyebrow.
 	footer(c) {
 		const footer = c.content(3);
 		const f = this.t.footer(this.opening);
-		if (ROUND) footer.first.string = f.join(" · ");
-		else {
+		if (ROUND) {
+			c.content(1).string = this.t.eyebrow + " · " + f[1];
+			footer.first.string = f[0];
+		} else {
+			c.content(1).string = this.t.eyebrow;
 			footer.first.string = f[0];
 			footer.last.string = f[1];
 		}
@@ -88,11 +102,11 @@ export const Sheet = Container.template($ => ({
 	left: 0, right: 0, top: screen.height, height: SHEET_HEIGHT, skin: $.theme.skins.paper, Behavior: SheetBehavior,
 	contents: [
 		Content($, { left: 0, right: 0, top: 0, height: 2, skin: $.theme.skins.ink }),
-		Label($, { left: INSET, right: INSET, top: 2, height: 18, style: ROUND ? $.theme.styles.smallCenter : $.theme.styles.small, string: "" }),
-		Container($, { left: 0, right: 0, top: 20, height: 2 * LINE, clip: true, contents: [
+		Label($, { left: INSET, right: INSET, top: 2, height: EYEBROW, style: ROUND ? $.theme.styles.smallCenter : $.theme.styles.small, string: "" }),
+		Container($, { left: 0, right: 0, top: BODY_TOP, height: 2 * LINE, clip: true, contents: [
 			Column($, { left: 0, right: 0, top: 0, contents: [] }),
 		] }),
-		Container($, { left: 0, right: 0, top: 20 + 2 * LINE, height: 18, contents: ROUND
+		Container($, { left: 0, right: 0, top: FOOTER_TOP, height: EYEBROW, contents: ROUND
 			? [ Label($, { left: 0, right: 0, style: $.theme.styles.smallCenter, string: "" }) ]
 			: [
 				Label($, { left: INSET, style: $.theme.styles.small, string: "" }),

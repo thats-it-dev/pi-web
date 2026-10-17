@@ -45,6 +45,16 @@ test("cornerText: missing health readings and the date show --; an unknown id dr
 	assert.equal(cornerText("bogus", { hr: 72 }), "");
 });
 
+test("cornerText: the pi corner is the net cue (OFF offline or unconfigured; idle keeps the counts)", () => {
+	const pi = { running: 1, pending: 2 };
+	assert.equal(cornerText("pi", { pi, net: "offline" }), "OFF");
+	assert.equal(cornerText("pi", { pi, net: "unconfigured" }), "OFF");
+	assert.equal(cornerText("pi", { net: "offline" }), "OFF");
+	assert.equal(cornerText("pi", { pi, net: "idle" }), "1/2");
+	assert.equal(cornerText("pi", { pi, net: "online" }), "1/2");
+	assert.equal(cornerText("pi", { pi, net: "connecting" }), "1/2");
+});
+
 test("layout: emery idle and sheet heights; gabbro insets", () => {
 	assert.deepEqual(layout(200, 228, false), { time: { top: 90, height: 48 }, corners: { inset: 8, top: 6, height: 22 } });
 	assert.deepEqual(layout(200, 144, false), { time: { top: 48, height: 48 }, corners: { inset: 8, top: 6, height: 22 } });

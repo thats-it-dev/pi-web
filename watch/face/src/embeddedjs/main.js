@@ -110,7 +110,7 @@ class FaceBehavior extends Behavior {
 	}
 	data() {
 		const m = this.model;
-		return { corners: m.cfg.corners, date: this.date, pi: m.pi, temp: m.temp, hr: this.hr, steps: this.steps, battery: this.batteryPct };
+		return { corners: m.cfg.corners, date: this.date, pi: m.pi, net: m.net, temp: m.temp, hr: this.hr, steps: this.steps, battery: this.batteryPct };
 	}
 	onMessage(app, map) {
 		const kind = this.model.apply(map);

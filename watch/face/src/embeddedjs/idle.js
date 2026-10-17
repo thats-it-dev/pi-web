@@ -24,7 +24,7 @@ class IdleBehavior extends Behavior {
 	onClockChanged(c, date) {
 		c.content(0).string = clock(date, !watch.hour12);
 	}
-	// data: { corners: [tl, tr, bl, br], date, pi, temp, hr, steps, battery }.
+	// data: { corners: [tl, tr, bl, br], date, pi, net, temp, hr, steps, battery }.
 	onCorners(c, data) {
 		for (let i = 0; i < 4; i++) c.content(i + 1).string = cornerText(data.corners[i], data);
 	}
