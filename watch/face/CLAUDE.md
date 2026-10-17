@@ -21,4 +21,6 @@ Code size is memory in the emulator: the mod archive (`build/mods/emery/mc.xsa`)
 
 Piu font strings are CSS-like: `"bold 18px Gothic"`, not `"18px bold Gothic"` (that looks for `boldGothic-Regular-18` and the face fails to load).
 
+The hub URL is entered in the face's Clay page as well as the app's: `localStorage` is per app on a phone. Launch paths, idle policy and the hardware checklist are in `../README.md`.
+
 See `watch/README.md` and `docs/superpowers/specs/2026-10-16-pebble-watch-design.md`.
