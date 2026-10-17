@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo } from "../src/embeddedjs/modules/format.js";
+import { toolbar, statusLeft, clock, queryText, hint, sessionMeta, menuMeta, clipTo, tailLines } from "../src/embeddedjs/modules/format.js";
 
 test("toolbar", () => {
 	assert.deepEqual(toolbar({ ctxPercent: 41, tps: 62, model: "qwen3" }), { ctx: "41%", percent: 41, speed: "62 T/S", model: "QWEN3" });
@@ -46,4 +46,14 @@ test("menuMeta and clipTo", () => {
 	assert.deepEqual(menuMeta({ model: "qwen3", state: "idle", ctxTokens: 52000, ctxWindow: 128000 }), ["QWEN3 · IDLE", "52k of 128k"]);
 	assert.equal(clipTo("abcdef", 4), "abc…");
 	assert.equal(clipTo("abc", 4), "abc");
+});
+
+test("tailLines keeps the end of a transcript in at most 2 lines, … where cut", () => {
+	const w = (s) => s.length * 10; // 10 px a character
+	assert.deepEqual(tailLines("yes please", 100, w), ["yes please"]);
+	assert.deepEqual(tailLines("  ", 100, w), []);
+	assert.deepEqual(tailLines("one two three four", 100, w), ["one two", "three four"]);
+	assert.deepEqual(tailLines("aa bb cc dd ee ff gg hh", 80, w), ["…dd ee", "ff gg hh"]);
+	assert.deepEqual(tailLines("supercalifragilistic", 100, w), ["…agilistic"]);
+	assert.deepEqual(tailLines("ok supercalifragilistic", 100, w), ["…agilistic"]);
 });

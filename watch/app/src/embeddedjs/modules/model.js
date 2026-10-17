@@ -1,4 +1,5 @@
 const num = (v) => (typeof v === "number" && v >= 0 ? v : null);
+const MAX_RESULTS = 4;
 const lines = (s) => (s ? String(s).split("\n") : []);
 
 export function parseRows(kind, rows) {
@@ -96,6 +97,8 @@ export function createModel() {
 						else m.setSayIt({ status: "failed" });
 					} else {
 						results.set(g("CMD_ID"), r);
+						// Unclaimed results (timed out, superseded, screen left) must not pile up.
+						while (results.size > MAX_RESULTS) results.delete(results.keys().next().value);
 					}
 					return kind;
 				}

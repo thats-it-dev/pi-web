@@ -9,7 +9,7 @@
 // pending. m.sayIt holds the state (model.js); this view drives the transitions.
 import { METRICS } from "assets";
 import { homeRows } from "model";
-import { toolbar, statusLeft, clock, queryText, hint } from "format";
+import { toolbar, statusLeft, clock, queryText, hint, tailLines } from "format";
 import Menu from "Menu";
 import Timer from "timer";
 import View from "piu/View";
@@ -24,6 +24,8 @@ const WAIT_MS = 10000; // no result by then: treat as failed
 const EXIT_MS = 400;
 const USER_INSET = 32; // a user turn's left inset (§7.8)
 const SAY_GAP = 4;
+const LINE = 22; // a body line (18 px type, 22 px leading)
+const UNMATCHED = 18; // the 14 px no_match line and the gap above it
 // Say-it states during which the screen keeps the request it showed (a home that
 // arrives meanwhile is held until the transcript's result has landed).
 const SAY_HOLD = { listening: 1, sending: 1, sent: 1, gone: 1, failed: 1 };
@@ -54,20 +56,35 @@ const Toolbar = Row.template($ => ({
 }));
 
 // The query block: the query text, then (after say it) the transcript as a user
-// turn, right-aligned, same ink, no fill, then the no_match line (14 px).
+// turn, right-aligned, same ink, no fill, then the no_match line (14 px). With a
+// transcript, the query text area is whole lines and the transcript at most two
+// Labels (its end, see layoutSaid), so the request stays in view and no line is cut.
 const Query = Container.template($ => ({
 	left:0, right:0, top:$.top, height:$.height, clip:true,
 	contents: [
-		Column($, {
-			left:0, right:0, top:0,
+		Container($, {
+			left:0, right:0, top:0, height:$.textHeight, clip:true,
 			contents: [
-				Text($, { left:PAD, right:PAD, style:$.styles.body, string:$.string }),
-				$.said ? Text($, { left:USER_INSET, right:PAD, top:SAY_GAP, style:$.styles.bodyRight, string:$.said }) : null,
-				$.unmatched ? Label($, { left:PAD, right:PAD, top:2, height:HINT, style:$.styles.meta, string:$.unmatched }) : null,
+				Text($, { left:PAD, right:PAD, top:0, style:$.styles.body, string:$.string }),
 			],
 		}),
+		...$.said.map((line, k) => Label($, { left:USER_INSET, right:PAD, top:$.saidTop + k * LINE, height:LINE, style:$.styles.bodyRight, string:line })),
+		$.unmatched ? Label($, { left:PAD, right:PAD, top:$.unmatchedTop, height:HINT, style:$.styles.meta, string:$.unmatched }) : null,
 	],
 }));
+
+// Splits the query block between the query text and the transcript: the request
+// keeps two lines where it can, the transcript gets one or two, all whole lines.
+function layoutSaid(styles, width, height, said, unmatched) {
+	if (!said) return { textHeight:height, said:[], saidTop:0, unmatchedTop:height - HINT };
+	const extra = SAY_GAP + (unmatched ? UNMATCHED : 0);
+	const max = Math.max(1, Math.min(2, Math.floor((height - extra - 2 * LINE) / LINE)));
+	const style = styles.bodyRight;
+	const lines = tailLines(said, width - USER_INSET - PAD, s => style.measure(s).width, max);
+	const textHeight = Math.max(0, Math.floor((height - extra - lines.length * LINE) / LINE) * LINE);
+	const saidTop = textHeight + SAY_GAP;
+	return { textHeight, said:lines, saidTop, unmatchedTop:saidTop + lines.length * LINE + 2 };
+}
 
 const Hint = Label.template($ => ({
 	left:PAD, right:PAD, top:$.top, height:HINT, style:$.styles.meta, string:$.string,
@@ -110,6 +127,11 @@ class HomeBehavior extends View.Behavior {
 	}
 	onUndisplaying(container) {
 		this.clearHold();
+		// A wait or flash timer would keep this screen alive and build into it after it left.
+		const p = this.pending;
+		if (p && p.timer !== undefined) Timer.clear(p.timer);
+		this.pending = null;
+		this.stale = false;
 		this.clearSayTimer();
 		this.closeDictation();
 		// The timers that would settle a say-it in flight go with this screen.
@@ -165,9 +187,10 @@ class HomeBehavior extends View.Behavior {
 		container.empty();
 		container.add(new Status({ styles:theme.styles, left:statusLeft(home, m.net), right:clock(new Date(), controller.h24) }));
 		container.add(new Toolbar(toolbarData(theme, m.stats)));
-		const query = new Query({ styles:theme.styles, top, height:queryHeight, string:this.queryString(), said:showSaid ? say.text : "", unmatched });
+		const layout = layoutSaid(theme.styles, container.width, queryHeight, showSaid ? say.text : "", unmatched);
+		const query = new Query({ styles:theme.styles, top, height:queryHeight, string:this.queryString(), unmatched, ...layout });
 		container.add(query);
-		if (showSaid) this.keepTail(query);
+		if (layout.said.length) this.tuckSaid(query, layout.textHeight);
 		if (withHint)
 			container.add(new Hint({ styles:theme.styles, top:top + queryHeight, string:hint(home, m.stats) }));
 		container.add(new Rule({ skins:theme.skins, top:ruleTop }));
@@ -189,14 +212,16 @@ class HomeBehavior extends View.Behavior {
 		this.build(container, keep);
 		this.focusMenu(container);
 	}
-	// When the query and the transcript overflow the block, anchor the column at the
-	// bottom so the transcript stays in view and the query's start is cut instead.
-	keepTail(query) {
+	// A short query leaves room above the transcript: once Piu has laid out the text,
+	// move the transcript (and no_match line) up to sit under its last line.
+	tuckSaid(query, textHeight) {
 		Timer.set(() => {
-			const column = query.first;
-			if (!column || !query.container) return;
-			if (column.height > query.height)
-				column.coordinates = { left:0, right:0, bottom:0 };
+			if (!query.container) return;
+			const used = Math.ceil(query.first.first.height / LINE) * LINE;
+			const shift = textHeight - used;
+			if (shift < LINE) return;
+			for (let c = query.first.next; c; c = c.next)
+				c.y -= shift;
 		}, 0);
 	}
 	rowLabel(index, string, style) {
@@ -314,18 +339,18 @@ class HomeBehavior extends View.Behavior {
 		this.sayCmd = undefined; // a transcript still out is superseded; its result is ignored
 		const m = this.m;
 		try {
-			if (!this.dictation) {
-				const view = this;
-				this.dictation = new Dictation({
-					onReadable() {
-						view.onDictated(container, this.read());
-					},
-					onError(status) {
-						view.onDictationError(container, status);
-					},
-				});
-				this.dictation.configure({ confirm:true, errorDialogs:true });
-			}
+			// A fresh session each round; the last one was closed when it ended.
+			this.closeDictation();
+			const view = this;
+			this.dictation = new Dictation({
+				onReadable() {
+					view.onDictated(container, this.read());
+				},
+				onError(status) {
+					view.onDictationError(container, status);
+				},
+			});
+			this.dictation.configure({ confirm:true, errorDialogs:true });
 			this.dictation.start();
 		}
 		catch (e) {
@@ -345,6 +370,7 @@ class HomeBehavior extends View.Behavior {
 		m.setSayIt({ status:"listening" });
 	}
 	onDictated(container, text) {
+		this.releaseDictation();
 		const m = this.m;
 		text = text ? String(text).trim() : "";
 		if (m.sayIt.status !== "listening") return;
@@ -371,6 +397,7 @@ class HomeBehavior extends View.Behavior {
 	onDictationError(container, status) {
 		// errorDialogs: true, so the firmware has shown (or shows) its own dialog.
 		console.log("pi-web: dictation error " + status);
+		this.releaseDictation();
 		if (this.m.sayIt.status === "listening") this.sayIdle(container);
 	}
 	onSayResult(container) {
@@ -394,6 +421,19 @@ class HomeBehavior extends View.Behavior {
 	clearSayTimer() {
 		if (this.sayTimer !== undefined) Timer.clear(this.sayTimer);
 		this.sayTimer = undefined;
+	}
+	// From inside a Dictation callback: close the session once the callback has returned
+	// (the firmware may still touch it while its callback runs).
+	releaseDictation() {
+		const d = this.dictation;
+		this.dictation = null;
+		if (d) Timer.set(() => {
+			try {
+				d.close();
+			}
+			catch (e) {
+			}
+		}, 0);
 	}
 	closeDictation() {
 		if (!this.dictation) return;

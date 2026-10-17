@@ -54,3 +54,36 @@ export function menuMeta(stats) {
 	const line2 = typeof s.ctxTokens === "number" && typeof s.ctxWindow === "number" ? k(s.ctxTokens) + " of " + k(s.ctxWindow) : "";
 	return [line1, line2];
 }
+
+// The end of a transcript in at most `max` lines of `width` px (measure(s) → px),
+// as whole lines for Labels: words wrap from the end, and where text is dropped
+// the first line starts with `…` (a word too long for a line keeps its end).
+export function tailLines(text, width, measure, max = 2) {
+	const words = String(text).trim().split(/\s+/).filter(Boolean);
+	const fitTail = (s) => {
+		let k = 1;
+		while (k < s.length && measure("…" + s.slice(k)) > width) k++;
+		return "…" + s.slice(k);
+	};
+	const lines = [];
+	let i = words.length - 1;
+	while (i >= 0 && lines.length < max) {
+		if (measure(words[i]) > width) {
+			lines.unshift(fitTail(words[i]));
+			return lines;
+		}
+		let line = words[i--];
+		while (i >= 0 && measure(words[i] + " " + line) <= width) line = words[i--] + " " + line;
+		lines.unshift(line);
+	}
+	if (i >= 0) {
+		let first = lines[0];
+		while (measure("…" + first) > width) {
+			const sp = first.indexOf(" ");
+			if (sp < 0) return [fitTail(first)].concat(lines.slice(1));
+			first = first.slice(sp + 1);
+		}
+		lines[0] = "…" + first;
+	}
+	return lines;
+}

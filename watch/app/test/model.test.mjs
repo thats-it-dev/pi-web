@@ -57,6 +57,12 @@ test("takeResult returns a result once", () => {
 	assert.equal(m.takeResult("zz"), null);
 });
 
+test("results keep only the newest 4", () => {
+	const m = createModel();
+	for (let c = 1; c <= 6; c++) m.apply(M({ MSG: "result", CMD_ID: c, OK: 1 }));
+	assert.deepEqual([1, 2, 3, 4, 5, 6].map((c) => m.takeResult(c) !== null), [false, false, true, true, true, true]);
+});
+
 test("sayIt via setSayIt", () => {
 	const m = createModel();
 	assert.deepEqual(m.sayIt, { text: "", status: "idle" });
