@@ -11,6 +11,7 @@ import { METRICS } from "assets";
 import { homeRows } from "model";
 import { toolbar, statusLeft, clock, queryText, hint, tailLines } from "format";
 import Menu from "Menu";
+import { Status, Rule } from "ListScreen";
 import Timer from "timer";
 import View from "piu/View";
 import Dictation from "pebble/dictation";
@@ -30,14 +31,6 @@ const UNMATCHED = 18; // the 14 px no_match line and the gap above it
 // arrives meanwhile is held until the transcript's result has landed).
 const SAY_HOLD = { listening: 1, sending: 1, sent: 1, gone: 1, failed: 1 };
 const SAY_LABEL = { sent: "sent", gone: "already answered", failed: "failed" };
-
-const Status = Container.template($ => ({
-	left:0, right:0, top:0, height:METRICS.status,
-	contents: [
-		Label($, { left:PAD, right:60, top:1, style:$.styles.small, string:$.left }),
-		Label($, { right:PAD, width:56, top:1, style:$.styles.smallRight, string:$.right }),
-	],
-}));
 
 const Toolbar = Row.template($ => ({
 	left:PAD, right:PAD, top:METRICS.status, height:METRICS.toolbar,
@@ -88,10 +81,6 @@ function layoutSaid(styles, width, height, said, unmatched) {
 
 const Hint = Label.template($ => ({
 	left:PAD, right:PAD, top:$.top, height:HINT, style:$.styles.meta, string:$.string,
-}));
-
-const Rule = Content.template($ => ({
-	left:0, right:0, top:$.top, height:METRICS.rule, skin:$.skins.rule,
 }));
 
 function toolbarData(theme, stats) {
@@ -294,7 +283,7 @@ class HomeBehavior extends View.Behavior {
 			this.wait(container, index, title, controller.link.send("dismiss", { REQ_ID:id }));
 		}
 		else if (title === "menu") {
-			console.log("pi-web: menu (Task 9)");
+			controller.goTo("MenuView");
 		}
 		return true;
 	}
@@ -455,8 +444,7 @@ class HomeBehavior extends View.Behavior {
 		this.clearHold();
 		this.hold = Timer.set(() => {
 			this.hold = undefined;
-			console.log("pi-web: hold select -> MenuView (Task 9)");
-			// controller.goTo("MenuView");
+			if (controller.view === this.view && !this.exiting) controller.goTo("MenuView");
 		}, HOLD_MS);
 		return true;
 	}

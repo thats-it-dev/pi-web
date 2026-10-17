@@ -93,7 +93,9 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 **Pacing.** The watch's `pebble/message` holds one unread dict; one that lands before the JS has read the previous is overwritten, and the firmware acks on receipt. The phone side therefore waits 100 ms after each ack before the next send (`ACK_GAP_MS` in `src/pkjs/index.js`). Without it, `net` and `stats` sent right after `cfg`/`home` were lost.
 
-**Memory.** The VM runs with `stack 5120, slot 40960, chunk 23552` (`src/c/mdbl.c`; the words example's `slot 31744` aborts with `memory full` once the Home screen is built, and a larger total fails `fxMapArchive` at launch). AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. At exit the firmware reports about 105 KB of 122 KB heap used; the high-water mark is now about 117.5 KB, the same with or without a dictation round. On the Home screen, `heap_bytes_free()` read about 9.3 KB before, during and after say-it rounds; each round's `Dictation` is closed when it ends. The chunk heap went from 19456 to 23552 for the transcript screens: a Piu `Text` is chunk-heavy, and the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456.
+**Memory.** The VM runs with `stack 5120, slot 43008, chunk 23552` (`src/c/mdbl.c`, mirrored in `manifest.json`). The words example's `slot 31744` aborts with `memory full` once the Home screen is built. Slot went from 40960 to 43008 for the menu screens: at 40960, picking a model aborted with `# Slot allocation: failed in fixed size heap` (every loaded screen module keeps its functions resident), and 41984 passed with under 1 KB to spare. The chunk heap went from 19456 to 23552 for the transcript screens: a Piu `Text` is chunk-heavy, and the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456. AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. With the menu screens, `heap_bytes_free()` reads 8.1 KB on every screen, and the firmware's high-water mark at exit is 119.6 KB of 122.1 KB.
+
+**Code size is memory (emulator).** The emulator copies the mod archive (`build/mods/<platform>/mc.xsa`) into RAM, and at launch the runtime mallocs a table the size of the archive's `MAPS` atom (2 bytes per identifier reference in the bytecode). A 51 KB archive with `MAPS` 7636 B failed at launch with `fxMapArchive failed` or `fxAbort memory full`; 41.5 KB with `MAPS` 5836 B boots. Keep the archive near 42 KB: screens swap without transitions (`piuView.js`), the Menu has no tweens, and list screens share `modules/ListScreen.js`. Lists are virtualised (`Menu.js` keeps only the rows that fit plus one, re-bound on scroll), and sessions/models rows stay raw strings until drawn (`m.rowAt`). On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 install.
 
 ### With the real hub
 
@@ -112,6 +114,7 @@ Mute pi-web notifications in the Pebble phone app so they do not duplicate the w
 
 (Filled in Task 11.)
 
+- Full build boots on the Time 2? (The emulator copies the archive into RAM; hardware maps it from flash.) Also note the firmware's `Heap Usage for App` line at exit; it was 119.6 KB of 122.1 KB in the emulator.
 - dictation: hardware only (the emulator shows the dictation screen but cannot transcribe; check `say it` end to end on the watch: confirm screen, `sending…`, `sent`, and `didn't match` on a dialog).
 
 ## Known issues

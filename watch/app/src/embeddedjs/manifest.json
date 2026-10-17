@@ -1,16 +1,15 @@
 {
  	"include":  [
-		"$(MODDABLE)/examples/manifest_mod.json",
-		"$(MODDABLE)/examples/manifest_typings.json"
+		"$(MODDABLE)/examples/manifest_mod.json"
 	],
 	"config": {
-		"creation": { "stack": 5120, "slot": 40960, "chunk": 23552 }
+		"creation": { "stack": 5120, "slot": 43008, "chunk": 23552 }
 	},
 	"modules": {
 		"piu/Controller": "./modules/piuController",
 		"piu/View": "./modules/piuView",
 		"Menu": "./modules/Menu",
-		"*": [ "./assets", "./main", "./modules/model", "./modules/format", "./modules/link", "./views/*" ]
+		"*": [ "./assets", "./main", "./modules/model", "./modules/format", "./modules/link", "./modules/listWindow", "./modules/ListScreen", "./views/*" ]
 	},
 	"ffi": {
 		"sources": [ "./exit.c" ],

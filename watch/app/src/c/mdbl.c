@@ -11,7 +11,7 @@ int main(void) {
     .flags = kModdableCreationFlagDebug,
 #endif
     .stack = 5120,
-    .slot = 40960,
+    .slot = 43008,
     .chunk = 23552,
     .fxBuildFFI = fxBuildFFI,
   });

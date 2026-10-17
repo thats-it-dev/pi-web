@@ -39,6 +39,11 @@ export function createModel() {
 		cfg: { dark: false },
 		lists: { sessions: emptyList(), history: emptyList(), models: emptyList() },
 		sayIt: { text: "", status: "idle" },
+		// Row i of the sessions or models list, parsed.
+		rowAt(kind, i) {
+			const line = m.lists[kind].rows[i];
+			return line === undefined ? undefined : parseRows(kind, [line])[0];
+		},
 		resetList(kind) {
 			m.lists[kind] = emptyList();
 		},
@@ -106,18 +111,16 @@ export function createModel() {
 					const name = g("LIST");
 					if (!m.lists[name]) return null;
 					const list = m.lists[name];
-					const parsed = parseRows(name, lines(g("ROWS")));
 					const offset = g("OFFSET") || 0;
 					if (name === "history") {
 						const byI = new Map(list.rows.map((r) => [r.i, r]));
-						for (const r of parsed) byI.set(r.i, r);
+						for (const r of parseRows(name, lines(g("ROWS")))) byI.set(r.i, r);
 						list.rows = [...byI.values()].sort((a, b) => a.i - b.i);
 					} else {
-						const next = list.rows.slice(0, offset);
-						while (next.length < offset) next.push(undefined);
-						parsed.forEach((r, k) => { next[offset + k] = r; });
-						const tail = list.rows.slice(offset + parsed.length);
-						list.rows = next.concat(tail).filter((r) => r !== undefined);
+						// Sessions and models keep their raw lines, parsed one at a time when
+						// drawn (rowAt): a string per row costs far fewer XS slots than an object.
+						const rows = list.rows;
+						if (offset <= rows.length) lines(g("ROWS")).forEach((line, k) => { rows[offset + k] = line; });
 					}
 					list.total = g("TOTAL") || 0;
 					list.complete = g("MORE") !== 1;

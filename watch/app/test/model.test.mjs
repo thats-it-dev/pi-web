@@ -124,3 +124,17 @@ test("parseRows per kind; homeRows per kind", () => {
 	assert.deepEqual(homeRows({ requestId: null, kind: "", options: [] }), ["say it", "menu"]);
 	assert.deepEqual(homeRows(null), ["say it", "menu"]);
 });
+
+test("sessions and models keep raw lines (parsed by rowAt), chunks land by OFFSET", () => {
+	const m = createModel();
+	const s = (n) => `s${n}\tT${n}\tidle\t1\tqwen3\t${n}\t1m`;
+	m.apply(M({ MSG: "list", LIST: "sessions", ROWS: [s(0), s(1)].join("\n"), OFFSET: 0, TOTAL: 3, MORE: 1 }));
+	m.apply(M({ MSG: "list", LIST: "sessions", ROWS: s(2), OFFSET: 2, TOTAL: 3, MORE: 0 }));
+	assert.deepEqual(m.lists.sessions.rows, [s(0), s(1), s(2)]);
+	assert.deepEqual(m.rowAt("sessions", 2), { id: "s2", title: "T2", state: "idle", live: true, model: "qwen3", ctx: 2, age: "1m" });
+	m.apply(M({ MSG: "list", LIST: "sessions", ROWS: s(9), OFFSET: 1, TOTAL: 3, MORE: 0 }));
+	assert.deepEqual(m.lists.sessions.rows, [s(0), s(9), s(2)]);
+	m.apply(M({ MSG: "list", LIST: "models", ROWS: "p\tid1\tName\t1", OFFSET: 0, TOTAL: 1, MORE: 0 }));
+	assert.deepEqual(m.rowAt("models", 0), { provider: "p", id: "id1", name: "Name", current: true });
+	assert.equal(m.rowAt("models", 5), undefined);
+});
