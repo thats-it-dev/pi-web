@@ -51,6 +51,8 @@ export const SHEET_HEIGHT = 84;
 export const RISE_MS = 350;
 export const SCROLL_PAUSE_MS = 2000;
 export const SCROLL_STEP_MS = 1500;
+// After a flick the footer reads opening… for this long unless the phone says it failed (spec §8).
+export const OPENING_MS = 3000;
 
 // sheet: { kind, tool, text, index, count } as the model holds it.
 export function sheetText(sheet) {
@@ -84,6 +86,8 @@ export function createFaceModel() {
 		temp: null,
 		net: "connecting",
 		cfg: { dark: true, corners: DEFAULTS.slice(), unit: "C" },
+		// The last result dict: { id: its CMD_ID, ok }.
+		result: null,
 		// Applies one dict; returns its kind, or null when it is not one the face knows.
 		apply(map) {
 			const msg = map.get("MSG");
@@ -99,6 +103,8 @@ export function createFaceModel() {
 				m.pi = running === null || pending === null ? null : { running, pending };
 			} else if (msg === "weather") {
 				m.temp = text(map.get("TEMP")) || null;
+			} else if (msg === "result") {
+				m.result = { id: map.get("CMD_ID"), ok: map.get("OK") === 1 };
 			} else if (msg === "net") {
 				m.net = text(map.get("NET")) || m.net;
 			} else if (msg === "cfg") {

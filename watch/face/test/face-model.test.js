@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createFace, selectSheet, piCounts } = require("../src/pkjs/face.js");
-const { FakeTimers } = require("../../app/test/support/fakes.js");
+const { FakeTimers, FakeSocket } = require("../../app/test/support/fakes.js");
 
 const MIN = 60 * 1000;
 
@@ -40,6 +40,7 @@ function setup(opts) {
 	const hub = new FakeHub();
 	const store = Object.assign({}, opts.store || {});
 	const dicts = [];
+	const logs = [];
 	let inFlight = null;
 	const face = createFace({
 		send: (dict, onAck, onFail) => {
@@ -51,7 +52,9 @@ function setup(opts) {
 		setTimeout: timers.setTimeout,
 		clearTimeout: timers.clearTimeout,
 		now: () => 0,
-		log: () => {},
+		log: (m) => logs.push(m),
+		WebSocket: opts.WebSocket === undefined ? null : opts.WebSocket,
+		launchPort: () => (opts.launchPort === undefined ? 9000 : opts.launchPort),
 	});
 	face.setHub(hub);
 	const t = {
@@ -59,6 +62,7 @@ function setup(opts) {
 		hub,
 		timers,
 		dicts,
+		logs,
 		store,
 		inFlight: () => inFlight,
 		ack() {
@@ -377,4 +381,57 @@ test("a queued vibe survives coalescing: a newer sheet without a vibe keeps VIBE
 	t.face.onPending({ requests: [req("b", 20)], sessions: [] });
 	const sheets = t.drain().filter((d) => d.MSG === "sheet");
 	assert.deepEqual(sheets.map((d) => [d.REQ_ID, d.REQ_COUNT, d.VIBE]), [["b", 1, 1]]);
+});
+
+test("launch: the loopback opens → result OK 1 for the command's CMD_ID, logged as via loopback", () => {
+	FakeSocket.reset();
+	const t = setup({ WebSocket: FakeSocket });
+	t.hello();
+	t.face.onAppMessage({ CMD: "launch", CMD_ID: 7 });
+	assert.equal(FakeSocket.instances.length, 1);
+	assert.equal(FakeSocket.instances[0].url, "ws://127.0.0.1:9000/");
+	FakeSocket.instances[0].onopen();
+	assert.deepEqual(t.drain(), [{ MSG: "result", CMD_ID: 7, OK: 1 }]);
+	assert.ok(t.logs.includes("pi-web: launch via loopback"));
+	assert.deepEqual(t.hub.of("post"), []);
+});
+
+test("launch: the loopback fails → POST /api/watch/launch; ok → result 1 via hub; both failing → result 0", () => {
+	FakeSocket.reset();
+	const t = setup({ WebSocket: FakeSocket, launchPort: 45678 });
+	t.hello();
+	t.face.onAppMessage({ CMD: "launch", CMD_ID: 3 });
+	assert.equal(FakeSocket.instances[0].url, "ws://127.0.0.1:45678/");
+	FakeSocket.instances[0].onerror();
+	const posts = t.hub.of("post");
+	assert.equal(posts.length, 1);
+	assert.equal(posts[0].path, "/api/watch/launch");
+	assert.deepEqual(posts[0].body, { uuid: "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b" });
+	posts[0].cb(null, { ok: true });
+	assert.deepEqual(t.drain(), [{ MSG: "result", CMD_ID: 3, OK: 1 }]);
+	assert.ok(t.logs.includes("pi-web: launch via hub"));
+
+	// No loopback port (the emulator without a phone simulator port), hub says no phone.
+	const u = setup({ WebSocket: FakeSocket, launchPort: 0 });
+	u.hello();
+	u.face.onAppMessage({ CMD: "launch", CMD_ID: 4 });
+	u.hub.of("post")[0].cb(null, { ok: false, reason: "no_phone" });
+	assert.deepEqual(u.drain(), [{ MSG: "result", CMD_ID: 4, OK: 0 }]);
+	assert.ok(u.logs.includes("pi-web: launch failed"));
+});
+
+test("result dicts are FIFO, not coalesced: two launches answer in order, both sent", () => {
+	const t = setup({ WebSocket: null });
+	t.hello();
+	t.face.onAppMessage({ CMD: "launch", CMD_ID: 1 });
+	t.face.onAppMessage({ CMD: "launch", CMD_ID: 2 });
+	const posts = t.hub.of("post");
+	assert.equal(posts.length, 2);
+	// Both answers arrive while the first result is in flight.
+	posts[0].cb(null, { ok: true });
+	posts[1].cb(new Error("hub answered 502"));
+	assert.deepEqual(t.drain(), [
+		{ MSG: "result", CMD_ID: 1, OK: 1 },
+		{ MSG: "result", CMD_ID: 2, OK: 0 },
+	]);
 });

@@ -1,6 +1,7 @@
 // The face's phone-side model: turns hub frames into AppMessage dicts for the
 // watchface (the sheet, the pi corner, weather, settings) and idles the socket
 // when nothing happens. ES5 only; all dependencies are injected.
+var launcher = require("./launch");
 
 var TEXT_MAX = 240;
 var NAME_MAX = 40;
@@ -274,6 +275,20 @@ function createFace(deps) {
 		}
 	}
 
+	// Flick (spec §8): the Developer Connection on the phone, then the hub; the
+	// watch hears back in a result dict for its command.
+	function launchApp(cmdId) {
+		var port = deps.launchPort ? deps.launchPort() : launcher.DEV_CONNECTION_PORT;
+		launcher.launch(
+			{ WebSocket: deps.WebSocket || null, port: port, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, hub: hub },
+			launcher.APP_UUID,
+			function (ok, path) {
+				log(ok ? "pi-web: launch via " + path : "pi-web: launch failed");
+				enqueue({ MSG: "result", CMD_ID: typeof cmdId === "number" ? cmdId : Number(cmdId) || 0, OK: ok ? 1 : 0 });
+			}
+		);
+	}
+
 	return {
 		// The launch burst. The watch's pebble/message can write only after it has
 		// received a dict (pebble-appmessage.c: pkjsReady is set in messageReceived),
@@ -295,6 +310,8 @@ function createFace(deps) {
 			var cmd = str(p && p.CMD);
 			if (cmd === "hello") {
 				sendAll();
+			} else if (cmd === "launch") {
+				launchApp(p.CMD_ID);
 			} else {
 				log("pi-web: unknown command " + cmd);
 			}

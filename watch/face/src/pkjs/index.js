@@ -2,6 +2,7 @@
 var createHubClient = require("../../../shared/pkjs/hub").createHubClient;
 var normalizeHubUrl = require("../../../shared/pkjs/hub").normalizeHubUrl;
 var createFace = require("./face").createFace;
+var DEV_CONNECTION_PORT = require("./launch").DEV_CONNECTION_PORT;
 var createWeather = require("./weather").createWeather;
 var Clay = require("@rebble/clay");
 var clay = new Clay(require("./config"), null, { autoHandleEvents: false });
@@ -16,6 +17,10 @@ var ACK_GAP_MS = 100;
 var client = null;
 var url = null;
 var announced = false;
+// The flick's loopback port: the phone's Developer Connection; in the emulator the
+// phone simulator's port from the stub's /dev/settings (0 until then, or with
+// --no-launch-port: no loopback, straight to the hub).
+var launchPort = DEV_CONNECTION_PORT;
 
 function log(m) {
 	console.log(m);
@@ -48,6 +53,10 @@ var face = createFace({
 		return Date.now();
 	},
 	log: log,
+	WebSocket: typeof WebSocket === "function" ? WebSocket : null,
+	launchPort: function () {
+		return launchPort;
+	},
 });
 
 var weather = createWeather({
@@ -139,6 +148,7 @@ Pebble.addEventListener("ready", function () {
 	var qemu = !!(info && /^qemu/.test(info.model || ""));
 	var stored = localStorage.getItem(URL_KEY);
 	log("pi-web: face ready" + (qemu ? " (emulator)" : ""));
+	if (qemu) launchPort = 0;
 	face.start();
 	connect(stored || (qemu ? "http://127.0.0.1:5173" : null));
 	weather.start(localStorage.getItem("pi-web.unit") === "F" ? "F" : "C");
@@ -146,6 +156,7 @@ Pebble.addEventListener("ready", function () {
 		// The stub hub serves the theme and corners here, so screenshots can switch them.
 		client.get("/dev/settings", function (err, json) {
 			if (!err && json) {
+				launchPort = typeof json.LAUNCH_PORT === "number" ? json.LAUNCH_PORT : 0;
 				face.onSettings(json);
 				weather.setUnit(json.UNIT);
 			}

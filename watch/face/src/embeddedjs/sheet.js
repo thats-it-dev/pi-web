@@ -16,19 +16,15 @@ class SheetBehavior extends Behavior {
 		this.id = null;
 		this.text = null;
 		this.timer = null;
+		this.t = null;
+		this.opening = false;
 	}
 	// sheet: { id, kind, tool, text, index, count }. Only a new request or new
 	// text rebuilds the lines and restarts the scroll; a counter change does not.
 	onSheet(c, sheet) {
-		const t = sheetText(sheet);
+		const t = (this.t = sheetText(sheet));
 		c.content(1).string = t.eyebrow;
-		const footer = c.content(3);
-		const f = t.footer(false);
-		if (ROUND) footer.first.string = f.join(" · ");
-		else {
-			footer.first.string = f[0];
-			footer.last.string = f[1];
-		}
+		this.footer(c);
 		if (sheet.id === this.id && sheet.text === this.text) return;
 		this.stop(c);
 		this.id = sheet.id;
@@ -41,6 +37,20 @@ class SheetBehavior extends Behavior {
 		this.max = lines.length - 2;
 		this.k = -1;
 		this.step(c);
+	}
+	// After a flick (main): opening… until the app launches or main gives up.
+	onOpening(c, on) {
+		this.opening = on;
+		if (this.t) this.footer(c);
+	}
+	footer(c) {
+		const footer = c.content(3);
+		const f = this.t.footer(this.opening);
+		if (ROUND) footer.first.string = f.join(" · ");
+		else {
+			footer.first.string = f[0];
+			footer.last.string = f[1];
+		}
 	}
 	column(c) {
 		return c.content(2).first;

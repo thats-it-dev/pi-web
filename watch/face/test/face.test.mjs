@@ -9,7 +9,7 @@ registerHooks({
 		return specifier === "format" ? next(new URL("../../shared/js/format.js", import.meta.url).href, context) : next(specifier, context);
 	},
 });
-const { cornerText, dateLabel, layout, createFaceModel, KEYS, sheetText, scrollNext, SHEET_HEIGHT, RISE_MS, SCROLL_PAUSE_MS, SCROLL_STEP_MS } = await import("../src/embeddedjs/modules/face.js");
+const { cornerText, dateLabel, layout, createFaceModel, KEYS, sheetText, scrollNext, SHEET_HEIGHT, RISE_MS, SCROLL_PAUSE_MS, SCROLL_STEP_MS, OPENING_MS } = await import("../src/embeddedjs/modules/face.js");
 
 const M = (o) => new Map(Object.entries(o));
 
@@ -154,4 +154,14 @@ test("a sheet dict with VIBE 1 sets the model's vibe flag; VIBE 0 leaves it", ()
 	m.vibe = false;
 	m.apply(M({ MSG: "sheet", REQ_ID: "d1", REQ_KIND: "dialog", REQ_TOOL: "bash", REQ_TEXT: "Allow?", REQ_INDEX: 1, REQ_COUNT: 1, VIBE: 0 }));
 	assert.equal(m.vibe, false);
+});
+
+test("a result dict records the command id and OK as the model's last result; the opening lasts 3 s", () => {
+	const m = createFaceModel();
+	assert.equal(m.result, null);
+	assert.equal(m.apply(M({ MSG: "result", CMD_ID: 4, OK: 1 })), "result");
+	assert.deepEqual(m.result, { id: 4, ok: true });
+	m.apply(M({ MSG: "result", CMD_ID: 5, OK: 0 }));
+	assert.deepEqual(m.result, { id: 5, ok: false });
+	assert.equal(OPENING_MS, 3000);
 });

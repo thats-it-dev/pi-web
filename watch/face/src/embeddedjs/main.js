@@ -1,4 +1,4 @@
-import { createFaceModel, KEYS, SHEET_HEIGHT, RISE_MS } from "face";
+import { createFaceModel, KEYS, SHEET_HEIGHT, RISE_MS, OPENING_MS } from "face";
 import { createLink } from "link";
 import { makeTheme } from "assets";
 import { Idle } from "idle";
@@ -7,6 +7,8 @@ import Timeline from "piu/Timeline";
 import Health from "pebble/health";
 import Vibes from "pebble/vibes";
 import Battery from "embedded:sensor/Battery";
+import Accelerometer from "embedded:sensor/Accelerometer";
+import Timer from "timer";
 
 const DARK_KEY = "pi-web.dark";
 
@@ -40,6 +42,9 @@ class FaceBehavior extends Behavior {
 		this.steps = null;
 		this.battery = null;
 		this.batteryPct = null;
+		this.accel = null;
+		this.launchId = null;
+		this.openTimer = null;
 	}
 	onDisplaying(app) {
 		this.idle = app.first;
@@ -69,6 +74,10 @@ class FaceBehavior extends Behavior {
 			if (subtype === "significant" || subtype === "movement" || subtype === "metric") this.readSteps();
 			app.distribute("onCorners", this.data());
 		});
+	}
+	onUndisplaying(app) {
+		this.listen(false);
+		this.endOpening();
 	}
 	// Each read is guarded: an inaccessible metric throws or reads 0, and the corner shows --.
 	readSteps() {
@@ -126,6 +135,12 @@ class FaceBehavior extends Behavior {
 			app.skin = theme.skins.paper;
 			app.distribute("onTheme", theme);
 		}
+		const r = this.model.result;
+		if (kinds.includes("result") && r && r.id === this.launchId) {
+			// OK 1: the app takes over the screen; the footer stays until the timer.
+			console.log("pi-web: launch " + (r.ok ? "ok" : "failed"));
+			if (!r.ok) this.endOpening();
+		}
 		if (kinds.includes("sheet")) {
 			const m = this.model;
 			if (m.vibe) {
@@ -148,11 +163,44 @@ class FaceBehavior extends Behavior {
 		}
 		this.sheet.delegate("onSheet", sheet);
 		if (this.state === "hidden" || this.state === "falling") this.run(app, "rising");
+		this.listen(true);
 	}
 	hideSheet(app) {
 		if (this.state === "hidden" || this.state === "falling") return;
+		this.listen(false);
+		this.endOpening();
 		this.sheet.delegate("stop");
 		this.run(app, "falling");
+	}
+	// Flick (spec §6.3): the accelerometer is open only while a sheet is up or rising.
+	listen(on) {
+		if (on && !this.accel) {
+			try {
+				this.accel = new Accelerometer({ onTap: () => this.flick() });
+			} catch (e) {
+				console.log("pi-web: no accelerometer: " + e);
+			}
+		} else if (!on && this.accel) {
+			this.accel.close();
+			this.accel = null;
+		}
+	}
+	flick() {
+		if (this.launchId !== null || !this.sheet) return;
+		console.log("pi-web: flick");
+		this.sheet.delegate("onOpening", true);
+		this.launchId = this.link.send("launch");
+		this.openTimer = Timer.set(() => {
+			this.openTimer = null;
+			this.endOpening();
+		}, OPENING_MS);
+	}
+	endOpening() {
+		if (this.openTimer !== null) Timer.clear(this.openTimer);
+		this.openTimer = null;
+		if (this.launchId === null) return;
+		this.launchId = null;
+		if (this.sheet) this.sheet.delegate("onOpening", false);
 	}
 	// Starts the rise or the fall; a reversal mid-way starts from where the other one was.
 	run(app, state) {
