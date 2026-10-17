@@ -3,7 +3,8 @@
 // the status line takes two centred lines, text is centred and inset from the rim.
 export const ROUND = screen.round;
 export const METRICS = {
-	status: ROUND ? 38 : 18, toolbar: 16, rule: 2, row: 32, row2: 44, bar: 60,
+	status: ROUND ? 38 : 18, toolbar: 16, rule: 2, row: 32, row2: 44,
+	bar: ROUND ? 32 : 60, // the context bar; short on Round 2 so the toolbar clears the rim
 	pad: ROUND ? 18 : 4, // the inset of text from the screen's edge
 	bottom: ROUND ? 18 : 0, // paper under the rows, where the rim cuts them
 };

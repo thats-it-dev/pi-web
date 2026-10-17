@@ -31,6 +31,9 @@ const FLASH_MS = 1000;
 const WAIT_MS = 10000; // no result by then: treat as failed
 const EXIT_MS = 400;
 const BLINK_MS = 500;
+// The toolbar's gaps; tighter on Round 2, where the whole bar must clear the rim.
+const GAP2 = ROUND ? 3 : 4;
+const GAP3 = ROUND ? 4 : 6;
 // Say-it states during which the screen keeps the request it showed (a home that
 // arrives meanwhile is held until the transcript's result has landed).
 const SAY_HOLD = { listening: 1, sending: 1, sent: 1, gone: 1, failed: 1 };
@@ -55,14 +58,14 @@ const Toolbar = Row.template($ => {
 		contents: [
 			Label($, { style, string:"CTX" }),
 			Container($, {
-				left:4, width:METRICS.bar, height:8, skin:skins.track,
+				left:GAP2, width:METRICS.bar, height:8, skin:skins.track,
 				contents: [
 					Content($, { left:0, top:0, bottom:0, width:Math.round(Math.max(0, Math.min(100, t.percent || 0)) * METRICS.bar / 100), skin:skins.ink }),
 				],
 			}),
-			Label($, { left:4, style, string:t.ctx }),
-			Label($, { left:6, style, string:t.speed }),
-			Label($, { left:6, style, string:t.model || "--" }),
+			Label($, { left:GAP2, style, string:t.ctx }),
+			Label($, { left:GAP3, style, string:t.speed }),
+			Label($, { left:GAP3, style, string:t.model || "--" }),
 		],
 	};
 });
@@ -147,8 +150,11 @@ class HomeBehavior extends View.Behavior {
 		const said = say.text && say.status !== "idle" && say.status !== "listening" ? say.text : "";
 		const unmatched = say.status === "no_match" ? "didn't match: " + say.options.join(", ") : "";
 		const extra = said ? SAY_GAP + (unmatched ? UNMATCHED : 0) : 0;
-		const saidLines = said ? tailLines(said, width + PAD - USER_INSET, s => styles.bodyRight.measure(s).width, Math.max(1, Math.min(2, Math.floor((height - extra - 2 * LINE) / LINE)))) : [];
-		const n = Math.floor((height - extra - saidLines.length * LINE) / LINE);
+		// Whole lines for the request and the transcript; with no line to spare (four
+		// options) the no_match line alone says what happened.
+		const room = Math.max(0, Math.floor((height - extra) / LINE));
+		const saidLines = said && room ? tailLines(said, width + PAD - USER_INSET, s => styles.bodyRight.measure(s).width, Math.max(1, Math.min(2, room - 2))) : [];
+		const n = room - saidLines.length;
 		const measure = s => styles.query.measure(s).width;
 		// The live reply (a text tail) once one has come for this session, else the last reply.
 		const t = m.text;

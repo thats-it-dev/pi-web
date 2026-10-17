@@ -23,7 +23,7 @@ import Timer from "timer";
 import View from "piu/View";
 
 const INSET = ROUND ? 24 : 6;
-const VALUE = ROUND ? 48 : INSET; // a value's right inset: on Round 2 it clears the rim on a bottom row
+const VALUE = ROUND ? 64 : INSET; // a value's right inset: on Round 2 it clears the rim on the bottom row
 
 class MenuBehavior extends View.Behavior {
 	onCreate(menu, view) {

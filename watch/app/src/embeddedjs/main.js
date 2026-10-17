@@ -117,6 +117,8 @@ class PiController extends Behavior {
 					container.replace(container.first, new this.view.Template(this.view));
 					container.purge();
 					container.defer("onScreenDisplayed");
+					// The new screen builds from the model; the rest of the batch is in it.
+					break;
 				}
 			}
 			container.distribute("onModel", kind);

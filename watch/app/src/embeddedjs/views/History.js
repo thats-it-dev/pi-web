@@ -91,7 +91,7 @@ class HistoryBehavior extends ListBehavior {
 		this.status.first.string = n ? "HISTORY · " + (this.topI + 1) + "/" + this.m.lists.history.total : "HISTORY";
 	}
 	onModel(container, kind) {
-		if (kind !== "list") return;
+		if (kind !== "list" || !this.port) return;
 		const l = this.m.lists.history;
 		this.hs = [];
 		// The first page opens at the bottom; an older one keeps the top turn in view.

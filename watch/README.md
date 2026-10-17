@@ -100,11 +100,11 @@ In the emulator the phone side needs no settings: `Pebble.getActiveWatchInfo().m
 
 A lost dict would show as a stale screen until the next frame, or, for a lost `result`, as `failed` after 10 s for an answer that went through. If that is seen on hardware, the fix is sequence numbers plus a `hello` resync.
 
-**Memory.** The VM runs with `stack 5120, slot 43008, chunk 23552` (`src/c/mdbl.c`, mirrored in `manifest.json`). The words example's `slot 31744` aborts with `memory full` once the Home screen is built. Slot went from 40960 to 43008 for the menu screens: at 40960, picking a model aborted with `# Slot allocation: failed in fixed size heap` (every loaded screen module keeps its functions resident), and 41984 passed with under 1 KB to spare. The chunk heap went from 19456 to 23552 for the transcript screens: a Piu `Text` is chunk-heavy, and the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456. AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. With the menu screens, `heap_bytes_free()` reads 8.1 KB on every screen, and the firmware's high-water mark at exit is 119.6 KB of 122.1 KB.
+**Memory.** The VM runs with `stack 5120, slot 43008, chunk 23552` (`src/c/mdbl.c`, mirrored in `manifest.json`). The words example's `slot 31744` aborts with `memory full` once the Home screen is built. Slot went from 40960 to 43008 for the menu screens: at 40960, picking a model aborted with `# Slot allocation: failed in fixed size heap` (every loaded screen module keeps its functions resident), and 41984 passed with under 1 KB to spare. The chunk heap went from 19456 to 23552 for the transcript screens. A Piu `Text` is chunk-heavy: the no_match screen (query, transcript, options) aborted with `# Chunk allocation … failed` at 19456. The app now uses no `Text` at all. AppMessage buffers are 1100 bytes in, 640 out (`modules/link.js`), not the 8 KB default each. For the C heap figures of the final build, see the next paragraphs.
 
 **Code size is memory (emulator).** The emulator copies the mod archive (`build/mods/<platform>/mc.xsa`) into RAM, and at launch the runtime mallocs a table the size of the archive's `MAPS` atom (2 bytes per identifier reference in the bytecode). Too big and launch stops at `fxMapArchive failed` or `fxAbort memory full`. Measured on emery: a 42.8 KB archive boots, 42.9 KB does not, so the ceiling is about 42.8 KB with the current VM sizes. Every byte of the archive copy is also a byte less C heap.
 
-**The full build boots in both emulators.** The final archive is 42334 B (`MAPS` 5940 B), the same for emery and gabbro, about 450 B under the ceiling. The full build of Task 10 was 45702 B (`MAPS` 6496 B) and did not boot. The diet:
+**The full build boots in both emulators.** The final archive is 42455 B (`MAPS` 5948 B), the same for emery and gabbro, about 340 B under the ceiling. The full build of Task 10 was 45702 B (`MAPS` 6496 B) and did not boot. The diet:
 
 - Home's query block is whole lines of Labels (`wrapLines`/`tailLines`), not a Piu `Text`.
 - The say-it and row feedback share one timer.
@@ -114,7 +114,13 @@ A lost dict would show as a stale screen until the next frame, or, for a lost `r
 - The 12/24 h FFI call gave way to `watch.hour12`.
 - `KEYS` is a single string.
 
-Free heap with the full build on emery (temporary `heap_bytes_free()` probe, since removed): 9.7 KB at `main.js`, 7.4 to 7.6 KB with Home built, and the firmware's high-water mark at exit was 120.4 KB of 122.3 KB. Keep the archive under about 42.5 KB:
+Free heap with the full build on emery (temporary `heap_bytes_free()` probe, since removed, measured on a 42.3 KB build) was:
+
+- 9.7 KB at `main.js`;
+- 7.4 to 7.6 KB with Home built;
+- 120.4 KB of 122.3 KB used at exit (the firmware's high-water mark).
+
+The ceiling is about 42.8 KB; keep a working margin under 42.5 KB:
 
 - Screens swap without transitions (`piuView.js`), and the Menu has no tweens.
 - List screens share `modules/ListScreen.js`.
@@ -170,10 +176,11 @@ For Michael's Pebble Time 2 and iPhone. Note the outcome of each item here.
 - **Font.** The LECO 1976 font could not be fetched (fontlibrary.org serves no download for it), so the UI uses the system `Gothic` font (`makeTheme` in `app/src/embeddedjs/assets.js`). Dropping a licensed TTF into `app/src/embeddedjs/assets/fonts/` and adding a `resources` entry in the manifest would restore it.
 - **Dictation is hardware only.** The emulator shows the dictation screen but cannot transcribe (error 2 or 3, then back to the rows). The transcript states were checked with a temporary hook.
 - **Touch is untested.** `pebble` has no touch injection.
-- **Emulator code-size ceiling.** The full build boots, with about 450 B to spare (see Code size is memory above). Past the ceiling, use `dev/build-subset.mjs`.
+- **Emulator code-size ceiling.** The full build boots, with about 340 B to spare (ceiling about 42.8 KB; keep a working margin under 42.5 KB) (see Code size is memory above). Past the ceiling, use `dev/build-subset.mjs`.
 - **Message loss is mitigated, not ruled out** (see Pacing above).
 - **Native PKJS-ready message.** At launch the native module's PKJS-ready message reaches the phone as a dict with no `CMD`, and the phone logs `pi-web: unknown command ` (harmless). The watch's first `hello` write can fail there with `output_begin failed`; it is retried.
 - **Stats switch early.** After an answer the phone switches `stats` to the next session at once, so for about a second the toolbar can show the next session's figures under the answered request.
 - **History.** A theme change on History reloads the newest page and loses the scroll position. A failed page shows `/-1` in the status until the next Up retries it. There is no touch drag.
 - **Round 2 rim.** The rim cuts the first and last characters of a full-width history line at the very top and bottom of the view, and the free-centred Sessions list leaves paper above its first row.
+- **A lost `list` dict on History** leaves the page marked as loading until Back: Down does nothing, and Up scrolls but loads no older turns.
 - **Menu selection.** Coming back to the Menu from a screen starts the selection on `sessions` again.
