@@ -76,3 +76,104 @@ describe("renderMarkdown cache", () => {
 		expect(parses.n).toBe(1);
 	});
 });
+
+// Flatten a lit TemplateResult to text, spelling out bound values, so tests can
+// assert on what the template contains without a DOM.
+function flat(v: unknown): string {
+	if (v == null || v === false) return "";
+	if (Array.isArray(v)) return v.map(flat).join("");
+	if (typeof v === "object" && v !== null && "strings" in v && "values" in v) {
+		const t = v as { strings: readonly string[]; values: unknown[] };
+		return t.strings.map((s, i) => s + (i < t.values.length ? flat(t.values[i]) : "")).join("");
+	}
+	if (typeof v === "object") return JSON.stringify(v);
+	return String(v);
+}
+
+const REF = { type: "image", mimeType: "image/png", ref: "r1", width: 4, height: 3 } as const;
+const showCall = (args: Record<string, unknown>) => ({ type: "toolCall", id: "c1", name: "show_image", arguments: args });
+function convWith(calls: unknown[], result?: Record<string, unknown>, extra: AgentMessage[] = []) {
+	const msgs: AgentMessage[] = [...extra, { role: "assistant", content: calls as never, timestamp: 1 }];
+	if (result) msgs.push({ role: "toolResult", toolCallId: "c1", timestamp: 2, ...result } as AgentMessage);
+	return createConversation(msgs);
+}
+
+describe("images in the conversation", () => {
+	it("a show_image result renders as a figure, not a collapsed card", () => {
+		const out = flat(
+			renderConversation(
+				convWith([showCall({ path: "shot.png", caption: "The login page" })], {
+					content: [{ type: "text", text: "Displayed in the conversation: shot.png" }, REF],
+					details: { path: "/w/shot.png" },
+				}),
+			),
+		);
+		expect(out).toContain("<pi-image");
+		expect(out).toContain(".variant=figure");
+		expect(out).toContain('"ref":"r1"');
+		expect(out).toContain("The login page");
+		expect(out).toContain("show_image · shot.png");
+		expect(out).not.toContain('<details class="tool');
+	});
+
+	it("a show_image with see:false takes the image from details.image", () => {
+		const out = flat(
+			renderConversation(
+				convWith([showCall({ path: "a.png", see: false })], {
+					content: [{ type: "text", text: "Displayed in the conversation: a.png" }],
+					details: { path: "/w/a.png", image: REF },
+				}),
+			),
+		);
+		expect(out).toContain(".variant=figure");
+		expect(out).toContain('"ref":"r1"');
+		expect(out).not.toContain('<details class="tool');
+	});
+
+	it("a running show_image shows the spinner; a failed one the normal error card", () => {
+		const running = createConversation([{ role: "assistant", content: [showCall({ path: "a.png" })] as never, timestamp: 1 }]);
+		running.tools.c1 = { running: true, isError: false } as never;
+		const r = flat(renderConversation(running));
+		expect(r).toContain('<span class="spin">');
+		expect(r).not.toContain("<pi-image");
+
+		const failed = flat(renderConversation(convWith([showCall({ path: "a.png" })], { isError: true, content: [{ type: "text", text: "not an image" }] })));
+		expect(failed).toContain('<details class="tool error"');
+		expect(failed).toContain("not an image");
+		expect(failed).not.toContain("<pi-image");
+	});
+
+	it("other tools' images render as thumbnails under the text output", () => {
+		const out = flat(
+			renderConversation(
+				convWith([{ type: "toolCall", id: "c1", name: "read", arguments: { path: "x.png" } }], {
+					content: [{ type: "text", text: "Read image file" }, REF],
+				}),
+			),
+		);
+		expect(out).toContain('<pre class="out">Read image file</pre>');
+		expect(out).toContain(".variant=thumb");
+		expect(out.indexOf('<pre class="out">')).toBeLessThan(out.indexOf("<pi-image"));
+		expect(out).toContain('<details class="tool ok"');
+	});
+
+	it("user images render through pi-image", () => {
+		const out = flat(renderConversation(createConversation([{ role: "user", content: [{ type: "text", text: "look" }, REF], timestamp: 1 }] as never)));
+		expect(out).toContain("<pi-image");
+		expect(out).toContain(".variant=thumb");
+		expect(out).not.toContain("<img");
+	});
+
+	it("inline data images still render", () => {
+		const out = flat(renderConversation(createConversation([{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "AAAA" }], timestamp: 1 }] as never)));
+		expect(out).toContain("<pi-image");
+		expect(out).toContain('"data":"AAAA"');
+		expect(out).not.toContain('"ref"');
+	});
+
+	it("passes the loader to every image", () => {
+		const loader = { load: async () => "blob:x", dispose() {} } as never;
+		const out = flat(renderConversation(createConversation([{ role: "user", content: [REF], timestamp: 1 }] as never), loader));
+		expect(out).toContain(".loader={");
+	});
+});

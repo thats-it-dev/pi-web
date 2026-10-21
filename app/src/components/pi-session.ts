@@ -3,6 +3,7 @@ import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, Sn
 import { contentText } from "../../../shared/src/reducer.ts";
 import type { HubApi } from "../lib/api.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
+import { ImageLoader } from "../lib/image-loader.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
@@ -39,6 +40,7 @@ export class PiSession extends LitElement {
 	declare tucked: boolean;
 
 	store: SessionStore | null = null;
+	private loader: ImageLoader | null = null; // one per session view: blob URLs live and die with it
 	private stream: { close(): void } | null = null;
 	private streamId: string | null = null;
 	private atBottom = true;
@@ -85,6 +87,7 @@ export class PiSession extends LitElement {
 		this.teardown();
 		const store = new SessionStore(id);
 		this.store = store;
+		this.loader = new ImageLoader((ref) => this.api.image(id, ref));
 		this.sheet = null;
 		this.atBottom = true;
 		this.tucked = false;
@@ -128,6 +131,8 @@ export class PiSession extends LitElement {
 		this.stream?.close();
 		this.stream = null;
 		this.streamId = null;
+		this.loader?.dispose();
+		this.loader = null;
 		const s = this.store;
 		if (!s) return;
 		s.removeEventListener("change", this.onStoreChange);
@@ -375,7 +380,7 @@ export class PiSession extends LitElement {
 		return html`
 			<pi-header .store=${s} .version=${this.version} .heading=${heading} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 			<div class="scroll" @scroll=${this.onScroll}>
-				<pi-messages .conv=${s.conv} .version=${this.version}></pi-messages>
+				<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
 			</div>
 			${this.renderTray(snap)}
 			<pi-composer

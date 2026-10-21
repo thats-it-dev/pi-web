@@ -64,6 +64,26 @@ test("desktop: @ mentions complete files and folders from the session's folder",
 	await expect(files).toHaveCount(0);
 });
 
+test("the agent's show_image appears and opens full screen", async ({ page }) => {
+	await startSession(page);
+	const input = page.getByLabel("Message");
+	await input.fill("show me the test card");
+	await page.getByRole("button", { name: "send" }).click();
+	const figure = page.locator("pi-messages figure.shot");
+	await expect(figure).toHaveCount(1);
+	await figure.scrollIntoViewIfNeeded();
+	await expect(figure).toContainText("A red and blue test card");
+	await expect(figure).toContainText("show_image · shot.png");
+	const img = figure.locator("pi-image img.pic");
+	await expect(img).toBeVisible();
+	await expect(img).toHaveAttribute("src", /^blob:/);
+	await figure.locator("pi-image button.pic").click();
+	const viewer = figure.locator("pi-image button.viewer");
+	await expect(viewer).toBeVisible();
+	await viewer.click();
+	await expect(viewer).toHaveCount(0);
+});
+
 test("phone: send with the button, then find the session from the menu", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await startSession(page);

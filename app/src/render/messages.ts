@@ -2,10 +2,12 @@ import { type TemplateResult, css, html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AgentMessage, ContentBlock, Conversation, ToolRun } from "../../../shared/src/protocol.ts";
 import { blocksText, formatTokens, parseArgsRaw, summarizeToolArgs, truncateOutput, wordCount } from "../lib/format.ts";
+import type { ImageLoader } from "../lib/image-loader.ts";
 import { renderMarkdown, renderMarkdownUncached } from "../lib/markdown.ts";
 
 type ToolCall = Extract<ContentBlock, { type: "toolCall" }>;
 type Results = Map<string, AgentMessage>;
+type ImageContent = Extract<ContentBlock, { type: "image" }>;
 
 // The whole conversation re-renders on every streaming delta, so work on
 // completed messages is memoized per object: they are never mutated once they
@@ -23,18 +25,26 @@ function markdown(text: string, key: object | null) {
 	return unsafeHTML(key ? memo(key, "md", () => renderMarkdown(text)) : renderMarkdownUncached(text));
 }
 
-export function renderConversation(conv: Conversation): TemplateResult {
-	const results: Results = new Map();
-	for (const m of conv.messages) if (m.role === "toolResult" && typeof m.toolCallId === "string") results.set(m.toolCallId, m);
-	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true) : nothing}`;
+function imagesOf(content: unknown): ImageContent[] {
+	return Array.isArray(content) ? content.filter((b): b is ImageContent => Boolean(b) && b.type === "image") : [];
 }
 
-function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>) {
+function thumbs(images: ImageContent[], loader: ImageLoader | null, alt: string) {
+	return images.map((i) => html`<pi-image .block=${i} .loader=${loader} .alt=${alt} .variant=${"thumb"}></pi-image>`);
+}
+
+export function renderConversation(conv: Conversation, loader: ImageLoader | null = null): TemplateResult {
+	const results: Results = new Map();
+	for (const m of conv.messages) if (m.role === "toolResult" && typeof m.toolCallId === "string") results.set(m.toolCallId, m);
+	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools, loader))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true, loader) : nothing}`;
+}
+
+function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, loader: ImageLoader | null) {
 	switch (m.role) {
 		case "user":
-			return renderUser(m);
+			return renderUser(m, loader);
 		case "assistant":
-			return renderAssistant(m, results, tools, false);
+			return renderAssistant(m, results, tools, false, loader);
 		case "bashExecution":
 			return renderBash(m);
 		case "compactionSummary":
@@ -48,14 +58,14 @@ function renderMessage(m: AgentMessage, results: Results, tools: Record<string, 
 	}
 }
 
-function renderUser(m: AgentMessage) {
-	const images = Array.isArray(m.content) ? m.content.filter((b): b is Extract<ContentBlock, { type: "image" }> => b.type === "image") : [];
+function renderUser(m: AgentMessage, loader: ImageLoader | null) {
+	const images = imagesOf(m.content);
 	return html`<div class="user">${blocksText(m.content)}${
-		images.length ? html`<div class="imgs">${images.map((i) => html`<img alt="attached image" src="data:${i.mimeType};base64,${i.data}" />`)}</div>` : nothing
+		images.length ? html`<div class="imgs">${thumbs(images, loader, "attached image")}</div>` : nothing
 	}</div>`;
 }
 
-function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean) {
+function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null) {
 	const blocks = Array.isArray(m.content) ? m.content : [];
 	return html`<div class="assistant">
 		${blocks.map((b) => {
@@ -72,7 +82,7 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 				const text = String(b.text ?? "");
 				return text.trim() ? html`<div class="md">${markdown(text, streaming ? null : b)}</div>` : nothing;
 			}
-			if (b.type === "toolCall") return renderTool(b, results.get(b.id), tools[b.id], streaming);
+			if (b.type === "toolCall") return renderTool(b, results.get(b.id), tools[b.id], streaming, loader);
 			return nothing;
 		})}
 		${m.stopReason === "error" ? html`<div class="err" role="alert">${String(m.errorMessage ?? "The model returned an error.")}</div>` : nothing}
@@ -86,13 +96,32 @@ function toolArgs(call: ToolCall): { summary: string; json: string } {
 	return { summary: summarizeToolArgs(call.name, args), json: Object.keys(args).length ? JSON.stringify(args, null, 2) : "" };
 }
 
-function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolRun | undefined, streaming: boolean) {
-	const args = streaming ? toolArgs(call) : memo(call, "args", () => toolArgs(call));
+// A finished show_image call is a figure in the flow, not a collapsed card.
+function renderShowImage(call: ToolCall, image: ImageContent, loader: ImageLoader | null) {
+	const args = call.arguments && Object.keys(call.arguments).length ? call.arguments : parseArgsRaw(call.argsRaw);
+	const caption = typeof args.caption === "string" ? args.caption.trim() : "";
+	const path = typeof args.path === "string" ? args.path : "";
+	return html`<figure class="shot">
+		<pi-image .block=${image} .loader=${loader} .alt=${caption || path || "image"} .variant=${"figure"}></pi-image>
+		${caption ? html`<figcaption>${caption}</figcaption>` : nothing}
+		<div class="shot-tool">show_image · ${path}</div>
+	</figure>`;
+}
+
+function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolRun | undefined, streaming: boolean, loader: ImageLoader | null) {
 	const done = Boolean(result) || run?.running === false;
 	const isError = result ? Boolean(result.isError) : Boolean(run?.isError);
+	const content = result?.content ?? run?.result?.content;
+	if (call.name === "show_image" && done && !isError) {
+		const details = (result?.details ?? run?.result?.details) as { image?: ImageContent } | undefined;
+		const image = imagesOf(content)[0] ?? (details?.image && details.image.type === "image" ? details.image : undefined);
+		if (image) return renderShowImage(call, image, loader);
+	}
+	const args = streaming ? toolArgs(call) : memo(call, "args", () => toolArgs(call));
 	const status = !done ? "running" : isError ? "error" : "ok";
 	const source = result ?? run;
 	const output = source ? memo(source, "out", () => truncateOutput(blocksText(result?.content ?? run?.result?.content ?? run?.partialResult?.content))) : "";
+	const images = imagesOf(content);
 	return html`<details class="tool ${status}">
 		<summary>
 			<span class="st" aria-label=${status}>${status === "ok" ? "✓" : status === "error" ? "✗" : html`<span class="spin"></span>`}</span>
@@ -101,6 +130,7 @@ function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolR
 		</summary>
 		${args.json ? html`<pre class="args">${args.json}</pre>` : nothing}
 		${output ? html`<pre class="out">${output}</pre>` : nothing}
+		${images.length ? html`<div class="imgs thumbs">${thumbs(images, loader, `image from ${call.name}`)}</div>` : nothing}
 	</details>`;
 }
 
@@ -116,7 +146,11 @@ export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
-	.imgs img { max-width: 160px; max-height: 160px; border-radius: var(--radius); }
+	.imgs.thumbs { justify-content: flex-start; padding: 0 9px 8px; }
+	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
+	.shot pi-image { max-width: 100%; max-height: 70vh; }
+	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
 	.assistant { display: grid; gap: 8px; min-width: 0; }
 	.md { overflow-wrap: anywhere; line-height: 1.6; min-width: 0; }
 	.md > :first-child { margin-top: 0; }
