@@ -19,6 +19,7 @@ export class FakeHandle implements SessionHandle {
 	/** When true, close() does not push handle_gone either; call goneNow() (an RpcHandle's handle_gone waits for the child to exit). */
 	deferGone = false;
 	received: AppCommand[] = [];
+	commandResult: CommandResult = { ok: true };
 	notices: string[] = [];
 	conv = createConversation();
 	private subs = new Set<(m: StreamMessage) => void>();
@@ -83,7 +84,7 @@ export class FakeHandle implements SessionHandle {
 			this.dialogs = this.dialogs.filter((d) => d.id !== cmd.id);
 			this.fire({ type: "state_changed" });
 		}
-		return { ok: true };
+		return this.commandResult;
 	}
 	subscribe(fn: (m: StreamMessage) => void): () => void {
 		this.subs.add(fn);

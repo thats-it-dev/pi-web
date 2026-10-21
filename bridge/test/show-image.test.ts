@@ -53,3 +53,15 @@ test("a non-image is refused", async () => {
 test("a missing file is refused", async () => {
 	await assert.rejects(showImage({ path: "nope.png" }, dir), (e: Error) => e.message.includes(join(dir, "nope.png")));
 });
+
+test("a directory is refused as not a regular file", async () => {
+	await assert.rejects(showImage({ path: "sub" }, dir), /not a regular file/);
+});
+
+test("the size is checked from stat before the file is read", async () => {
+	const { truncate } = await import("node:fs/promises");
+	await truncate(join(dir, "huge.png"), 0).catch(() => {});
+	writeFileSync(join(dir, "huge.png"), "");
+	await truncate(join(dir, "huge.png"), 50_000_000); // sparse: reading it would be slow
+	await assert.rejects(showImage({ path: "huge.png" }, dir), /50\.0 MB|2 MB/);
+});

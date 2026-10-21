@@ -457,3 +457,14 @@ test("the image route refuses requests without an allowed Origin", async () => {
 	assert.equal((await call(port, "GET", path, { ...GOOD, origin: "https://evil.example" })).status, 403);
 	assert.equal((await call(port, "GET", path, { ...GOOD, "tailscale-user-login": undefined })).status, 403);
 });
+
+test("a command result carrying an image comes back as a ref, not base64", async () => {
+	const h = await liveWithImage("img-cmd");
+	h.commandResult = { ok: true, data: { messages: [imgResult()] } };
+	const r = await call(port, "POST", "/api/sessions/img-cmd/commands", GOOD, { type: "attach" });
+	assert.equal(r.status, 200);
+	assert.match(r.body.result.data.messages[0].content[0].ref, /^[0-9a-f]{64}$/);
+	assert.ok(!JSON.stringify(r.body).includes(PNG_B64));
+	// the handle's own result keeps its data
+	assert.equal((h.commandResult.data as any).messages[0].content[0].data, PNG_B64);
+});

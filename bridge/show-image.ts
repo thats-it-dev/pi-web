@@ -1,12 +1,14 @@
 // The show_image tool: puts an image file from the session's working directory
 // into the conversation, and (by default) in front of the model too.
 
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import type { ContentBlock } from "../shared/src/protocol.ts";
 import { sniffImageType } from "../shared/src/images.ts";
 
 export const MAX_IMAGE_FILE_BYTES = 2_000_000;
+
+class TooBig extends Error {}
 
 export interface ShowImageParams {
 	path: string;
@@ -26,8 +28,14 @@ export async function showImage(params: ShowImageParams, cwd: string): Promise<{
 	const path = resolve(cwd, params.path);
 	let bytes: Buffer;
 	try {
+		const info = await stat(path);
+		if (!info.isFile()) throw new Error("not a regular file");
+		if (info.size > MAX_IMAGE_FILE_BYTES) {
+			throw new TooBig(`${path} is ${(info.size / 1_000_000).toFixed(1)} MB; the limit is 2 MB. Downscale it (for example with ImageMagick) and try again.`);
+		}
 		bytes = await readFile(path);
 	} catch (e) {
+		if (e instanceof TooBig) throw e;
 		throw new Error(`Cannot read ${path}: ${e instanceof Error ? e.message : String(e)}`);
 	}
 	if (bytes.length > MAX_IMAGE_FILE_BYTES) {
