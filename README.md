@@ -85,6 +85,10 @@ The bridge connects to the hub at `~/.config/pi-web/bridge.sock`. Set `PI_WEB_BR
 
 From the app you can watch the terminal session stream, prompt, steer and queue follow-ups, switch the model and thinking level, compact, and rename. Fork, clone, `!bash`, export and extension commands stay in the terminal, and extension dialogs show as "waiting for you in the terminal". If the app is running a reply in headless pi when you resume that session in a terminal, the terminal is told to wait. When the reply finishes, the terminal is told the session is free: `/resume` it there to continue with the latest messages. The same goes for a session open in another terminal, once that terminal quits or moves on.
 
+## Images in replies
+
+pi can show an image in the conversation with its `show_image` tool: give it the path of a PNG, JPEG, GIF or WebP file (up to 2 MB, checked by content, not extension). The app shows it as a figure in the reply. Images load by reference: messages and history carry only a reference, and the app fetches the bytes when the figure scrolls into view. The `show-image` skill in `bridge/skills` tells pi when to use the tool.
+
 ## Notifications
 
 Turn notifications on in settings. A device then gets a push when one of pi-web's headless sessions finishes a run with no app open on it, waits on a dialog, or stops with an error. Tapping the notification opens the session. Terminal sessions don't notify, because you are at the terminal.
