@@ -52,7 +52,7 @@ layer becomes a shared kit that all apps import.
   spark) for projects, domains and DNS. **Exception (Michael, 2026-10-20):** cf beta.14 can't
   upload to classic Pages (`cf pages deploy` is a stub), so CI uploads with
   `wrangler pages deploy --project-name <name> --branch <branch>`. Wrangler is used for nothing else.
-- **Deploys run in GitHub Actions** (wrangler upload, see above): push to `main` → production at
+- **Deploys run in GitHub Actions** (wrangler upload, see above): push to `main` → production (app repos; pi-web and kit use `master`) at
   `<name>.thatsit.app`; each PR → preview deployment, link posted as a PR comment.
 - **Scope**: all of it, in phases, each shippable: (1) kit + pi-web refactor + kit.thatsit.app,
   (2) app template, (3) pi skill, (4) spark client pattern and atproto module.

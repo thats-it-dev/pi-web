@@ -15,9 +15,11 @@
 :root[data-theme="dark"] { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
 
 *, *::before, *::after { box-sizing: border-box; }
-/* The document never scrolls or bounces (iOS would drag the header with it); only the
-   app's own panes scroll. the app host sizes itself from --app-top/--app-h (viewport.ts). */
-html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* App shells opt in with <html data-shell>: the document never scrolls or bounces (iOS
+   would drag the header with it); only the app's own panes scroll. The app host sizes
+   itself from --app-top/--app-h (viewport.ts). Document-style pages omit the attribute
+   and scroll normally. */
+:root[data-shell], :root[data-shell] body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 :root { --safe-bottom: env(safe-area-inset-bottom); }
 :root[data-keyboard] { --safe-bottom: 0px; } /* the keyboard covers the home indicator */
 html { background: var(--bg); }

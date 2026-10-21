@@ -78,6 +78,8 @@ function publishTheme(): Plugin {
 
 export default defineConfig({
 	plugins: [csp(), inlineTouchIcon(), publishTheme()],
+	// One Lit, even if the app's and the kit's pins drift apart.
+	resolve: { dedupe: ["lit"] },
 	server: {
 		port: 5173,
 		strictPort: true,

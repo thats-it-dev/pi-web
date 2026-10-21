@@ -24,7 +24,12 @@ Everything is published at https://kit.thatsit.app/ with `access-control-allow-o
 
 - `kit.css` holds the tokens and page base. `theme-init.js` sets the theme before first paint; `data-key` picks its localStorage key.
 - `kit.js` imports only `./lit.js`, so a page that also needs Lit should import `https://kit.thatsit.app/lit.js` too. Keep exactly one copy of Lit per page, because two copies break custom-element registration and `instanceof` checks.
+- `lit.js` re-exports `lit` and `lit/directives/unsafe-html.js` only (more directives can be added). The published API surface is exactly what `api.json` lists.
 - `kit.d.ts` and `types/` hold the typings, `api.json` lists the public API.
+
+## Shell vs. document pages
+
+`kit.css` only locks the document (no scroll, no bounce, full height) when `<html data-shell>` is set, as pi-web's app shell does. Pages without it scroll normally.
 
 ## API policy
 
@@ -32,7 +37,7 @@ The API is additive-only: exports, element tags (`tk-`), events, CSS custom prop
 
 ## Publishing
 
-CI (`.github/workflows/kit.yml`) runs on pushes to `master` that touch `kit/`, `theme/` or the workflow: test, build, check-api, then
+CI (`.github/workflows/kit.yml`) runs on pushes to `master` that touch `kit/`, `theme/` or the workflow: build, test, check-api, then
 
 ```sh
 npx wrangler@4.149.0 pages deploy kit/dist --project-name thatsit-kit --branch master

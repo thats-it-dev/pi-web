@@ -2,4 +2,5 @@
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=300, must-revalidate
 /fonts/*
+  ! Cache-Control
   Cache-Control: public, max-age=86400

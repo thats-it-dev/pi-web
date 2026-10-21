@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 const read = (f: string) => readFileSync(join(dist, f), "utf8");
 
-describe.skipIf(!existsSync(dist))("kit dist (run `npm run build -w kit` first; skipped when dist/ is missing)", () => {
+// Locally the suite skips without a build; in CI a missing dist/ must fail, not skip.
+describe.skipIf(!existsSync(dist) && !process.env.CI)("kit dist (run `npm run build -w kit` first; skipped when dist/ is missing)", () => {
 	it("has every published file", () => {
 		for (const f of ["kit.js", "lit.js", "kit.css", "kit.d.ts", "theme-init.js", "api.json", "_headers", "fonts/Inter.ttf"]) {
 			expect(existsSync(join(dist, f)), f).toBe(true);

@@ -32,8 +32,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test -w kit
       - run: npm run build -w kit
+      # After the build, so the dist tests run (they fail rather than skip when CI is set).
+      - run: npm test -w kit
       # Compares the fresh build with what kit.thatsit.app serves: additive-only.
       - run: npm run check-api -w kit
       # cf 1.0.0-beta.14's `cf pages deploy` is a stub, so wrangler does the upload.
