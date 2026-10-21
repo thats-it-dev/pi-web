@@ -6,8 +6,13 @@ on:
     paths:
       - 'kit/**'
       - 'theme/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/kit.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 # One deploy at a time; never cancel a half-uploaded deployment.
 concurrency:
@@ -32,4 +37,6 @@ jobs:
       # Compares the fresh build with what kit.thatsit.app serves: additive-only.
       - run: npm run check-api -w kit
       # cf 1.0.0-beta.14's `cf pages deploy` is a stub, so wrangler does the upload.
-      - run: npx wrangler@4.149.0 pages deploy kit/dist --project-name thatsit-kit --branch ${{ github.ref_name }}
+      - run: npx wrangler@4.149.0 pages deploy kit/dist --project-name thatsit-kit --branch "$BRANCH"
+        env:
+          BRANCH: ${{ github.ref_name }}
