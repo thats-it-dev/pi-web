@@ -30,6 +30,8 @@ for (const scheme of ["light", "dark"] as const) {
 			// Other specs leave sessions behind on the shared hub; pin the sidebar to the empty state.
 			await page.route(/\/api\/sessions$/, (route) =>
 				route.request().method() === "GET" ? route.fulfill({ json: { sessions: [], home: "/home/e2e" } }) : route.fallback());
+			// The new-session screen builds its recent-folder chips and default folder from this.
+			await page.route(/\/api\/cwds$/, (route) => route.fulfill({ json: { cwds: [], home: "/home/e2e" } }));
 		});
 
 		const shot = async (page: import("@playwright/test").Page, name: string, mask = masks(page)) =>
