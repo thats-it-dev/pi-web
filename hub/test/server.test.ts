@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { applyEvent } from "../../shared/src/reducer.ts";
 import type { HubConfig } from "../src/config.ts";
+import { ImageStore } from "../src/images.ts";
 import { Registry } from "../src/registry.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { createHubServer } from "../src/server.ts";
@@ -66,6 +67,8 @@ const updater = {
 	apply: async () => ({ output: "Updating abc1234..def5678", commit: "def5678" }),
 };
 const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers, updater, restart: () => restarts++ });
+// A second hub over the same registry with its own tiny store: the "after a restart" cases.
+const freshServer = (images: ImageStore) => createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: () => {}, images });
 let port = 0;
 before(async () => {
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -393,19 +396,46 @@ test("a ref from another session is 404", async () => {
 	assert.deepEqual(r.body, { error: "Image not found" });
 });
 
+async function withServer<T>(images: ImageStore, fn: (port: number) => Promise<T>): Promise<T> {
+	const srv = freshServer(images);
+	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+	try {
+		return await fn((srv.address() as AddressInfo).port);
+	} finally {
+		srv.closeAllConnections();
+		srv.close();
+	}
+}
+const jsonl = (id: string, msgs: unknown[]) =>
+	[{ type: "session", version: 3, id, timestamp: "2026-10-07T00:00:00.000Z", cwd: work }, ...msgs.map((m, i) => ({ type: "message", id: `r${i}`, parentId: i ? `r${i - 1}` : null, timestamp: "x", message: m }))].map((l) => JSON.stringify(l)).join("\n") + "\n";
+const pngOf = (pad: number) => {
+	const b = Buffer.alloc(40 + pad, 9);
+	PNG.copy(b, 0, 0, 24);
+	return b;
+};
+const resultOf = (b: Buffer) => ({ role: "toolResult", toolCallId: "t", toolName: "show_image", content: [{ type: "image", data: b.toString("base64"), mimeType: "image/png" }], isError: false, timestamp: 2 });
+
 test("a ref is served from the session file when no handle is live", async () => {
-	const file = join(sessions, "--work--", "2026-10-07T00-00-00-000Z_img-cold.jsonl");
-	writeFileSync(
-		file,
-		`${JSON.stringify({ type: "session", version: 3, id: "img-cold", timestamp: "2026-10-07T00:00:00.000Z", cwd: work })}\n` +
-			`${JSON.stringify({ type: "message", id: "r1", parentId: null, timestamp: "x", message: imgResult() })}\n`,
-	);
-	const { ImageStore } = await import("../src/images.ts");
-	const ref = (new ImageStore().outgoing("x", imgBlock()) as any).ref;
-	const r = await getBytes(`/api/sessions/img-cold/images/${ref}`, GOOD);
-	assert.equal(r.status, 200);
-	assert.deepEqual(r.body, PNG);
-	assert.equal((await call(port, "GET", `/api/sessions/img-cold/images/${"0".repeat(64)}`, GOOD)).status, 404);
+	const bytes = pngOf(11); // bytes no other test uses
+	writeFileSync(join(sessions, "--work--", "2026-10-07T00-00-00-000Z_img-cold.jsonl"), jsonl("img-cold", [resultOf(bytes)]));
+	const ref = (new ImageStore().outgoing("x", resultOf(bytes).content[0]) as any).ref;
+	await withServer(new ImageStore(), async (p) => {
+		const rr = await new Promise<Buffer>((res, rej) => httpGet({ host: "127.0.0.1", port: p, path: `/api/sessions/img-cold/images/${ref}`, headers: GOOD }, (x) => { const c: Buffer[] = []; x.on("data", (d) => c.push(d)); x.on("end", () => res(Buffer.concat(c))); }).on("error", rej));
+		assert.deepEqual(rr, bytes);
+		assert.equal((await call(p, "GET", `/api/sessions/img-cold/images/${"0".repeat(64)}`, GOOD)).status, 404);
+	});
+});
+
+test("the first image of a session larger than the store budget is still served", async () => {
+	const imgs = [pngOf(1), pngOf(2), pngOf(3)]; // 41-43 bytes each
+	writeFileSync(join(sessions, "--work--", "2026-10-07T00-00-00-000Z_img-big.jsonl"), jsonl("img-big", imgs.map(resultOf)));
+	await withServer(new ImageStore({ maxBytes: 100 }), async (p) => {
+		const refs = (await call(p, "GET", "/api/sessions/img-big/history", GOOD)).body.messages.map((m: any) => m.content[0].ref);
+		for (let i = 0; i < 2; i++) {
+			const bytes = await new Promise<Buffer>((res, rej) => httpGet({ host: "127.0.0.1", port: p, path: `/api/sessions/img-big/images/${refs[0]}`, headers: GOOD }, (x) => { const c: Buffer[] = []; x.on("data", (d) => c.push(d)); x.on("end", () => res(Buffer.concat(c))); }).on("error", rej));
+			assert.deepEqual(bytes, imgs[0]);
+		}
+	});
 });
 
 test("images of a forked session load under its new id", async () => {

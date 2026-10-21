@@ -150,3 +150,18 @@ test("conv.tools partialResult images are rewritten", () => {
 	assert.ok(!JSON.stringify(out).includes(b.toString("base64")));
 	assert.match(out.conv.tools.t.partialResult.content[0].ref, HEX);
 });
+
+test("find serves one image of a session larger than the budget", () => {
+	const bufs = [png(1, 1, 7), png(2, 2, 7), png(3, 3, 7)]; // 40 bytes each
+	const msgs = [{ role: "toolResult", content: bufs.map(block) }] as any[];
+	const store = new ImageStore({ maxBytes: 100 });
+	const ref = (new ImageStore().outgoing("x", block(bufs[0])) as any).ref;
+	store.index("s", msgs);
+	assert.equal(store.get("s", ref), undefined); // evicted by the walk
+	const got = store.find("s", ref, msgs);
+	assert.deepEqual(got?.bytes, bufs[0]);
+	assert.equal(got?.mimeType, "image/png");
+	assert.deepEqual(store.get("s", ref)?.bytes, bufs[0]);
+	assert.equal(store.find("s", "0".repeat(64), msgs), undefined);
+	assert.equal(store.find("s", ref, []), undefined);
+});

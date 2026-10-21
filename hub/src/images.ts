@@ -67,6 +67,33 @@ export class ImageStore {
 		return e;
 	}
 
+	// Find the one image with this ref in messages, remember it for the session,
+	// keep only its bytes and return it. For a miss on a session whose images
+	// together exceed the store's budget, where index() would evict the target again.
+	find(sessionId: string, ref: string, messages: AgentMessage[]): { mimeType: string; bytes: Buffer } | undefined {
+		const hit = this.search(messages, ref);
+		if (!hit || hit.meta.size > this.maxBytes) return undefined;
+		let members = this.members.get(sessionId);
+		if (!members) this.members.set(sessionId, (members = new Set()));
+		members.add(ref);
+		const entry = { mimeType: hit.meta.mimeType, bytes: Buffer.from(hit.img.data, "base64") };
+		this.keep(ref, entry);
+		return this.lru.get(ref) ?? entry;
+	}
+
+	private search(v: unknown, ref: string): { img: ImageData; meta: Meta } | undefined {
+		if (v === null || typeof v !== "object") return undefined;
+		if (isImage(v)) {
+			const meta = this.metaOf(v).meta;
+			return meta.ref === ref ? { img: v, meta } : undefined;
+		}
+		for (const x of Array.isArray(v) ? v : Object.values(v)) {
+			const r = this.search(x, ref);
+			if (r) return r;
+		}
+		return undefined;
+	}
+
 	private walk(sessionId: string, v: unknown, copy: boolean): unknown {
 		if (v === null || typeof v !== "object") return v;
 		if (isImage(v)) {
@@ -82,7 +109,7 @@ export class ImageStore {
 		return copy ? out : v;
 	}
 
-	private record(sessionId: string, img: ImageData) {
+	private metaOf(img: ImageData): { meta: Meta; bytes?: Buffer } {
 		let meta = this.memo.get(img);
 		let bytes: Buffer | undefined;
 		if (!meta) {
@@ -99,6 +126,11 @@ export class ImageStore {
 			};
 			this.memo.set(img, meta);
 		}
+		return { meta, bytes };
+	}
+
+	private record(sessionId: string, img: ImageData) {
+		const { meta, bytes } = this.metaOf(img);
 		let members = this.members.get(sessionId);
 		if (!members) this.members.set(sessionId, (members = new Set()));
 		members.add(meta.ref);

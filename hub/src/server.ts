@@ -108,14 +108,11 @@ export function createHubServer(deps: HubDeps): Server {
 		if (m === "GET" && im) {
 			const [, id, ref] = im;
 			let img = images.has(id, ref) ? images.get(id, ref) : undefined;
-			// Unknown ref, or its bytes were evicted: re-read the session once.
+			// Unknown ref, or its bytes were evicted: look for just that image in the session.
 			if (!img) {
-				const messages = registry.get(id)?.snapshot().conv.messages ?? (await (async () => {
-					const s = await index.find(id);
-					return s ? readHistory(s.file) : [];
-				})());
-				images.index(id, messages);
-				img = images.get(id, ref);
+				const live = registry.get(id);
+				const found = live ? live.snapshot().conv.messages : await index.find(id).then((s) => (s ? readHistory(s.file) : []));
+				img = images.find(id, ref, found);
 			}
 			if (!img) throw new HttpError(404, "Image not found");
 			res.writeHead(200, { ...cors, "content-type": img.mimeType, "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff", "content-length": img.bytes.length });
@@ -137,7 +134,7 @@ export function createHubServer(deps: HubDeps): Server {
 				const cmd = parseCommand(await readJson(req));
 				const h = await registry.ensure(id);
 				const result = await h.command(cmd);
-				return sendJson(res, 200, { result, sessionId: h.sessionId }, cors);
+				return sendJson(res, 200, { result: images.outgoing(h.sessionId, result), sessionId: h.sessionId }, cors);
 			}
 			if (m === "POST" && action === "close") {
 				registry.close(id);
