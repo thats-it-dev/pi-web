@@ -84,6 +84,13 @@ export class HubApi {
 		return `${this.base}/api/events`;
 	}
 
+	// Plain fetch (not req) because the body is wanted as a Blob.
+	async image(sessionId: string, ref: string): Promise<Blob> {
+		const res = await fetch(`${this.base}/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(ref)}`).catch(() => null);
+		if (!res?.ok) throw new HubError(res?.status ?? 0, "The image couldn't be loaded.");
+		return res.blob();
+	}
+
 	// Cross-origin navigations carry no Origin header, so the hub would refuse a
 	// plain link; fetch the file and hand it to the browser as a download.
 	async downloadExport(name: string): Promise<void> {
