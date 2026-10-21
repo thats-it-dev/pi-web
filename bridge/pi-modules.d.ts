@@ -9,3 +9,12 @@ declare module "@earendil-works/pi-coding-agent" {
 declare module "@earendil-works/pi-ai" {
 	export function getSupportedThinkingLevels(model: unknown): string[];
 }
+
+declare module "typebox" {
+	export const Type: {
+		Object(properties: Record<string, unknown>): unknown;
+		String(options?: { description?: string }): unknown;
+		Boolean(options?: { description?: string }): unknown;
+		Optional(schema: unknown): unknown;
+	};
+}

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fakeHub } from "../../hub/test/support/fake-hub.ts";
-import { type FakeModel, HELLO, startFakeModel } from "../../hub/test/support/fake-model.ts";
+import { type FakeModel, type FakeScript, HELLO, startFakeModel } from "../../hub/test/support/fake-model.ts";
 import { makePiEnv } from "../../hub/test/support/pi-env.ts";
 import { startTerminalPi } from "../../hub/test/support/terminal-pi.ts";
 
@@ -140,4 +141,31 @@ test("with no hub, pi starts and works normally and the bridge stays silent", as
 	await term.records.waitFor((r) => r.type === "agent_settled");
 	assert.doesNotMatch(term.stderr(), /pi-web|bridge|ENOENT|ECONNREFUSED/i);
 	assert.equal(term.records.items.filter((r) => r.type === "extension_error").length, 0);
+});
+
+const PNG_1PX = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg==", "base64");
+const showImageScript = (): FakeScript => (req) => (req.messages.at(-1)?.role !== "tool" ? { toolCalls: [{ id: "call_img", name: "show_image", args: { path: "shot.png" } }] } : { text: "done" });
+
+test("show_image puts the image in the transcript", async (t) => {
+	const { env, hub, term } = await setup(t);
+	writeFileSync(join(env.workDir, "shot.png"), PNG_1PX);
+	model.setScript(showImageScript());
+	await hub!.messages.next((m) => m.type === "hello");
+	term.send({ type: "prompt", message: "show it" });
+	const end = await hub!.messages.waitFor((m) => m.type === "event" && m.event.type === "tool_execution_end");
+	assert.equal(end.event.isError, false);
+	assert.equal(end.event.result.content[1].type, "image");
+	assert.equal(end.event.result.content[1].mimeType, "image/png");
+});
+
+test("show_image exists in the hub's own headless children (PI_WEB=1)", async (t) => {
+	const { env, hub, term } = await setup(t, { extraEnv: { PI_WEB: "1" } });
+	writeFileSync(join(env.workDir, "shot.png"), PNG_1PX);
+	model.setScript(showImageScript());
+	term.send({ type: "prompt", message: "show it" });
+	const end = await term.records.waitFor((r) => r.type === "tool_execution_end", 30_000);
+	assert.equal(end.toolName, "show_image");
+	assert.equal(end.isError, false);
+	assert.equal(end.result.content[1].type, "image");
+	assert.equal(hub!.connections(), 0);
 });

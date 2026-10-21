@@ -5,13 +5,39 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { VERSION, buildSessionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage, ThinkingLevel } from "../shared/src/protocol.ts";
+import { Type } from "typebox";
 import { socketPath } from "./client.ts";
 import { BridgeSession, type CtxLike, type PiLike } from "./session.ts";
+import { type ShowImageParams, showImage } from "./show-image.ts";
 import { FORWARDED_EVENTS } from "./wire.ts";
 
-type PiApi = PiLike & { on(event: string, handler: (event: any, ctx: CtxLike) => void): unknown };
+type PiApi = PiLike & {
+	on(event: string, handler: (event: any, ctx: CtxLike) => void): unknown;
+	registerTool(tool: {
+		name: string;
+		label: string;
+		description: string;
+		parameters: unknown;
+		execute(id: string, params: ShowImageParams, signal: unknown, onUpdate: unknown, ctx: CtxLike): Promise<unknown>;
+	}): void;
+};
 
 export default function piWebBridge(pi: PiApi): void {
+	// Registered before the PI_WEB check: the hub's own headless children need the tool too.
+	pi.registerTool({
+		name: "show_image",
+		label: "Show image",
+		description:
+			"Display an image file from the working directory in the conversation (PNG, JPEG, GIF or WebP, up to 2 MB; downscale larger files first). Use it for screenshots and generated images; it is displayed in the conversation and you also see it unless see is false.",
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the image file, absolute or relative to the working directory" }),
+			caption: Type.Optional(Type.String({ description: "Short caption shown with the image" })),
+			see: Type.Optional(Type.Boolean({ description: "default true; false keeps the image out of your context" })),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			return showImage(params, ctx.cwd);
+		},
+	});
 	if (process.env.PI_WEB === "1") return; // the hub's own headless children are driven over RPC already
 	let session: BridgeSession | null = null;
 	// No sockets in the factory: some pi invocations load extensions without a session.
