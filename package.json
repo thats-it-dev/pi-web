@@ -2,12 +2,12 @@
 	"name": "pi-web",
 	"private": true,
 	"type": "module",
-	"workspaces": ["shared", "hub", "bridge", "app", "theme"],
+	"workspaces": ["shared", "hub", "bridge", "app", "theme", "kit"],
 	"engines": { "node": ">=22.18" },
 	"scripts": {
-		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app && npm run test:watch",
+		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app && npm run test -w kit && npm run test:watch",
 		"test:watch": "node --test watch/app/test/ watch/face/test/",
-		"typecheck": "npm run typecheck -w shared && npm run typecheck -w hub && npm run typecheck -w bridge && npm run typecheck -w app",
+		"typecheck": "npm run typecheck -w shared && npm run typecheck -w hub && npm run typecheck -w bridge && npm run typecheck -w app && npm run typecheck -w kit",
 		"hub": "npm run start -w hub",
 		"dev": "npm run dev -w app"
 	}
