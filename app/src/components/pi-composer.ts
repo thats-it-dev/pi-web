@@ -1,11 +1,10 @@
 import { LitElement, css, html, nothing } from "lit";
+import { sharedStyles, toast } from "@thatsit/kit";
 import type { ApprovalMode, ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { type MentionEntry, applyMention, mentionAt } from "../lib/mention.ts";
-import { toast } from "../lib/toast.ts";
 import { checkImageFile } from "../lib/images.ts";
 import { UNAVAILABLE_IN_TERMINAL } from "../render/sheets.ts";
-import { sharedStyles } from "../styles/shared.ts";
 
 export interface SubmitDetail {
 	text: string;

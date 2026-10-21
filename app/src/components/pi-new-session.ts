@@ -1,9 +1,8 @@
 import { LitElement, css, html } from "lit";
+import { sharedStyles, toast } from "@thatsit/kit";
 import type { HubApi } from "../lib/api.ts";
 import { abbreviateCwd } from "../lib/format.ts";
 import { hrefFor } from "../lib/route.ts";
-import { toast } from "../lib/toast.ts";
-import { sharedStyles } from "../styles/shared.ts";
 
 export class PiNewSession extends LitElement {
 	static properties = { api: { attribute: false }, cwd: { attribute: false }, cwds: { state: true }, home: { state: true }, path: { state: true }, busy: { state: true } };
@@ -71,7 +70,7 @@ export class PiNewSession extends LitElement {
 
 	render() {
 		return html`<div class="wrap">
-			<button class="menu" aria-label="Open sessions" @click=${() => this.dispatchEvent(new CustomEvent("pi-open-nav", { bubbles: true, composed: true }))}>☰</button>
+			<button class="menu" aria-label="Open sessions" @click=${() => this.dispatchEvent(new CustomEvent("tk-open-nav", { bubbles: true, composed: true }))}>☰</button>
 			<h1>new session</h1>
 			<form @submit=${this.start}>
 				${this.cwds.length ? html`<span class="label">recent folders</span>

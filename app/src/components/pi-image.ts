@@ -1,6 +1,6 @@
 import { css, html, LitElement, nothing, type PropertyValues } from "lit";
+import { sharedStyles } from "@thatsit/kit";
 import type { ImageLoader } from "../lib/image-loader.ts";
-import { sharedStyles } from "../styles/shared.ts";
 
 export interface ImageBlock {
 	mimeType: string;

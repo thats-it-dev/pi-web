@@ -1,9 +1,9 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
+import { sharedStyles } from "@thatsit/kit";
 import type { SessionSummary } from "../../../shared/src/protocol.ts";
 import { formatTokens, groupSessions, relativeTime, sessionTitle } from "../lib/format.ts";
 import type { ListStore } from "../lib/list-store.ts";
 import { hrefFor } from "../lib/route.ts";
-import { sharedStyles } from "../styles/shared.ts";
 
 function stateLabel(s: SessionSummary): string | null {
 	if (s.state === "running") return "running";

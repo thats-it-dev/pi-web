@@ -1,4 +1,5 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
+import { sharedStyles, toast } from "@thatsit/kit";
 import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import type { HubApi } from "../lib/api.ts";
@@ -9,14 +10,11 @@ import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
-import { toast } from "../lib/toast.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
-import { sharedStyles } from "../styles/shared.ts";
 import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
 import "./pi-header.ts";
 import "./pi-messages.ts";
-import "./pi-sheet.ts";
 
 type Sheet = "model" | "stats" | "fork" | "settings";
 const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", settings: "session settings" };
@@ -273,7 +271,7 @@ export class PiSession extends LitElement {
 				location.hash = hrefFor({ name: "new", cwd: snap?.cwd ?? this.store?.cwdHint ?? undefined });
 				return true;
 			case "resume":
-				this.dispatchEvent(new CustomEvent("pi-open-nav", { bubbles: true, composed: true }));
+				this.dispatchEvent(new CustomEvent("tk-open-nav", { bubbles: true, composed: true }));
 				return true;
 			case "copy":
 				await this.copyLastReply();
@@ -360,7 +358,7 @@ export class PiSession extends LitElement {
 			this.composer?.updateComplete.then(() => this.composer?.renderRoot.querySelector("textarea")?.focus());
 			return;
 		}
-		const sheet = this.renderRoot.querySelector<LitElement>("pi-sheet");
+		const sheet = this.renderRoot.querySelector<LitElement>("tk-sheet");
 		void sheet?.updateComplete.then(() => {
 			const target = sheet.querySelector<HTMLElement>(FOCUSABLE) ?? sheet.renderRoot.querySelector<HTMLElement>("button");
 			target?.focus();
@@ -401,11 +399,11 @@ export class PiSession extends LitElement {
 				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
 			></pi-composer>
 			${dialog
-				? html`<pi-sheet open heading=${dialog.title || "pi needs an answer"} @pi-close=${() => this.answer(dialog.id, { cancelled: true })}>
+				? html`<tk-sheet open heading=${dialog.title || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>
 						${dialogSheet(dialog, s.dialogSeenAt.get(dialog.id) ?? Date.now(), (a) => this.answer(dialog.id, a))}
-					</pi-sheet>`
+					</tk-sheet>`
 				: this.sheet
-					? html`<pi-sheet open heading=${SHEET_TITLES[this.sheet]} @pi-close=${() => (this.sheet = null)}>${this.renderSheet(this.sheet, snap)}</pi-sheet>`
+					? html`<tk-sheet open heading=${SHEET_TITLES[this.sheet]} @tk-close=${() => (this.sheet = null)}>${this.renderSheet(this.sheet, snap)}</tk-sheet>`
 					: nothing}
 		`;
 	}

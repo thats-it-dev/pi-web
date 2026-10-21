@@ -77,7 +77,7 @@ for (const scheme of ["light", "dark"] as const) {
 
 		test("toast", async ({ page }) => {
 			await page.goto("/");
-			await page.evaluate(() => window.dispatchEvent(new CustomEvent("pi-toast", { detail: { message: "Saved", level: "warning" } })));
+			await page.evaluate(() => window.dispatchEvent(new CustomEvent("tk-toast", { detail: { message: "Saved", level: "warning" } })));
 			await shot(page, "toast");
 		});
 	});
@@ -90,4 +90,19 @@ test("forced dark theme looks like the dark scheme", async ({ page }) => {
 		route.request().method() === "GET" ? route.fulfill({ json: { sessions: [], home: "/home/e2e" } }) : route.fallback());
 	await page.goto("/#/settings");
 	await expect(page).toHaveScreenshot("settings-dark.png", { fullPage: false, maxDiffPixels: 50, mask: masks(page) });
+});
+
+// The header is sticky inside the session's scroll pane; a 1px scroll must not move it (or tuck it).
+test("header stays pinned", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone only");
+	await startSession(page);
+	for (let i = 0; i < 3; i++) {
+		await page.getByLabel("Message").fill("hi");
+		await page.getByRole("button", { name: "send" }).click();
+		await expect(page.locator("pi-messages").getByText("Hello world")).toHaveCount(i + 1);
+	}
+	const header = page.locator("pi-header >> tk-header");
+	expect(await header.evaluate((el) => getComputedStyle(el).position)).toBe("sticky");
+	await page.locator("pi-session .scroll").evaluate((el) => el.scrollBy(0, -1));
+	await expect.poll(async () => (await header.boundingBox())?.y).toBe(0);
 });

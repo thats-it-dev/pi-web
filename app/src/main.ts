@@ -1,8 +1,7 @@
 import "./styles/global.css";
 import "./components/pi-app.ts";
 import { openHashFromMessage } from "./lib/push.ts";
-import { toast } from "./lib/toast.ts";
-import { trackViewport } from "./lib/viewport.ts";
+import { toast, trackViewport } from "@thatsit/kit";
 import { startVpDebug } from "./lib/vp-debug.ts";
 
 trackViewport();

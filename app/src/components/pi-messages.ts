@@ -1,9 +1,9 @@
 import { LitElement, nothing } from "lit";
+import { sharedStyles } from "@thatsit/kit";
 import type { Conversation } from "../../../shared/src/protocol.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import "./pi-image.ts";
 import { messageStyles, renderConversation } from "../render/messages.ts";
-import { sharedStyles } from "../styles/shared.ts";
 
 export class PiMessages extends LitElement {
 	static properties = { conv: { attribute: false }, version: { attribute: false }, loader: { attribute: false } };

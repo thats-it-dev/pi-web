@@ -1,10 +1,9 @@
 import { LitElement, css, html, nothing } from "lit";
+import { sharedStyles, toast } from "@thatsit/kit";
 import { HubApi } from "../lib/api.ts";
 import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
-import { sharedStyles } from "../styles/shared.ts";
 import type { UpdateStatus } from "../../../shared/src/protocol.ts";
-import { toast } from "../lib/toast.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
 
 export class PiSettings extends LitElement {

@@ -1,34 +1,5 @@
-/* Fonts and colors come from the shared That's it theme (/theme); only app-specific tokens live here. */
-@import "@thatsit/theme/theme.css";
+/* Theme, tokens and base rules come from the shared kit; only pi-web's own host rule lives here. */
+@import "@thatsit/kit/kit.css";
 
-:root {
-	--panel: #e7e7e7;
-	--line: #cfcfcf;
-	--overlay: rgba(0, 0, 0, 0.45);
-	--radius: 0.15rem;
-	--sidebar-w: 280px;
-}
-
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
-}
-:root[data-theme="dark"] { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
-
-*, *::before, *::after { box-sizing: border-box; }
-/* The document never scrolls or bounces (iOS would drag the header with it); only the
-   app's own panes scroll. lib/viewport.ts sizes pi-app to the visible area. */
-html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
-:root { --safe-bottom: env(safe-area-inset-bottom); }
-:root[data-keyboard] { --safe-bottom: 0px; } /* the keyboard covers the home indicator */
-html { background: var(--bg); }
-body {
-	margin: 0;
-	background: var(--bg);
-	color: var(--text-primary);
-	font-family: var(--font-body);
-	font-size: 15px;
-	line-height: 1.55;
-	-webkit-text-size-adjust: 100%;
-	transition: background-color 0.3s ease, color 0.3s ease;
-}
+/* trackViewport() (from the kit) sizes pi-app to the visible area. */
 pi-app { display: block; position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-h, 100dvh); }
