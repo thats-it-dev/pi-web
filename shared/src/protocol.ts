@@ -92,7 +92,7 @@ export type ContentBlock =
 	| { type: "text"; text: string }
 	| { type: "thinking"; thinking: string; redacted?: boolean }
 	| { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown>; argsRaw?: string }
-	| { type: "image"; data: string; mimeType: string };
+	| { type: "image"; mimeType: string; data?: string; ref?: string; width?: number; height?: number };
 
 // Pi AgentMessage: user | assistant | toolResult | bashExecution | custom |
 // compactionSummary | branchSummary (system messages are filtered out).
