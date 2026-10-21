@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
 import { checkHostAndLogin, checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
+import { ImageStore } from "./images.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
 import { ReplayCache, handleIndexWebhook } from "./index-webhook.ts";
@@ -34,6 +35,7 @@ export interface HubDeps {
 	updater?: Updater; // self-update from the app (update.ts); absent means the routes answer 501
 	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
 	watch?: WatchService; // the Pebble watch API; absent means /api/watch/* answers 503
+	images?: ImageStore; // image bytes by ref; absent means a private store
 	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
 	launchFn?: typeof launchOnPhone; // watch launch relay; tests stub it
 	now?: () => number;
@@ -48,6 +50,7 @@ export function createHubServer(deps: HubDeps): Server {
 	const { cfg, registry, index } = deps;
 	const fileLister = new FileLister();
 	const replays = new ReplayCache();
+	const images = deps.images ?? new ImageStore();
 
 	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
 		const { pathname: p, searchParams } = new URL(req.url ?? "/", "http://hub");
@@ -99,6 +102,25 @@ export function createHubServer(deps: HubDeps): Server {
 				deps.push.unsubscribe(endpoint);
 			}
 			return sendJson(res, 200, { ok: true }, cors);
+		}
+
+		const im = p.match(/^\/api\/sessions\/([\w.-]+)\/images\/([0-9a-f]{64})$/);
+		if (m === "GET" && im) {
+			const [, id, ref] = im;
+			let img = images.has(id, ref) ? images.get(id, ref) : undefined;
+			// Unknown ref, or its bytes were evicted: re-read the session once.
+			if (!img) {
+				const messages = registry.get(id)?.snapshot().conv.messages ?? (await (async () => {
+					const s = await index.find(id);
+					return s ? readHistory(s.file) : [];
+				})());
+				images.index(id, messages);
+				img = images.get(id, ref);
+			}
+			if (!img) throw new HttpError(404, "Image not found");
+			res.writeHead(200, { ...cors, "content-type": img.mimeType, "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff", "content-length": img.bytes.length });
+			res.end(img.bytes);
+			return;
 		}
 
 		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close|files)$/);
@@ -165,10 +187,10 @@ export function createHubServer(deps: HubDeps): Server {
 
 	async function history(id: string) {
 		const h = registry.get(id);
-		if (h) return { messages: h.snapshot().conv.messages, live: true, cwd: h.cwd };
+		if (h) return { messages: images.outgoing(id, h.snapshot().conv.messages), live: true, cwd: h.cwd };
 		const s = await index.find(id);
 		if (!s) throw new HttpError(404, "Session not found");
-		return { messages: await readHistory(s.file), live: false, cwd: s.cwd, name: s.name, error: registry.lastError(id) ?? null };
+		return { messages: images.outgoing(id, await readHistory(s.file)), live: false, cwd: s.cwd, name: s.name, error: registry.lastError(id) ?? null };
 	}
 
 	function sessionStream(req: IncomingMessage, res: ServerResponse, cors: Cors, sessionId: string): void {
@@ -179,7 +201,7 @@ export function createHubServer(deps: HubDeps): Server {
 			detach?.();
 			const unsubscribe = h.subscribe((msg) => {
 				if (msg.type === "snapshot") id = msg.snapshot.sessionId; // follows fork/clone/new
-				sse.send(msg);
+				sse.send(images.outgoing(id, msg));
 				if (msg.type === "handle_gone") {
 					unsubscribe();
 					detach = null;
@@ -190,7 +212,7 @@ export function createHubServer(deps: HubDeps): Server {
 				}
 			});
 			detach = unsubscribe;
-			sse.send({ type: "snapshot", snapshot: h.snapshot() });
+			sse.send(images.outgoing(id, { type: "snapshot", snapshot: h.snapshot() }));
 		};
 		const existing = registry.get(id);
 		if (existing) attach(existing);

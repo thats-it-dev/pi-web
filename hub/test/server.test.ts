@@ -308,3 +308,122 @@ test("files searches the session's working directory", async () => {
 	assert.deepEqual(r.body, { files: [{ path: "src/mention.ts", dir: false }] });
 	assert.equal((await call(port, "GET", "/api/sessions/nope/files?q=a", GOOD)).status, 404);
 });
+
+// --- images ---
+const PNG = Buffer.alloc(40, 7);
+Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(PNG);
+PNG.writeUInt32BE(3, 16);
+PNG.writeUInt32BE(4, 20);
+const PNG_B64 = PNG.toString("base64");
+const imgBlock = () => ({ type: "image", data: PNG_B64, mimeType: "image/png" });
+const imgResult = () => ({ role: "toolResult", toolCallId: "t1", toolName: "show_image", content: [imgBlock()], isError: false, timestamp: 2 });
+
+function getBytes(path: string, headers: Record<string, string>): Promise<{ status: number; headers: Record<string, any>; body: Buffer }> {
+	return new Promise((resolve, reject) => {
+		httpGet({ host: "127.0.0.1", port, path, headers }, (res) => {
+			const chunks: Buffer[] = [];
+			res.on("data", (c) => chunks.push(c));
+			res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+		}).on("error", reject);
+	});
+}
+
+async function liveWithImage(id: string): Promise<FakeHandle> {
+	nextId = id;
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const h = handles.get(r.body.sessionId)!;
+	h.conv.messages.push(imgResult() as any);
+	return h;
+}
+
+test("the session stream sends snapshots and events without image data", async () => {
+	const h = await liveWithImage("img-stream");
+	const sse = await openSse(port, "/api/sessions/img-stream/stream", GOOD);
+	const snap: any = await sse.next((m) => m.type === "snapshot");
+	const block = snap.snapshot.conv.messages[0].content[0];
+	assert.match(block.ref, /^[0-9a-f]{64}$/);
+	assert.equal(block.data, undefined);
+	h.push({ type: "event", event: { type: "tool_execution_end", toolCallId: "t2", toolName: "show_image", result: { content: [imgBlock()] }, isError: false } as any });
+	const ev: any = await sse.next((m) => m.type === "event");
+	assert.equal(ev.event.result.content[0].ref, block.ref);
+	assert.ok(!JSON.stringify([snap, ev]).includes(PNG_B64));
+	// the handle keeps its data
+	assert.equal((h.conv.messages[0] as any).content[0].data, PNG_B64);
+	sse.close();
+});
+
+test("history returns refs, live and from disk", async () => {
+	await liveWithImage("img-hist");
+	const live = await call(port, "GET", "/api/sessions/img-hist/history", GOOD);
+	assert.match(live.body.messages[0].content[0].ref, /^[0-9a-f]{64}$/);
+	assert.ok(!JSON.stringify(live.body).includes(PNG_B64));
+	const file = join(sessions, "--work--", "2026-10-07T00-00-00-000Z_img-disk.jsonl");
+	writeFileSync(
+		file,
+		`${JSON.stringify({ type: "session", version: 3, id: "img-disk", timestamp: "2026-10-07T00:00:00.000Z", cwd: work })}\n` +
+			`${JSON.stringify({ type: "message", id: "r1", parentId: null, timestamp: "x", message: imgResult() })}\n`,
+	);
+	const disk = await call(port, "GET", "/api/sessions/img-disk/history", GOOD);
+	assert.equal(disk.body.live, false);
+	assert.match(disk.body.messages[0].content[0].ref, /^[0-9a-f]{64}$/);
+	assert.ok(!JSON.stringify(disk.body).includes(PNG_B64));
+});
+
+test("a ref from the stream is served as bytes", async () => {
+	await liveWithImage("img-bytes");
+	const hist = await call(port, "GET", "/api/sessions/img-bytes/history", GOOD);
+	const ref = hist.body.messages[0].content[0].ref;
+	const r = await getBytes(`/api/sessions/img-bytes/images/${ref}`, GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, PNG);
+	assert.equal(r.headers["content-type"], "image/png");
+	assert.equal(r.headers["cache-control"], "private, max-age=31536000, immutable");
+	assert.equal(r.headers["x-content-type-options"], "nosniff");
+	assert.equal(r.headers["access-control-allow-origin"], GOOD.origin);
+});
+
+test("a ref from another session is 404", async () => {
+	await liveWithImage("img-own");
+	nextId = "img-other"; // a session without that image
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	const hist = await call(port, "GET", "/api/sessions/img-own/history", GOOD);
+	const ref = hist.body.messages[0].content[0].ref;
+	const r = await call(port, "GET", `/api/sessions/img-other/images/${ref}`, GOOD);
+	assert.equal(r.status, 404);
+	assert.deepEqual(r.body, { error: "Image not found" });
+});
+
+test("a ref is served from the session file when no handle is live", async () => {
+	const file = join(sessions, "--work--", "2026-10-07T00-00-00-000Z_img-cold.jsonl");
+	writeFileSync(
+		file,
+		`${JSON.stringify({ type: "session", version: 3, id: "img-cold", timestamp: "2026-10-07T00:00:00.000Z", cwd: work })}\n` +
+			`${JSON.stringify({ type: "message", id: "r1", parentId: null, timestamp: "x", message: imgResult() })}\n`,
+	);
+	const { ImageStore } = await import("../src/images.ts");
+	const ref = (new ImageStore().outgoing("x", imgBlock()) as any).ref;
+	const r = await getBytes(`/api/sessions/img-cold/images/${ref}`, GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, PNG);
+	assert.equal((await call(port, "GET", `/api/sessions/img-cold/images/${"0".repeat(64)}`, GOOD)).status, 404);
+});
+
+test("images of a forked session load under its new id", async () => {
+	const h = await liveWithImage("img-fork-a");
+	const sse = await openSse(port, "/api/sessions/img-fork-a/stream", GOOD);
+	await sse.next((m) => m.type === "snapshot");
+	h.sessionId = "img-fork-b";
+	h.push({ type: "snapshot", snapshot: h.snapshot() });
+	const snap: any = await sse.next((m) => m.type === "snapshot");
+	const ref = snap.snapshot.conv.messages[0].content[0].ref;
+	const r = await getBytes(`/api/sessions/img-fork-b/images/${ref}`, GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body, PNG);
+	sse.close();
+});
+
+test("the image route refuses requests without an allowed Origin", async () => {
+	const path = `/api/sessions/disk-1/images/${"a".repeat(64)}`;
+	assert.equal((await call(port, "GET", path, { ...GOOD, origin: "https://evil.example" })).status, 403);
+	assert.equal((await call(port, "GET", path, { ...GOOD, "tailscale-user-login": undefined })).status, 403);
+});
