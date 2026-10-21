@@ -17,7 +17,7 @@
 - Kit API is additive-only: exports, element tags, CSS custom properties and published files are never removed or renamed.
 - Exactly one copy of Lit per page. Built `kit.js` imports nothing except `./lit.js`.
 - `https://pi.thatsit.app/theme/theme.css` keeps working (the existing `publishTheme` plugin stays).
-- Tooling: `gh` and `cf`, never wrangler. Look up `cf` commands with `cf cli search "<task>"`, keeping queries free of names, domains and IDs.
+- Tooling: `gh` and `cf`. The one exception is CI's upload step, `wrangler pages deploy --project-name thatsit-kit --branch <branch>` (cf beta.14 can't upload to Pages). Look up `cf` commands with `cf cli search "<task>"`, keeping queries free of names, domains and IDs.
 - Pages project name `thatsit-kit`, production branch `master`, custom domain `kit.thatsit.app`.
 - Secrets live only in GitHub org secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Never print them or commit them.
 - Match the repo's style: tabs, `.ts` import extensions, comments that explain why, sparse.
