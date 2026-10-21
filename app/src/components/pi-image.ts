@@ -39,13 +39,14 @@ export class PiImage extends LitElement {
 			:host([variant="thumb"]) { display: inline-block; }
 			button.pic { display: block; max-width: 100%; }
 			img.pic, .ph { display: block; max-width: 100%; border-radius: var(--radius); }
-			.figure img.pic { max-height: 70vh; width: auto; height: auto; }
+			.figure img.pic { width: 100%; max-width: 100%; max-height: 70vh; height: auto; object-fit: contain; object-position: left top; image-rendering: pixelated; }
 			.thumb img.pic { max-width: 160px; max-height: 160px; width: auto; height: auto; }
 			.ph { background: var(--code-bg); min-height: 48px; width: 100%; max-width: 480px; }
+			.figure .ph { max-width: 100%; max-height: 70vh; }
 			.thumb .ph { width: 160px; }
 			.fail { color: var(--text-secondary); font-size: 0.9em; }
 			.viewer { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(0, 0, 0, 0.92); padding: 0; border: 0; width: 100%; height: 100%; cursor: zoom-out; touch-action: pinch-zoom; }
-			.viewer img { max-width: 100%; max-height: 100%; object-fit: contain; touch-action: pinch-zoom; }
+			.viewer img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; touch-action: pinch-zoom; }
 		`,
 	];
 

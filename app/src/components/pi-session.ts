@@ -3,7 +3,8 @@ import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, Sn
 import { contentText } from "../../../shared/src/reducer.ts";
 import type { HubApi } from "../lib/api.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
-import { ImageLoader } from "../lib/image-loader.ts";
+import type { ImageLoader } from "../lib/image-loader.ts";
+import { sessionImageLoader } from "../lib/session-images.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
@@ -87,7 +88,7 @@ export class PiSession extends LitElement {
 		this.teardown();
 		const store = new SessionStore(id);
 		this.store = store;
-		this.loader = new ImageLoader((ref) => this.api.image(id, ref));
+		this.loader = sessionImageLoader(this.api, store);
 		this.sheet = null;
 		this.atBottom = true;
 		this.tucked = false;
