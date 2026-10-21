@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>That's it kit</title>
+	<link rel="stylesheet" href="./kit.css" />
+	<script src="./theme-init.js"></script>
+	<script type="module">import "./kit.js"</script>
+	<style>
+		nav { display: grid; gap: 10px; padding: 18px; }
+		section { padding: 18px; display: grid; gap: 14px; align-content: start; overflow-y: auto; }
+		.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+	</style>
+</head>
+<body>
+	<tk-shell nav-label="Demo pages">
+		<nav slot="nav">
+			<a class="u" href="#a">Page A</a>
+			<a class="u" href="#b">Page B</a>
+			<a class="u on" href="">This page</a>
+		</nav>
+		<tk-header menu-label="Open menu"><h1 slot="title">That's it kit</h1></tk-header>
+		<section>
+			<div class="row"><button class="btn">Primary</button><button class="btn ghost">Ghost</button></div>
+			<div class="seg"><button class="on">One</button><button>Two</button></div>
+			<div class="row"><span class="label">label</span><a class="u" href="#a">link</a><span class="dot live"></span><span class="dot running"></span><span class="dot needs_you"></span><span class="dot error"></span></div>
+			<input placeholder="Text input" aria-label="Text input" />
+			<div class="row">
+				<button class="btn" id="open-sheet">Open sheet</button>
+				<button class="btn ghost" id="show-toast">Show toast</button>
+			</div>
+		</section>
+	</tk-shell>
+	<tk-sheet id="sheet" heading="Sheet"><p>Slotted content.</p></tk-sheet>
+	<tk-toasts></tk-toasts>
+	<script type="module">
+		import { toast } from "./kit.js";
+		const sheet = document.getElementById("sheet");
+		document.getElementById("open-sheet").addEventListener("click", () => (sheet.open = true));
+		sheet.addEventListener("tk-close", () => (sheet.open = false));
+		document.getElementById("show-toast").addEventListener("click", () => toast("Saved"));
+	</script>
+</body>
+</html>

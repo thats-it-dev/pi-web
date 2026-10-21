@@ -12,6 +12,7 @@
 		"test": "vitest run",
 		"typecheck": "tsc -p tsconfig.json",
 		"build": "node scripts/build.ts",
+		"e2e": "playwright test -c playwright.config.ts",
 		"check-api": "node scripts/check-api.ts https://kit.thatsit.app"
 	},
 	"dependencies": {
