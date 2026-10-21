@@ -148,7 +148,7 @@ export const messageStyles = css`
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
 	.imgs.thumbs { justify-content: flex-start; padding: 0 9px 8px; }
 	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
-	.shot pi-image { max-width: 100%; max-height: 70vh; }
+	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */
 	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
 	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
 	.assistant { display: grid; gap: 8px; min-width: 0; }

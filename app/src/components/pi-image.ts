@@ -38,6 +38,7 @@ export class PiImage extends LitElement {
 			:host { display: block; min-width: 0; }
 			:host([variant="thumb"]) { display: inline-block; }
 			button.pic { display: block; max-width: 100%; }
+			.figure button.pic { width: 100%; } /* else the button shrinks to the image and width: 100% below resolves to its natural size */
 			img.pic, .ph { display: block; max-width: 100%; border-radius: var(--radius); }
 			.figure img.pic { width: 100%; max-width: 100%; max-height: 70vh; height: auto; object-fit: contain; object-position: left top; image-rendering: pixelated; }
 			.thumb img.pic { max-width: 160px; max-height: 160px; width: auto; height: auto; }

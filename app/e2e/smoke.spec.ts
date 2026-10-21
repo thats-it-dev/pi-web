@@ -77,6 +77,10 @@ test("the agent's show_image appears and opens full screen", async ({ page }) =>
 	const img = figure.locator("pi-image img.pic");
 	await expect(img).toBeVisible();
 	await expect(img).toHaveAttribute("src", /^blob:/);
+	// The 16 px test card is scaled up to the column width, not shown at its natural size.
+	const shot = await img.boundingBox();
+	const column = await figure.boundingBox();
+	expect(shot!.width).toBeGreaterThan(column!.width * 0.9);
 	await figure.locator("pi-image button.pic").click();
 	const viewer = figure.locator("pi-image button.viewer");
 	await expect(viewer).toBeVisible();
