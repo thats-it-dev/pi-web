@@ -87,3 +87,66 @@ test("identical images share one ref", () => {
 	const x = store.outgoing("s", [block(png(2, 2)), block(png(2, 2))]) as any[];
 	assert.equal(x[0].ref, x[1].ref);
 });
+
+test("a second outgoing of the same block does not decode or replace the stored bytes", () => {
+	const store = new ImageStore();
+	const blk = block(png(2, 2));
+	const r1 = (store.outgoing("s", blk) as any).ref;
+	const first = store.get("s", r1)?.bytes;
+	const r2 = (store.outgoing("s", { content: [blk] }) as any).content[0].ref;
+	assert.equal(r2, r1);
+	assert.equal(store.get("s", r1)?.bytes, first);
+});
+
+test("re-adding an existing ref keeps byte accounting right", () => {
+	const store = new ImageStore({ maxBytes: 100 });
+	const a = (store.outgoing("s", block(png(1, 1, 7))) as any).ref; // 40 bytes
+	store.outgoing("s", block(png(1, 1, 7)));
+	store.outgoing("s", block(png(1, 1, 7)));
+	const b = (store.outgoing("s", block(png(2, 2, 7))) as any).ref; // 80 total
+	assert.ok(store.get("s", a));
+	assert.ok(store.get("s", b));
+	store.outgoing("s", block(png(3, 3, 7))); // 120 > 100, evicts the oldest only
+	assert.equal(store.get("s", a), undefined);
+	assert.ok(store.get("s", b));
+});
+
+test("an image larger than the cache is a member but evicts nothing", () => {
+	const store = new ImageStore({ maxBytes: 100 });
+	const small = (store.outgoing("s", block(png(1, 1))) as any).ref;
+	const big = (store.outgoing("t", block(png(2, 2, 200))) as any).ref;
+	assert.equal(store.has("t", big), true);
+	assert.equal(store.get("t", big), undefined);
+	assert.ok(store.get("s", small));
+});
+
+test("unrecognised bytes are octet-stream; sniffed type beats the declared one", () => {
+	const store = new ImageStore();
+	const junk = { type: "image", data: Buffer.from("<script>").toString("base64"), mimeType: "text/html" };
+	const j = store.outgoing("s", junk) as any;
+	assert.equal(j.mimeType, "application/octet-stream");
+	assert.equal(store.get("s", j.ref)?.mimeType, "application/octet-stream");
+	assert.equal("data" in j, false);
+	const p = store.outgoing("s", { ...block(png(2, 2)), mimeType: "image/jpeg" }) as any;
+	assert.equal(p.mimeType, "image/png");
+	assert.equal(store.get("s", p.ref)?.mimeType, "image/png");
+});
+
+test("an image block without a string mimeType still loses its data", () => {
+	const store = new ImageStore();
+	const b = png(2, 2);
+	const out = store.outgoing("s", [{ type: "image", data: b.toString("base64") }, { type: "image", data: b.toString("base64"), mimeType: 5 }]) as any[];
+	for (const o of out) {
+		assert.equal("data" in o, false);
+		assert.equal(o.mimeType, "image/png");
+		assert.match(o.ref, HEX);
+	}
+});
+
+test("conv.tools partialResult images are rewritten", () => {
+	const store = new ImageStore();
+	const b = png(2, 2);
+	const out = store.outgoing("s", { conv: { tools: { t: { partialResult: { content: [block(b)] } } } } }) as any;
+	assert.ok(!JSON.stringify(out).includes(b.toString("base64")));
+	assert.match(out.conv.tools.t.partialResult.content[0].ref, HEX);
+});

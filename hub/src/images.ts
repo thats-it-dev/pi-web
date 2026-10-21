@@ -17,12 +17,20 @@ interface Entry {
 interface ImageData {
 	type: "image";
 	data: string;
+	mimeType?: unknown;
+}
+
+interface Meta {
+	ref: string;
 	mimeType: string;
+	size: number; // decoded bytes
+	width?: number;
+	height?: number;
 }
 
 const isImage = (v: unknown): v is ImageData => {
 	const o = v as Record<string, unknown>;
-	return o.type === "image" && typeof o.data === "string" && typeof o.mimeType === "string";
+	return o.type === "image" && typeof o.data === "string";
 };
 
 export class ImageStore {
@@ -30,6 +38,7 @@ export class ImageStore {
 	private bytes = 0;
 	private lru = new Map<string, Entry>(); // insertion order = recency
 	private members = new Map<string, Set<string>>();
+	private memo = new WeakMap<object, Meta>(); // snapshots resend the same block objects
 
 	constructor(opts: { maxBytes?: number } = {}) {
 		this.maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
@@ -74,17 +83,34 @@ export class ImageStore {
 	}
 
 	private record(sessionId: string, img: ImageData) {
-		const bytes = Buffer.from(img.data, "base64");
-		const ref = createHash("sha256").update(bytes).digest("hex");
-		// Trust the bytes over the declared type; fall back to it for unknown formats.
-		const sniffed = sniffImageType(bytes);
-		const mimeType = sniffed ?? img.mimeType;
+		let meta = this.memo.get(img);
+		let bytes: Buffer | undefined;
+		if (!meta) {
+			bytes = Buffer.from(img.data, "base64");
+			// Trust the bytes over the declared type. Unrecognised bytes are never
+			// served under a type the sender chose.
+			const sniffed = sniffImageType(bytes);
+			const size = sniffed ? imageDimensions(bytes, sniffed) : null;
+			meta = {
+				ref: createHash("sha256").update(bytes).digest("hex"),
+				mimeType: sniffed ?? "application/octet-stream",
+				size: bytes.length,
+				...(size ?? {}),
+			};
+			this.memo.set(img, meta);
+		}
 		let members = this.members.get(sessionId);
 		if (!members) this.members.set(sessionId, (members = new Set()));
-		members.add(ref);
-		this.keep(ref, { mimeType, bytes });
-		const size = sniffed ? imageDimensions(bytes, sniffed) : null;
-		return { type: "image" as const, mimeType, ref, ...(size ?? {}) };
+		members.add(meta.ref);
+		const held = this.lru.get(meta.ref);
+		if (held) {
+			this.lru.delete(meta.ref); // refresh recency, keep the stored entry
+			this.lru.set(meta.ref, held);
+		} else if (meta.size <= this.maxBytes) {
+			this.keep(meta.ref, { mimeType: meta.mimeType, bytes: bytes ?? Buffer.from(img.data, "base64") });
+		}
+		const { ref, mimeType, width, height } = meta;
+		return { type: "image" as const, mimeType, ref, ...(width && height ? { width, height } : {}) };
 	}
 
 	private keep(ref: string, entry: Entry): void {
