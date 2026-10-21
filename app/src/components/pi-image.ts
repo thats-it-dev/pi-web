@@ -40,7 +40,7 @@ export class PiImage extends LitElement {
 			button.pic { display: block; max-width: 100%; }
 			img.pic, .ph { display: block; max-width: 100%; border-radius: var(--radius); }
 			.figure img.pic { max-height: 70vh; width: auto; height: auto; }
-			.thumb img.pic { max-width: 160px; max-height: 160px; }
+			.thumb img.pic { max-width: 160px; max-height: 160px; width: auto; height: auto; }
 			.ph { background: var(--code-bg); min-height: 48px; width: 100%; max-width: 480px; }
 			.thumb .ph { width: 160px; }
 			.fail { color: var(--text-secondary); font-size: 0.9em; }
@@ -68,7 +68,8 @@ export class PiImage extends LitElement {
 
 	connectedCallback() {
 		super.connectedCallback();
-		addEventListener("keydown", this.onKey);
+		// Lit doesn't re-render on reconnect, so re-arm the observer here.
+		if (this.hasUpdated) this.arm();
 	}
 	disconnectedCallback() {
 		super.disconnectedCallback();
@@ -83,6 +84,7 @@ export class PiImage extends LitElement {
 	protected willUpdate(changed: PropertyValues) {
 		if (changed.has("block") || changed.has("loader")) {
 			this.requested = null;
+			this._open = false;
 			this._url = "";
 			this._state = this.block?.data !== undefined ? "ready" : "idle";
 			this.observer?.disconnect();
@@ -90,9 +92,19 @@ export class PiImage extends LitElement {
 		}
 	}
 
-	protected updated() {
+	protected updated(changed: PropertyValues) {
+		if (changed.has("_open")) {
+			if (this._open) addEventListener("keydown", this.onKey);
+			else removeEventListener("keydown", this.onKey);
+		}
+		this.arm();
+	}
+
+	private arm() {
 		const ref = this.block?.data === undefined ? this.block?.ref : undefined;
-		if (ref && this.loader && this.requested !== ref && !this.observer) {
+		// Only an element still waiting to load needs an observer; an in-flight
+		// load completes on its own even while detached.
+		if (ref && this.loader && this._state === "idle" && !this.observer) {
 			this.observer = new IntersectionObserver(
 				(entries) => {
 					if (!entries.some((e) => e.isIntersecting)) return;
