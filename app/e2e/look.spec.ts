@@ -11,14 +11,14 @@ async function startSession(page: import("@playwright/test").Page) {
 	await expect(page).toHaveURL(/#\/s\//);
 }
 
-// The sidebar lists whatever sessions earlier specs left on the hub, and the stats sheet shows the new session's
-// file and id (the 12th and 13th rows): none of that is stable, so it is masked or stubbed.
-const masks = (page: import("@playwright/test").Page) => [
-	page.locator("pi-sidebar .ago"),
-	page.locator("pi-header .l2"),
+const masks = (page: import("@playwright/test").Page) => [page.locator("pi-sidebar .ago"), page.locator("pi-header .l2")];
+
+// The stats sheet shows the new session's file and id, which are random per run, and the sidebar lists whatever
+// sessions earlier specs left on the hub.
+const sessionSheetMasks = (page: import("@playwright/test").Page) => [
+	...masks(page),
 	page.locator("pi-sidebar .groups"),
-	page.locator("pi-settings .seg"), // highlights the stored choice, which differs between "system" and a forced dark
-	page.locator("dl.stats dd:nth-of-type(12), dl.stats dd:nth-of-type(13)"),
+	page.locator('dl.stats dt:has-text("session file") + dd, dl.stats dt:has-text("session id") + dd'),
 ];
 
 // Pins the current look so the kit extraction can prove it changed nothing.
@@ -32,8 +32,8 @@ for (const scheme of ["light", "dark"] as const) {
 				route.request().method() === "GET" ? route.fulfill({ json: { sessions: [], home: "/home/e2e" } }) : route.fallback());
 		});
 
-		const shot = async (page: import("@playwright/test").Page, name: string) =>
-			expect(page).toHaveScreenshot(`${name}-${scheme}.png`, { fullPage: false, maxDiffPixels: 50, mask: masks(page) });
+		const shot = async (page: import("@playwright/test").Page, name: string, mask = masks(page)) =>
+			expect(page).toHaveScreenshot(`${name}-${scheme}.png`, { fullPage: false, maxDiffPixels: 50, mask });
 
 		test("home", async ({ page }) => {
 			await page.goto("/");
@@ -41,8 +41,20 @@ for (const scheme of ["light", "dark"] as const) {
 		});
 
 		test("settings", async ({ page }) => {
+			// Store the choice explicitly so the theme control's state is the same one the forced-dark test reaches.
+			await page.addInitScript((t) => localStorage.setItem("pi-web:theme", t), scheme);
 			await page.goto("/#/settings");
 			await shot(page, "settings");
+		});
+
+		test("settings-system", async ({ page }) => {
+			await page.goto("/#/settings");
+			await shot(page, "settings-system");
+		});
+
+		test("new", async ({ page }) => {
+			await page.goto("/#/new");
+			await shot(page, "new");
 		});
 
 		test("drawer", async ({ page, isMobile }) => {
@@ -58,7 +70,7 @@ for (const scheme of ["light", "dark"] as const) {
 			await page.getByRole("button", { name: "send" }).click(); // Enter doesn't send on the phone
 			await expect(page.locator("pi-messages")).toContainText("Hello world");
 			await page.getByRole("button", { name: "Session stats" }).click();
-			await shot(page, "session-sheet");
+			await shot(page, "session-sheet", sessionSheetMasks(page));
 		});
 
 		test("toast", async ({ page }) => {
