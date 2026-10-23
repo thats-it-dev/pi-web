@@ -126,7 +126,8 @@ test("add one increases the count", async ({ page }) => {
 
 ## When something fails
 
-- `new` failed: if the error starts with `invalid name`, `reserved name`, `color must`,
+- `new --resume` failed (any error): keep the name, fix the cause, rerun with `--resume`.
+- `new` failed (without `--resume`): if the error starts with `invalid name`, `reserved name`, `color must`,
   `GitHub repo exists`, `Pages project exists`, `DNS record exists`, `gh repo view`,
   `cf pages get`, `cf dns records list`, `gh repo create` or `could not read the GitHub
   account identity`, or ends in `already exists`, nothing was created: fix it and rerun
