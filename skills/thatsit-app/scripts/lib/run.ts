@@ -1,13 +1,15 @@
 import { execFile } from "node:child_process";
 
-export type RunResult = { code: number; stdout: string; stderr: string };
-export type Run = (cmd: string, args: string[], opts?: { cwd?: string; input?: string }) => Promise<RunResult>;
+export type RunResult = { code: number; stdout: string; stderr: string; timedOut?: true };
+export type Run = (cmd: string, args: string[], opts?: { cwd?: string; input?: string; timeoutMs?: number }) => Promise<RunResult>;
 
 // Never throws on non-zero exit and never echoes output: callers decide what to show.
 export const realRun: Run = (cmd, args, opts = {}) =>
 	new Promise((resolve) => {
-		const child = execFile(cmd, args, { cwd: opts.cwd, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+		const child = execFile(cmd, args, { cwd: opts.cwd, maxBuffer: 32 * 1024 * 1024, timeout: opts.timeoutMs }, (err, stdout, stderr) => {
 			if (!err) return resolve({ code: 0, stdout, stderr });
+			// execFile kills the child on timeout; report it distinctly from a normal failure.
+			if ((err as { killed?: boolean }).killed && opts.timeoutMs) return resolve({ code: 1, stdout, stderr: `timed out after ${opts.timeoutMs} ms`, timedOut: true });
 			const code = typeof err.code === "number" ? err.code : 1;
 			resolve({ code, stdout, stderr: stderr || err.message });
 		});

@@ -59,10 +59,28 @@ export async function findRun(repo: string, sha: string, run: Run, clock: Clock,
 	}
 }
 
+// Must match the step name in the template's .github/workflows/deploy.yml.
+export const DEPLOY_STEP = "Deploy to Cloudflare Pages";
+export const WATCH_TIMEOUT_MS = 20 * 60_000;
+const SKIPPED = "deploy step was skipped; check the org Cloudflare secrets and that app.config.json name was changed";
+
+// A green run can still have skipped the deploy (missing token, or the template's not-renamed guard).
+export async function deployStepOk(repo: string, id: number, run: Run): Promise<boolean> {
+	const args = ["run", "view", String(id), "--repo", repo, "--json", "jobs"];
+	const r = await run("gh", args);
+	if (r.code !== 0) throw fail("gh", args, r);
+	const jobs: { steps?: { name: string; conclusion: string }[] }[] = JSON.parse(r.stdout || "{}").jobs ?? [];
+	return jobs.some((j) => j.steps?.some((s) => s.name === DEPLOY_STEP && s.conclusion === "success"));
+}
+
 // Blocks until the run ends; on failure the error carries the tail of the failing step logs.
-export async function watchRun(repo: string, id: number, run: Run): Promise<void> {
-	const r = await run("gh", ["run", "watch", String(id), "--repo", repo, "--exit-status"]);
-	if (r.code === 0) return;
+export async function watchRun(repo: string, id: number, run: Run, timeoutMs = WATCH_TIMEOUT_MS): Promise<void> {
+	const r = await run("gh", ["run", "watch", String(id), "--repo", repo, "--exit-status"], { timeoutMs });
+	if (r.timedOut) throw new Error(`deploy run ${id} did not finish within ${timeoutMs / 60_000} min; it may be queued or stuck: https://github.com/${repo}/actions/runs/${id}`);
+	if (r.code === 0) {
+		if (!(await deployStepOk(repo, id, run))) throw new Error(`deploy run ${id} finished green but the ${SKIPPED}`);
+		return;
+	}
 	const log = await run("gh", ["run", "view", String(id), "--repo", repo, "--log-failed"]);
 	const tail = log.stdout.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
 	throw new Error(`deploy run ${id} failed in ${repo}. Last lines of the failing step:\n${tail || r.stderr.trim()}`);

@@ -1,7 +1,7 @@
 import { must, type Run } from "./run.ts";
 import { appRepo, branchOf, findRun, headSha, localChecks, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
 
-export type PrOpts = { clock?: Clock; previewWaitMs?: number };
+export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number };
 
 type Comment = { user?: { login?: string }; body?: string };
 
@@ -26,12 +26,16 @@ export async function openPr(
 
 	await localChecks(dir, run);
 	await must(run, "git", ["push", "-u", "origin", "HEAD"], { cwd: dir });
-	const prUrl = (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
+	// A rerun on a branch that already has a PR (fixing a red run) only pushes.
+	const existing = await run("gh", ["pr", "view", "--json", "url"], { cwd: dir });
+	const prUrl = existing.code === 0
+		? JSON.parse(existing.stdout).url
+		: (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
 	const num = prUrl.match(/\/pull\/(\d+)$/)?.[1];
 	if (!num) throw new Error(`could not read the PR number from: ${prUrl}`);
 
 	const sha = await headSha(dir, run);
-	await watchRun(repo, await findRun(repo, sha, run, clock), run);
+	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs);
 
 	// The sticky comment is edited in place, so an old one may still name an older commit.
 	const short = sha.slice(0, 7);

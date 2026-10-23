@@ -12,3 +12,11 @@ test("input is passed on stdin and non-zero exit does not throw", async () => {
 	assert.equal(r.code, 3);
 	assert.equal(r.stderr.trim(), "hi");
 });
+
+test("timeoutMs kills a sleeping child and reports timedOut", async () => {
+	const t = Date.now();
+	const r = await realRun("node", ["-e", "setTimeout(()=>{}, 30000)"], { timeoutMs: 200 });
+	assert.equal(r.timedOut, true);
+	assert.notEqual(r.code, 0);
+	assert.ok(Date.now() - t < 5000);
+});

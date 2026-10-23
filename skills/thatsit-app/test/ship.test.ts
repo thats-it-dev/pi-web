@@ -12,6 +12,9 @@ const SHA = "83a7f06aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ROOT = "1111111bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const REPO = "thats-it-dev/foo";
 const SUB = "foo-930.pages.dev";
+const jobs = (conclusion: string) => ({ stdout: JSON.stringify({ jobs: [{ steps: [{ name: "Deploy to Cloudflare Pages", conclusion }] }] }) });
+// gh run view answers either the jobs JSON or the failed-step log.
+const view = (conclusion = "success", log = "") => (c: { args: string[] }) => (c.args.includes("--json") ? jobs(conclusion) : { stdout: log });
 
 function appDir() {
 	const d = mkdtempSync(join(tmpdir(), "thatsit-ship-"));
@@ -29,7 +32,8 @@ const shipTable = (over: T = {}): T => ({
 	"git rev-parse --abbrev-ref HEAD": { stdout: "main\n" },
 	"git status --porcelain": { stdout: "" },
 	"git rev-list --max-parents=0 HEAD": { stdout: `${ROOT}\n` },
-	"gh run list --repo thats-it-dev/foo --branch main --workflow deploy.yml --status success": { stdout: JSON.stringify([{ headSha: ROOT }]) },
+	"gh run list --repo thats-it-dev/foo --branch main --workflow deploy.yml --status success": { stdout: JSON.stringify([{ headSha: ROOT, databaseId: 1 }]) },
+	"gh run view": view(),
 	"npm run": {},
 	"npm test": {},
 	"git push origin main": {},
@@ -48,7 +52,7 @@ test("ship happy path: exact calls in order, production URL", async () => {
 	assert.deepEqual(urls, ["https://foo.thatsit.app/"]);
 	assert.deepEqual(f.lines().filter((l) => !l.startsWith("git rev-list") && !l.startsWith("git status")), [
 		"git rev-parse --abbrev-ref HEAD",
-		`gh run list --repo ${REPO} --branch main --workflow deploy.yml --status success --json headSha`,
+		`gh run list --repo ${REPO} --branch main --workflow deploy.yml --status success --json headSha,databaseId`,
 		"npm run typecheck",
 		"npm test",
 		"npm run e2e",
@@ -56,6 +60,7 @@ test("ship happy path: exact calls in order, production URL", async () => {
 		"git rev-parse HEAD",
 		`gh run list --repo ${REPO} --commit ${SHA} --json databaseId,status,conclusion`,
 		`gh run watch 42 --repo ${REPO} --exit-status`,
+		`gh run view 42 --repo ${REPO} --json jobs`,
 	]);
 });
 
@@ -73,7 +78,7 @@ test("ship refuses a dirty tree", async () => {
 
 test("ship refuses when main already has a successful app deploy", async () => {
 	const f = fakeRun(shipTable({
-		"gh run list --repo thats-it-dev/foo --branch main --workflow deploy.yml --status success": { stdout: JSON.stringify([{ headSha: ROOT }, { headSha: SHA }]) },
+		"gh run list --repo thats-it-dev/foo --branch main --workflow deploy.yml --status success": { stdout: JSON.stringify([{ headSha: ROOT, databaseId: 1 }, { headSha: SHA, databaseId: 2 }]) },
 	}));
 	await assert.rejects(ship(appDir(), f.run, async () => 200, { clock: clock() }), /pull request|already shipped/i);
 	assert.ok(!f.lines().some((l) => l.startsWith("git push") || l.startsWith("npm")));
@@ -109,7 +114,7 @@ test("ship red deploy includes the log tail", async () => {
 	const log = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join("\n");
 	const f = fakeRun(shipTable({
 		"gh run watch": { code: 1 },
-		"gh run view": { stdout: log },
+		"gh run view": view("failure", log),
 	}));
 	await assert.rejects(ship(appDir(), f.run, async () => 200, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /line 60/);
@@ -152,6 +157,8 @@ const prTable = (over: T = {}): T => ({
 	"git rev-parse HEAD": { stdout: `${SHA}\n` },
 	"gh run list --repo thats-it-dev/foo --commit": { stdout: JSON.stringify([{ databaseId: 9 }]) },
 	"gh run watch": {},
+	"gh run view": view(),
+	"gh pr view": { code: 1, stderr: "no pull requests found" },
 	"gh api": { stdout: JSON.stringify([{ user: { login: "someone" }, body: "hi" }, comment("83a7f06")]) },
 	...over,
 });
@@ -168,10 +175,12 @@ test("pr happy path: exact calls and preview URL", async () => {
 		"npm test",
 		"npm run e2e",
 		"git push -u origin HEAD",
+		"gh pr view --json url",
 		`gh pr create --repo ${REPO} --title Add x --body Does x`,
 		"git rev-parse HEAD",
 		`gh run list --repo ${REPO} --commit ${SHA} --json databaseId,status,conclusion`,
 		`gh run watch 9 --repo ${REPO} --exit-status`,
+		`gh run view 9 --repo ${REPO} --json jobs`,
 		`gh api repos/${REPO}/issues/5/comments --paginate`,
 	]);
 });
@@ -191,7 +200,7 @@ test("pr refuses on main, dirty tree, and no commits ahead", async () => {
 test("pr red run: error carries the log tail, old preview is not returned", async () => {
 	const f = fakeRun(prTable({
 		"gh run watch": { code: 1 },
-		"gh run view": { stdout: Array.from({ length: 50 }, (_, i) => `row ${i + 1}`).join("\n") },
+		"gh run view": view("failure", Array.from({ length: 50 }, (_, i) => `row ${i + 1}`).join("\n")),
 	}));
 	await assert.rejects(openPr(appDir(), opts, f.run, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /row 50/);
@@ -223,4 +232,41 @@ test("pr ignores a marker comment from a non-bot user and handles concatenated p
 	}));
 	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
 	assert.equal(r.preview, `https://feat-x.${SUB}`);
+});
+
+test("ship: a green run whose deploy step was skipped fails with a plain reason", async () => {
+	const f = fakeRun(shipTable({ "gh run view": view("skipped") }));
+	await assert.rejects(ship(appDir(), f.run, async () => 200, { clock: clock() }), /deploy step was skipped.*Cloudflare secrets/);
+});
+
+test("ship: a skipped-deploy success on main does not count as already shipped", async () => {
+	const f = fakeRun(shipTable({
+		"gh run list --repo thats-it-dev/foo --branch main --workflow deploy.yml --status success": { stdout: JSON.stringify([{ headSha: SHA, databaseId: 2 }]) },
+		"gh run view": view("skipped"),
+	}));
+	await assert.rejects(ship(appDir(), f.run, async () => 200, { clock: clock() }), /skipped/);
+	assert.ok(f.lines().includes("git push origin main"));
+});
+
+test("pr: a skipped deploy step is an error, not 'no preview'", async () => {
+	const f = fakeRun(prTable({ "gh run view": view("skipped") }));
+	await assert.rejects(openPr(appDir(), opts, f.run, { clock: clock() }), /deploy step was skipped/);
+	assert.ok(!f.lines().some((l) => l.startsWith("gh api")));
+});
+
+test("pr reuses an existing PR and only pushes", async () => {
+	const f = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/5` }) } }));
+	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
+	assert.equal(r.pr, `https://github.com/${REPO}/pull/5`);
+	assert.ok(f.lines().includes("git push -u origin HEAD"));
+	assert.ok(!f.lines().some((l) => l.startsWith("gh pr create")));
+});
+
+test("a stuck run watch times out with the run URL", async () => {
+	const base = fakeRun(shipTable());
+	const run: typeof base.run = async (cmd, args, o) => {
+		if (cmd === "gh" && args[1] === "watch") return { code: 1, stdout: "", stderr: "timed out", timedOut: true };
+		return base.run(cmd, args, o);
+	};
+	await assert.rejects(ship(appDir(), run, async () => 200, { clock: clock(), watchTimeoutMs: 60_000 }), /actions\/runs\/42/);
 });
