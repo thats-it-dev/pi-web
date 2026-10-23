@@ -13,7 +13,7 @@ const tmp = () => mkdtempSync(join(tmpdir(), "thatsit-"));
 function table(over: Record<string, Reply | ((c: { args: string[] }) => Reply)> = {}) {
 	return {
 		"gh repo view": { code: 1, stderr: "Could not resolve to a Repository" },
-		"cf pages list": { stdout: "[]" },
+		"cf pages get": { code: 1, stderr: "[8000007] Project not found." },
 		"cf dns records list": { stdout: "[]" },
 		"gh repo create": {},
 		"gh repo clone": (c: { args: string[] }) => {
@@ -38,7 +38,7 @@ test("runs the seven steps in order with exact arguments", async () => {
 	const r = await newApp({ ...base, appsDir }, f.run);
 	assert.deepEqual(r, { dir, pagesSubdomain: SUB });
 	const l = f.lines();
-	const mut = l.filter((x) => !/^(gh repo view|cf pages list|cf dns records list|cf pages domains get|git (rev-parse|remote|log))/.test(x));
+	const mut = l.filter((x) => !/^(gh repo view|cf pages get|cf dns records list|cf pages domains get|git (rev-parse|remote|log))/.test(x));
 	assert.deepEqual(mut, [
 		"gh repo create thats-it-dev/foo --public --template thats-it-dev/app-template",
 		`gh repo clone thats-it-dev/foo ${dir}`,
@@ -88,7 +88,7 @@ function resumeTable(appsDir: string, over = {}) {
 		"gh repo view": { stdout: '{"name":"foo"}' },
 		"git remote get-url": { stdout: "https://github.com/thats-it-dev/foo.git\n" },
 		"git log": { stdout: "Configure foo\n" },
-		"cf pages list": { stdout: JSON.stringify([{ name: "foo", subdomain: SUB }]) },
+		"cf pages get": { stdout: JSON.stringify({ name: "foo", subdomain: SUB }) },
 		"cf pages domains get": { stdout: '{"name":"foo.thatsit.app"}' },
 		"cf dns records list": { stdout: JSON.stringify([{ name: "foo.thatsit.app", type: "CNAME", content: SUB }]) },
 		...over,
@@ -106,7 +106,7 @@ test("resume with everything present makes no create calls", async () => {
 test("resume after repo created but pages failed finishes the rest", async () => {
 	const appsDir = tmp();
 	const f = fakeRun(resumeTable(appsDir, {
-		"cf pages list": { stdout: "[]" },
+		"cf pages get": { code: 1, stderr: "[8000007] Project not found." },
 		"cf pages domains get": { code: 1 },
 		"cf dns records list": { stdout: "[]" },
 	}));
@@ -141,4 +141,12 @@ test("resume with a checkout of a different repo fails", async () => {
 	const appsDir = tmp();
 	const f = fakeRun(resumeTable(appsDir, { "git remote get-url": { stdout: "https://github.com/someone/else.git\n" } }));
 	await assert.rejects(newApp({ ...base, resume: true, appsDir }, f.run), /not a clone/);
+});
+
+test("fresh run refuses an existing checkout dir before any create call", async () => {
+	const appsDir = tmp();
+	mkdirSync(join(appsDir, "foo"));
+	const f = fakeRun(table());
+	await assert.rejects(newApp({ ...base, appsDir }, f.run), /already exists/);
+	assert.ok(!f.lines().some((x) => x.includes("create")));
 });

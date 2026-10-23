@@ -11,7 +11,8 @@ export const realRun: Run = (cmd, args, opts = {}) =>
 			const code = typeof err.code === "number" ? err.code : 1;
 			resolve({ code, stdout, stderr: stderr || err.message });
 		});
-		if (opts.input !== undefined) child.stdin?.end(opts.input);
+		// Close stdin right away so a prompting command fails instead of hanging.
+		child.stdin?.end(opts.input);
 	});
 
 export function fail(cmd: string, args: string[], r: RunResult): Error {

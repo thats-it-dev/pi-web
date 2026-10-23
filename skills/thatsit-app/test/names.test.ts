@@ -5,7 +5,7 @@ import { fakeRun } from "./helpers.ts";
 
 const free = {
 	"gh repo view": { code: 1, stderr: "Could not resolve to a Repository" },
-	"cf pages list": { stdout: JSON.stringify([{ name: "other", subdomain: "other.pages.dev" }]) },
+	"cf pages get": { code: 1, stderr: "[8000007] Project not found." },
 	"cf dns records list": { stdout: "[]" },
 };
 
@@ -38,7 +38,7 @@ test("GitHub repo exists", async () => {
 });
 
 test("Pages project exists", async () => {
-	const f = fakeRun({ ...free, "cf pages list": { stdout: JSON.stringify([{ name: "foo", subdomain: "foo.pages.dev" }]) } });
+	const f = fakeRun({ ...free, "cf pages get": { stdout: JSON.stringify({ name: "foo", subdomain: "foo.pages.dev" }) } });
 	const r = await checkName("foo", f.run);
 	assert.match(r.ok ? "" : r.reason, /Pages project exists/);
 });
@@ -51,6 +51,6 @@ test("DNS record exists", async () => {
 });
 
 test("a failing lookup is an error, not 'free'", async () => {
-	const f = fakeRun({ ...free, "cf pages list": { code: 1, stderr: "auth expired" } });
+	const f = fakeRun({ ...free, "cf pages get": { code: 1, stderr: "auth expired" } });
 	await assert.rejects(checkName("foo", f.run), /auth expired/);
 });

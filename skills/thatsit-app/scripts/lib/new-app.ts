@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkName, dnsRecords, listPages, repoExists, ORG, ZONE, NAME_RE } from "./names.ts";
+import { checkName, dnsRecords, getPage, repoExists, ORG, ZONE, NAME_RE } from "./names.ts";
 import { fail, must, type Run } from "./run.ts";
 
 export type NewAppOpts = { name: string; title: string; description: string; color: string; resume: boolean; appsDir: string };
@@ -17,6 +17,8 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	if (!o.resume) {
 		const c = await checkName(name, run);
 		if (!c.ok) throw new Error(c.reason);
+		// Fail before any create call, not after the repo exists.
+		if (existsSync(join(o.appsDir, name))) throw new Error(`${join(o.appsDir, name)} already exists`);
 	}
 
 	// 2. repo from template
@@ -28,7 +30,6 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	mkdirSync(o.appsDir, { recursive: true });
 	const dir = join(o.appsDir, name);
 	if (existsSync(dir)) {
-		if (!o.resume) throw new Error(`${dir} already exists`);
 		const r = await run("git", ["remote", "get-url", "origin"], { cwd: dir });
 		if (r.code !== 0 || !r.stdout.trim().replace(/\.git$/, "").endsWith(`${ORG}/${name}`)) {
 			throw new Error(`${dir} exists but is not a clone of ${ORG}/${name}`);
@@ -55,7 +56,7 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	}
 
 	// 5. Pages project; the real subdomain may carry a suffix, so always read it back
-	const existing = o.resume ? (await listPages(run)).find((p) => p.name === name) : undefined;
+	const existing = o.resume ? await getPage(name, run) : undefined;
 	let pagesSubdomain: string;
 	if (existing) pagesSubdomain = existing.subdomain;
 	else {

@@ -17,10 +17,13 @@ export async function repoExists(name: string, run: Run): Promise<boolean> {
 	throw fail("gh", args, r);
 }
 
-export async function listPages(run: Run): Promise<{ name: string; subdomain: string }[]> {
-	const r = await run("cf", ["pages", "list"]);
-	if (r.code !== 0) throw fail("cf", ["pages", "list"], r);
-	return JSON.parse(r.stdout);
+// `cf pages list` is paginated, so look the project up by name instead.
+export async function getPage(name: string, run: Run): Promise<{ name: string; subdomain: string } | null> {
+	const args = ["pages", "get", name];
+	const r = await run("cf", args);
+	if (r.code === 0) return JSON.parse(r.stdout);
+	if (/Project not found/i.test(r.stderr + r.stdout)) return null;
+	throw fail("cf", args, r);
 }
 
 export type DnsRecord = { name: string; type: string; content: string };
@@ -36,7 +39,7 @@ export async function checkName(name: string, run: Run): Promise<CheckResult> {
 	if (!NAME_RE.test(name)) return { ok: false, reason: `invalid name "${name}": use 1-30 lowercase letters, digits or hyphens, starting with a letter` };
 	if (RESERVED.includes(name)) return { ok: false, reason: `reserved name "${name}"` };
 	if (await repoExists(name, run)) return { ok: false, reason: `GitHub repo exists: ${ORG}/${name}` };
-	if ((await listPages(run)).some((p) => p.name === name)) return { ok: false, reason: `Pages project exists: ${name}` };
+	if (await getPage(name, run)) return { ok: false, reason: `Pages project exists: ${name}` };
 	if ((await dnsRecords(name, run)).length > 0) return { ok: false, reason: `DNS record exists: ${name}.${ZONE}` };
 	return { ok: true };
 }
