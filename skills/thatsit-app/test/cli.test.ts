@@ -23,3 +23,10 @@ test("usage error exits 2", () => {
 		assert.equal((e as { status: number }).status, 2);
 	}
 });
+
+test("parseArgs ship and pr", () => {
+	assert.deepEqual(parseArgs(["ship", "/x/foo"]), { cmd: "ship", name: "/x/foo" });
+	assert.deepEqual(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B"]), { cmd: "pr", name: "/x/foo", title: "T", body: "B" });
+	assert.equal(parseArgs(["pr", "/x/foo", "--title", "T"]), null);
+	assert.equal(parseArgs(["ship", "/x/foo", "--title", "T"]), null);
+});
