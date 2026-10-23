@@ -10,42 +10,42 @@ out at `~/workspace/apps/<name>`, and served at `https://<name>.thatsit.app`.
 All GitHub and Cloudflare work goes through one CLI. Do not run `gh repo create`,
 `cf` or `wrangler` yourself.
 
-```bash
-node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts <subcommand> ...
-```
-
 The CLI prints progress, then one last line `RESULT {...json...}`.
 Exit 0 means done; exit 1 means failed, and the reason is on stderr and in `RESULT`;
 exit 2 means you typed the command wrong. `ship` and `pr` wait for CI and can take
 20 minutes or more: if your bash tool takes a timeout, give it 2400 seconds.
 Copy URLs from `RESULT` into your reply exactly. Never guess a URL.
+Each bash call starts in the session folder, so a `cd` does not carry over: start
+every app command with `cd ~/workspace/apps/<name> &&` and edit files by full path.
 
 ## New app
 
 1. **Name.** Pick a short name: lowercase letters, digits and `-`, starting with a
-   letter, at most 30 characters. Never use `pi`, `kit`, `www`, `app`, `api`, `mail`
-   or `app-template`. Ask Michael in one line, then stop and wait for his answer:
+   letter, not ending with `-`, at most 30 characters. Never use `pi`, `kit`, `www`,
+   `app`, `api`, `mail` or `app-template`. Ask Michael in one line, then stop and wait for his answer:
    `I'll call it <name>, at https://<name>.thatsit.app. OK?`
 2. **Check.** Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts check <name>`
-   On exit 1 the reason says where the name is taken. Pick another name and go
-   back to step 1.
+   If exit 1 says `invalid name`, `reserved name` or `... exists`, pick another name
+   and go back to step 1. Any other exit 1 (for example `gh ... failed` or
+   `cf ... failed`): stop and tell Michael, quoting the stderr line.
 3. **Create.** Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts new <name> --title "<Title>" --description "<one sentence>"`
    Add `--color "#RRGGBB"` only if Michael asked for an icon color; that is the only
    place a hex color is allowed. On success `RESULT` has `dir` and `url`.
-   If it fails midway, fix the cause and run the same command with `--resume` added.
-4. **Write the app** in `~/workspace/apps/<name>` (`cd` there first):
-   - Remove `data-shell` from the `<html>` tag in `index.html` (single-page layout).
-   - Replace all of `src/app-main.ts` (start from the skeleton below). Put extra
-     modules in new files under `src/`; put unit tests for plain logic in `test/`.
-   - Delete `e2e/starter.spec.ts`. Keep `e2e/app.spec.ts`.
-   - Add `e2e/<name>.spec.ts` that tests the app's main behavior (example below).
-   - Use the shell layout (keep `data-shell`, `tk-shell`, `tk-header`) only if the
-     app really needs several pages and a menu. See the template `README.md`, "Layouts".
-5. **Test.** Run `npm run typecheck && npm test && npm run e2e`. Fix and rerun until
-   all three pass.
-6. **Commit.** `git add -A && git commit -m "First version of <name>"`
+   On exit 1, see "When something fails" for whether to rerun with `--resume`.
+4. **Write the app** in `~/workspace/apps/<name>` (full paths below):
+   - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html`.
+   - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the
+     skeleton below). Extra modules go in new files under `src/`; unit tests for
+     plain logic go in `test/`.
+   - Run `cd ~/workspace/apps/<name> && rm e2e/starter.spec.ts`. Keep `e2e/app.spec.ts`.
+   - Add `~/workspace/apps/<name>/e2e/<name>.spec.ts` that tests the app's main
+     behavior (example below).
+   - Only an app with several pages and a menu keeps `data-shell` and the shell.
+5. **Test.** Run `cd ~/workspace/apps/<name> && npm run typecheck && npm test && npm run e2e`.
+   Fix and rerun until all three pass.
+6. **Commit.** `cd ~/workspace/apps/<name> && git add -A && git commit -m "First version of <name>"`
 7. **Ship.** Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/<name>`
 8. **Reply.** If `RESULT` has `"pending":false`, give Michael its `url`. If
@@ -57,10 +57,10 @@ Copy URLs from `RESULT` into your reply exactly. Never guess a URL.
 ## Change an existing app
 
 1. `cd ~/workspace/apps/<name> && git switch main && git pull`
-2. `git switch -c <short-branch>` (for example `dark-mode-toggle`).
-3. Make the edit. Update or add the e2e test. Run
-   `npm run typecheck && npm test && npm run e2e` until green.
-4. `git add -A && git commit -m "<what changed>"`
+2. `cd ~/workspace/apps/<name> && git switch -c <short-branch>` (e.g. `dark-mode-toggle`).
+3. Edit files by full path, update or add the e2e test, then run
+   `cd ~/workspace/apps/<name> && npm run typecheck && npm test && npm run e2e` until green.
+4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
 5. Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
 6. Reply with the `pr` and `preview` URLs from `RESULT`.
@@ -129,14 +129,24 @@ test("add one increases the count", async ({ page }) => {
 
 ## When something fails
 
-- `new` failed midway: fix the cause, rerun the same `new` command with `--resume`.
+- `new` failed: if the error starts with `invalid name`, `reserved name`, `color must`,
+  `GitHub repo exists`, `Pages project exists`, `DNS record exists`, `gh repo view`,
+  `cf pages get`, `cf dns records list` or `gh repo create`, or ends in `already exists`,
+  nothing was created: fix it and rerun without `--resume` (a name problem means a new
+  name, back to step 1). Any other error came after the repo was made: fix the cause
+  and rerun the same command with `--resume` added.
 - `npm ... failed; fix it before pushing`: the CLI ran the tests for you. Fix, commit,
   rerun the same command.
-- `deploy run ... failed`: the error ends with the last lines of the failing CI step.
+- `deploy run ... failed in`: the error ends with the last lines of the failing CI step.
   Fix that, commit, and rerun the same `ship` or `pr`. A rerun of `pr` updates the same
   PR and its preview comment.
-- `there are uncommitted changes`: run `git add -A && git commit -m "..."`, then rerun.
+- `deploy step was skipped`: the org secrets or `app.config.json` need Michael. Stop and
+  tell him; do not rerun.
+- `did not finish within`: CI is slow or stuck. Give Michael the run URL from the error
+  and stop; do not push again.
+- `there are uncommitted changes`: run `cd ~/workspace/apps/<name> && git add -A && git commit -m "..."`, then rerun.
 - `pr will not run on main`: do Change step 2 first.
+- `ship only works on the main branch`: run `cd ~/workspace/apps/<name> && git switch main`, then rerun.
 - Stop and tell Michael (quote the reason from `RESULT`) when the same command fails
   with exit 1 twice and you can't fix it, or when the error mentions login,
   permissions, secrets or a token.
