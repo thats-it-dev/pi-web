@@ -34,6 +34,9 @@ describe.skipIf(!existsSync(dist) && !process.env.CI)("kit dist (run `npm run bu
 	it("_headers allows cross-origin use", () => {
 		expect(read("_headers")).toMatch(/^\/\*\n\s+Access-Control-Allow-Origin: \*/);
 	});
+	it("_headers serves type declarations as text", () => {
+		expect(read("_headers")).toMatch(/^\/kit\.d\.ts\n\s+Content-Type: text\/plain/m);
+	});
 	it("api.json lists the core exports", () => {
 		const { exports } = JSON.parse(read("api.json"));
 		for (const name of ["sharedStyles", "toast", "trackViewport"]) expect(exports).toContain(name);

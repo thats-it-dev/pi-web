@@ -4,3 +4,7 @@
 /fonts/*
   ! Cache-Control
   Cache-Control: public, max-age=86400
+/kit.d.ts
+  Content-Type: text/plain; charset=utf-8
+/types/*
+  Content-Type: text/plain; charset=utf-8
