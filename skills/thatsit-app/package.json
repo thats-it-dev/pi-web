@@ -1,0 +1,14 @@
+{
+	"name": "@pi-web/thatsit-app-skill",
+	"private": true,
+	"type": "module",
+	"version": "0.1.0",
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": {
+		"@types/node": "26.6.5",
+		"typescript": "5.9.3"
+	}
+}

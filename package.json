@@ -2,12 +2,12 @@
 	"name": "pi-web",
 	"private": true,
 	"type": "module",
-	"workspaces": ["shared", "hub", "bridge", "app", "theme", "kit"],
+	"workspaces": ["shared", "hub", "bridge", "app", "theme", "kit", "skills/thatsit-app"],
 	"engines": { "node": ">=22.18" },
 	"scripts": {
-		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app && npm run test -w kit && npm run test:watch",
+		"test": "npm run test -w shared && npm run test -w hub && npm run test -w bridge && npm run test -w app && npm run test -w kit && npm run test -w skills/thatsit-app && npm run test:watch",
 		"test:watch": "node --test watch/app/test/ watch/face/test/",
-		"typecheck": "npm run typecheck -w shared && npm run typecheck -w hub && npm run typecheck -w bridge && npm run typecheck -w app && npm run typecheck -w kit",
+		"typecheck": "npm run typecheck -w shared && npm run typecheck -w hub && npm run typecheck -w bridge && npm run typecheck -w app && npm run typecheck -w kit && npm run typecheck -w skills/thatsit-app",
 		"hub": "npm run start -w hub",
 		"dev": "npm run dev -w app"
 	}
