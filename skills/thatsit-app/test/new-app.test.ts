@@ -12,6 +12,7 @@ const tmp = () => mkdtempSync(join(tmpdir(), "thatsit-"));
 
 function table(over: Record<string, Reply | ((c: { args: string[] }) => Reply)> = {}) {
 	return {
+		"gh api user": { stdout: JSON.stringify({ id: 42, login: "octo", name: "Octo Cat" }) },
 		"gh repo view": { code: 1, stderr: "Could not resolve to a Repository" },
 		"cf pages get": { code: 1, stderr: "[8000007] Project not found." },
 		"cf dns records list": { stdout: "[]" },
@@ -38,10 +39,12 @@ test("runs the seven steps in order with exact arguments", async () => {
 	const r = await newApp({ ...base, appsDir }, f.run);
 	assert.deepEqual(r, { dir, pagesSubdomain: SUB });
 	const l = f.lines();
-	const mut = l.filter((x) => !/^(gh repo view|cf pages get|cf dns records list|cf pages domains get|git (rev-parse|remote|log))/.test(x));
+	const mut = l.filter((x) => !/^(gh api user|gh repo view|cf pages get|cf dns records list|cf pages domains get|git (rev-parse|remote|log))/.test(x));
 	assert.deepEqual(mut, [
 		"gh repo create thats-it-dev/foo --public --template thats-it-dev/app-template",
 		`gh repo clone thats-it-dev/foo ${dir}`,
+		"git config user.name Octo Cat",
+		"git config user.email 42+octo@users.noreply.github.com",
 		"npm ci",
 		"npm run icons",
 		"git add -A",
@@ -149,4 +152,35 @@ test("fresh run refuses an existing checkout dir before any create call", async 
 	const f = fakeRun(table());
 	await assert.rejects(newApp({ ...base, appsDir }, f.run), /already exists/);
 	assert.ok(!f.lines().some((x) => x.includes("create")));
+});
+
+test("identity is resolved before any create and set clone-locally; no login name falls back to login", async () => {
+	const f = fakeRun(table({ "gh api user": { stdout: JSON.stringify({ id: 7, login: "bot", name: null }) } }));
+	const appsDir = tmp();
+	await newApp({ ...base, appsDir }, f.run);
+	const l = f.lines();
+	assert.ok(l.indexOf("gh api user --jq {id,login,name}") >= 0);
+	assert.ok(l.indexOf("gh api user --jq {id,login,name}") < l.findIndex((x) => x.startsWith("gh repo create")));
+	assert.ok(l.indexOf("git config user.name bot") > l.findIndex((x) => x.startsWith("gh repo clone")));
+	assert.ok(l.indexOf("git config user.email 7+bot@users.noreply.github.com") < l.indexOf("git commit -m Configure foo"));
+	for (const c of f.calls.filter((c) => c.args[0] === "config")) assert.ok(!c.args.includes("--global"));
+});
+
+test("gh api user failure aborts before anything is created", async () => {
+	const f = fakeRun(table({ "gh api user": { code: 1, stderr: "gh auth login" } }));
+	await assert.rejects(newApp({ ...base, appsDir: tmp() }, f.run), /GitHub account identity/);
+	assert.ok(!f.lines().some((x) => x.includes("create") || x.includes("clone")));
+});
+
+test("resume with a missing repo refuses and creates nothing", async () => {
+	const f = fakeRun(table());
+	await assert.rejects(newApp({ ...base, resume: true, appsDir: tmp() }, f.run), /nothing to resume: thats-it-dev\/foo doesn't exist — run new without --resume/);
+	assert.ok(!f.lines().some((x) => x.includes("create") || x.includes("clone")));
+});
+
+test("resume with an existing checkout sets the clone-local identity", async () => {
+	const appsDir = tmp();
+	const f = fakeRun(resumeTable(appsDir));
+	await newApp({ ...base, resume: true, appsDir }, f.run);
+	assert.ok(f.lines().includes("git config user.name Octo Cat"));
 });

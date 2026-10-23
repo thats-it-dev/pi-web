@@ -27,9 +27,11 @@ export async function openPr(
 	await localChecks(dir, run);
 	await must(run, "git", ["push", "-u", "origin", "HEAD"], { cwd: dir });
 	// A rerun on a branch that already has a PR (fixing a red run) only pushes.
-	const existing = await run("gh", ["pr", "view", "--json", "url"], { cwd: dir });
-	const prUrl = existing.code === 0
-		? JSON.parse(existing.stdout).url
+	const existing = await run("gh", ["pr", "view", "--json", "url,state"], { cwd: dir });
+	// `gh pr view` also finds closed/merged PRs for the branch; only an open one is reused.
+	const prInfo = existing.code === 0 ? JSON.parse(existing.stdout) : undefined;
+	const prUrl = prInfo?.state === "OPEN"
+		? prInfo.url
 		: (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
 	const num = prUrl.match(/\/pull\/(\d+)$/)?.[1];
 	if (!num) throw new Error(`could not read the PR number from: ${prUrl}`);

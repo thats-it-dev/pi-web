@@ -33,7 +33,7 @@ every app command with `cd ~/workspace/apps/<name> &&` and edit files by full pa
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts new <name> --title "<Title>" --description "<one sentence>"`
    Add `--color "#RRGGBB"` only if Michael asked for an icon color; that is the only
    place a hex color is allowed. On success `RESULT` has `dir` and `url`.
-   On exit 1, see "When something fails" for whether to rerun with `--resume`.
+   On exit 1, see "When something fails".
 4. **Write the app** in `~/workspace/apps/<name>` (full paths below):
    - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html`.
    - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the
@@ -52,8 +52,7 @@ every app command with `cd ~/workspace/apps/<name> &&` and edit files by full pa
    `"pending":true`, say the custom domain is still validating, give the `url` from
    `RESULT` (a pages.dev link) and say `https://<name>.thatsit.app` will work soon.
 
-`ship` works once per app. If it says the app `is already shipped`, use **Change**.
-
+If `ship` says `is already shipped`, use **Change**.
 ## Change an existing app
 
 1. `cd ~/workspace/apps/<name> && git switch main && git pull`
@@ -64,9 +63,7 @@ every app command with `cd ~/workspace/apps/<name> &&` and edit files by full pa
 5. Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
 6. Reply with the `pr` and `preview` URLs from `RESULT`.
-
-Never merge a PR, never run `gh pr merge`, never push to `main` after the first
-version. Michael merges.
+Never merge a PR (`gh pr merge`) or push to `main` after the first version.
 
 ## Skeleton: single-page `src/app-main.ts`
 
@@ -99,7 +96,7 @@ export class AppMain extends LitElement {
 customElements.define("app-main", AppMain);
 ```
 
-Render into the shadow root as above: never override `createRenderRoot`.
+Never override `createRenderRoot`.
 
 ## Example `e2e/<name>.spec.ts`
 
@@ -131,10 +128,12 @@ test("add one increases the count", async ({ page }) => {
 
 - `new` failed: if the error starts with `invalid name`, `reserved name`, `color must`,
   `GitHub repo exists`, `Pages project exists`, `DNS record exists`, `gh repo view`,
-  `cf pages get`, `cf dns records list` or `gh repo create`, or ends in `already exists`,
-  nothing was created: fix it and rerun without `--resume` (a name problem means a new
-  name, back to step 1). Any other error came after the repo was made: fix the cause
-  and rerun the same command with `--resume` added.
+  `cf pages get`, `cf dns records list`, `gh repo create` or `could not read the GitHub
+  account identity`, or ends in `already exists`, nothing was created: fix it and rerun
+  without `--resume` (a name problem means a new name, back to step 1). Any other error
+  came after the repo was made: from then on use `--resume` with the same name and never
+  pick a new one. Fix the cause and rerun the same command with `--resume`; if it fails
+  twice, stop and tell Michael.
 - `npm ... failed; fix it before pushing`: the CLI ran the tests for you. Fix, commit,
   rerun the same command.
 - `deploy run ... failed in`: the error ends with the last lines of the failing CI step.

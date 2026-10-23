@@ -13,8 +13,24 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	if (!/^#[0-9A-Fa-f]{6}$/.test(o.color)) throw new Error(`color must look like #RRGGBB, got "${o.color}"`);
 	if (!NAME_RE.test(name)) throw new Error(`invalid name "${name}"`);
 
+	// The machine may have no global git identity; resolve one from the gh account before creating anything.
+	const idArgs = ["api", "user", "--jq", "{id,login,name}"];
+	const idr = await run("gh", idArgs);
+	if (idr.code !== 0) throw new Error(`could not read the GitHub account identity (needed for git commits): ${fail("gh", idArgs, idr).message}`);
+	let who: { id: number; login: string; name?: string | null };
+	try {
+		who = JSON.parse(idr.stdout);
+	} catch {
+		throw new Error(`could not read the GitHub account identity: unexpected output from gh api user: ${idr.stdout.slice(0, 200)}`);
+	}
+	if (!who.login || !who.id) throw new Error("could not read the GitHub account identity: gh api user returned no id/login");
+	const gitName = who.name || who.login;
+	const gitEmail = `${who.id}+${who.login}@users.noreply.github.com`;
+
 	// 1. name check (a resume expects its own half-made resources to exist)
-	if (!o.resume) {
+	if (o.resume) {
+		if (!(await repoExists(name, run))) throw new Error(`nothing to resume: ${ORG}/${name} doesn't exist — run new without --resume`);
+	} else {
 		const c = await checkName(name, run);
 		if (!c.ok) throw new Error(c.reason);
 		// Fail before any create call, not after the repo exists.
@@ -44,6 +60,9 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 			await sleep(2000);
 		}
 	}
+
+	await must(run, "git", ["config", "user.name", gitName], { cwd: dir });
+	await must(run, "git", ["config", "user.email", gitEmail], { cwd: dir });
 
 	// 4. configure
 	if (!(o.resume && (await configured(dir, name, run)))) {

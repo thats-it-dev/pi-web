@@ -175,7 +175,7 @@ test("pr happy path: exact calls and preview URL", async () => {
 		"npm test",
 		"npm run e2e",
 		"git push -u origin HEAD",
-		"gh pr view --json url",
+		"gh pr view --json url,state",
 		`gh pr create --repo ${REPO} --title Add x --body Does x`,
 		"git rev-parse HEAD",
 		`gh run list --repo ${REPO} --commit ${SHA} --json databaseId,status,conclusion`,
@@ -255,7 +255,7 @@ test("pr: a skipped deploy step is an error, not 'no preview'", async () => {
 });
 
 test("pr reuses an existing PR and only pushes", async () => {
-	const f = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/5` }) } }));
+	const f = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/5`, state: "OPEN" }) } }));
 	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
 	assert.equal(r.pr, `https://github.com/${REPO}/pull/5`);
 	assert.ok(f.lines().includes("git push -u origin HEAD"));
@@ -269,4 +269,15 @@ test("a stuck run watch times out with the run URL", async () => {
 		return base.run(cmd, args, o);
 	};
 	await assert.rejects(ship(appDir(), run, async () => 200, { clock: clock(), watchTimeoutMs: 60_000 }), /actions\/runs\/42/);
+});
+
+test("pr: an existing OPEN PR is reused, a merged one is not", async () => {
+	const url = `https://github.com/${REPO}/pull/5`;
+	const open = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url, state: "OPEN" }) } }));
+	await openPr(appDir(), opts, open.run, { clock: clock() });
+	assert.ok(!open.lines().some((l) => l.startsWith("gh pr create")));
+	const merged = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/2`, state: "MERGED" }) } }));
+	const r = await openPr(appDir(), opts, merged.run, { clock: clock() });
+	assert.ok(merged.lines().some((l) => l.startsWith("gh pr create")));
+	assert.equal(r.pr, url);
 });
