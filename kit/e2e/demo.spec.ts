@@ -39,3 +39,18 @@ test("toast shows its message", async ({ page }) => {
 	await page.getByRole("button", { name: "Show toast" }).click();
 	await expect(page.getByRole("status")).toContainText("Saved");
 });
+
+test("light-DOM .btn is styled from the kit tokens", async ({ page }) => {
+	const s = await page.evaluate(() => {
+		// Resolve --primary to rgb by painting it on a probe element.
+		const probe = document.createElement("div");
+		probe.style.backgroundColor = "var(--primary)";
+		document.body.append(probe);
+		const primary = getComputedStyle(probe).backgroundColor;
+		probe.remove();
+		const b = getComputedStyle(document.querySelector("button.btn:not(.ghost)")!);
+		return { primary, bg: b.backgroundColor, radius: parseFloat(b.borderRadius) };
+	});
+	expect(s.bg).toBe(s.primary);
+	expect(s.radius).toBeGreaterThan(0);
+});

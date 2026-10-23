@@ -35,7 +35,9 @@
 	<tk-sheet id="sheet" heading="Sheet"><p>Slotted content.</p></tk-sheet>
 	<tk-toasts></tk-toasts>
 	<script type="module">
-		import { toast } from "./kit.js";
+		import { toast, sharedStyles } from "./kit.js";
+		// Light DOM doesn't get sharedStyles otherwise, so .btn/.seg would be unstyled.
+		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedStyles.styleSheet];
 		const sheet = document.getElementById("sheet");
 		document.getElementById("open-sheet").addEventListener("click", () => (sheet.open = true));
 		sheet.addEventListener("tk-close", () => (sheet.open = false));
