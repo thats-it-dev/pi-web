@@ -89,6 +89,10 @@ From the app you can watch the terminal session stream, prompt, steer and queue 
 
 pi can show an image in the conversation with its `show_image` tool: give it the path of a PNG, JPEG, GIF or WebP file (up to 2 MB, checked by content, not extension). The app shows it as a figure in the reply. Images load by reference: messages and history carry only a reference, and the app fetches the bytes when the figure scrolls into view. The `show-image` skill in `bridge/skills` tells pi when to use the tool.
 
+## thatsit.app apps
+
+The `thatsit-app` pi skill builds small PWAs at `<name>.thatsit.app` from the app template and turns later changes into PRs with preview links. See [skills/thatsit-app/README.md](skills/thatsit-app/README.md) for install and usage.
+
 ## Notifications
 
 Turn notifications on in settings. A device then gets a push when one of pi-web's headless sessions finishes a run with no app open on it, waits on a dialog, or stops with an error. Tapping the notification opens the session. Terminal sessions don't notify, because you are at the terminal.
