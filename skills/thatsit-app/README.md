@@ -41,7 +41,7 @@ pi reads this section (SKILL.md points here) before it builds an app that needs 
 2. `gateway-checkout`, then `gateway-register <name>` if the app is not in `~/workspace/apps/spark-gateway/apps.json` yet.
 3. `gateway-pr ~/workspace/apps/spark-gateway --title "Register <name>" --body "<what the app uses>"`.
 4. New app: `ship` as usual. Change: `pr ... --gateway-pr <N>` with `number` from step 3.
-5. Reply with the gateway `pr` and `preview`, and the app's `url` (or `pr` and `preview`). Say the app works for real once Michael merges the gateway PR.
+5. Reply with the gateway `pr` and `preview`, and the app's `url` (or `pr` and `preview`). Tell Michael to merge the gateway PR before the app PR; the app works for real once the gateway PR is merged.
 
 If the app is already registered, skip steps 2-3 and run `pr` without `--gateway-pr`.
 
@@ -51,7 +51,7 @@ If the app is already registered, skip steps 2-3 and run `pr` without `--gateway
 2. Write `~/workspace/apps/spark-gateway/apps/<name>/routes.ts` and `routes.test.ts` following `~/workspace/apps/spark-gateway/apps/README.md` exactly (single-line imports, the import allowlist, the banned words). Run `cd ~/workspace/apps/spark-gateway && npm run typecheck && npm test` until green, then commit.
 3. `gateway-pr ~/workspace/apps/spark-gateway --title "..." --body "..."` first.
 4. Then the app: New app steps (ship as usual), or Change steps with `pr ... --gateway-pr <N>`.
-5. Reply with both PR links and both previews (`preview` from `gateway-pr`, `preview` and `gatewayPreview` from `pr`).
+5. Reply with both PR links and both previews (`preview` from `gateway-pr`, `preview` and `gatewayPreview` from `pr`). Tell Michael to merge the gateway PR before the app PR.
 
 **Never:** edit anything under the gateway's `src/` (or anything outside `apps.json` and `apps/<name>/`), merge a PR, or touch `~/.local/share/spark-gateway` or `~/.config/spark-gateway`.
 
@@ -59,7 +59,8 @@ If the app is already registered, skip steps 2-3 and run `pr` without `--gateway
 
 - `test run ... failed in` (GitHub CI) or `spark preview ... failed` (the spark's own run): the error ends with the failing test output. Fix the gateway files, commit, rerun `gateway-pr`; it updates the same PR.
 - `gateway-pr only sends apps.json and apps/<app>/ changes`: restore the listed files to their `main` version (or delete the ones you added), commit, rerun.
-- `is not using gateway preview #N` (app `pr`): the app preview was deployed before the Gateway line was in the PR body. Run `git commit --allow-empty -m "Use gateway preview #N"` in the app, then rerun the same `pr`.
+- `is not using gateway preview #N` (app `pr`): the app preview was deployed before the Gateway line was in the PR body. Run `cd ~/workspace/apps/<name> && git commit --allow-empty -m "Use gateway preview #N"`, then rerun the same `pr`.
+- `predates gateway support` (app `pr --gateway-pr`): the app was made from a template without `src/gateway.ts` or the Gateway step in `deploy.yml`. Stop and tell Michael; nothing was pushed.
 - `is already registered`: skip `gateway-register`. `has no Pages project`: run `new` first.
 - `No preview`, `did not report a preview` or `did not finish within`: give Michael the PR URL and stop.
 

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GATEWAY_REPO, gatewayPreviewUrl } from "./names.ts";
 import { must, type Run } from "./run.ts";
@@ -40,6 +40,16 @@ export async function pushAndOpen(dir: string, repo: string, o: { title: string;
 	return { url, number: prNumber(url) };
 }
 
+// Apps made from an older template lack the client and the CI step that reads the Gateway line.
+export function hasGatewayFiles(dir: string): boolean {
+	if (!existsSync(join(dir, "src", "gateway.ts"))) return false;
+	try {
+		return readFileSync(join(dir, ".github", "workflows", "deploy.yml"), "utf8").includes("gateway-url.ts");
+	} catch {
+		return false;
+	}
+}
+
 export const gatewayLine = (n: number) => `Gateway: ${GATEWAY_REPO}#${n}`;
 
 export async function openPr(
@@ -49,9 +59,12 @@ export async function openPr(
 	opts: PrOpts = {},
 ): Promise<{ pr: string; preview: string; gatewayPreview?: string }> {
 	const clock = opts.clock ?? realClock;
-	const { repo } = appRepo(dir);
+	const { name, repo } = appRepo(dir);
 	if (o.gatewayPr !== undefined && JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway !== true) {
 		throw new Error('--gateway-pr needs "gateway": true in app.config.json; set it, commit, then rerun');
+	}
+	if (o.gatewayPr !== undefined && !hasGatewayFiles(dir)) {
+		throw new Error(`${name} predates gateway support; tell Michael (it needs the current template's gateway files)`);
 	}
 	if ((await branchOf(dir, run)) === "main") throw new Error("pr will not run on main; create one with git switch -c <name>, commit, then run pr");
 	await requireClean(dir, run);
@@ -84,7 +97,7 @@ export async function openPr(
 			// Editing the body starts no run, so a deploy from before the Gateway line was added is not wired to it.
 			const gw = gatewayPreviewUrl(o.gatewayPr);
 			if (!c.body!.split("\n").some((l) => l.trim() === `Gateway preview: ${gw}`)) {
-				throw new Error(`the preview ${url} is not using gateway preview #${o.gatewayPr} (it was deployed before the Gateway line was in the PR body); run git commit --allow-empty -m "Use gateway preview #${o.gatewayPr}", then rerun the same pr`);
+				throw new Error(`the preview ${url} is not using gateway preview #${o.gatewayPr} (it was deployed before the Gateway line was in the PR body); run cd ${dir} && git commit --allow-empty -m "Use gateway preview #${o.gatewayPr}", then rerun the same pr`);
 			}
 			return { pr: prUrl, preview: url, gatewayPreview: gw };
 		}

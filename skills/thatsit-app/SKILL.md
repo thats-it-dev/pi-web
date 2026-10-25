@@ -70,8 +70,8 @@ Only for an app that reads the spark (models, GPU, pi sessions) or keeps data th
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-pr ~/workspace/apps/spark-gateway --title "..." --body "..."`
   If you committed nothing in the gateway checkout (app already registered, no custom routes), skip gateway-pr and --gateway-pr.
 - For an app change, add `--gateway-pr <N>` (`number` from `gateway-pr`) to the app's `pr`. Reply
-  with every `pr` and `preview` URL from the `RESULT`s; the app works for real once Michael merges
-  the gateway PR. Never edit the gateway's `src/`, never merge, never touch `~/.local/share/spark-gateway`.
+  with every `pr` and `preview` URL from the `RESULT`s and tell Michael to merge the gateway PR before
+  the app PR. Never edit the gateway's `src/`, never merge, never touch `~/.local/share/spark-gateway`.
 
 ## Skeleton: single-page `src/app-main.ts`
 
@@ -132,22 +132,22 @@ test("add one increases the count", async ({ page }) => {
 ## When something fails
 
 - `new --resume` failed (any error): keep the name, fix the cause, rerun with `--resume`.
-- `new` failed (without `--resume`): if the error starts with `invalid name`, `reserved name`,
-  `color must`, `GitHub repo exists`, `Pages project exists`, `DNS record exists`, `gh repo view`,
-  `cf pages get`, `cf dns records list`, `gh repo create` or `could not read the GitHub account
-  identity`, or ends in `already exists`, nothing was created: fix it and rerun without `--resume`
-  (a name problem means a new name, back to step 1). Any other error came after the repo was made:
-  from then on use `--resume` with the same name and never pick a new one. Fix the cause and rerun
-  the same command with `--resume`; if it fails twice, stop and tell Michael.
+- `new` failed (without `--resume`): if the error starts with `invalid name`, `reserved name`, `color must`,
+  `GitHub repo exists`, `Pages project exists`, `DNS record exists`, `gh repo view`, `cf pages get`,
+  `cf dns records list`, `gh repo create` or `could not read the GitHub account identity`, or ends in
+  `already exists`, nothing was created: fix it and rerun without `--resume` (a name problem means a new
+  name, back to step 1). Any other error came after the repo was made: from then on use `--resume` with
+  the same name and never pick a new one. Fix the cause and rerun with `--resume`; twice failed: tell Michael.
 - `npm ... failed; fix it before pushing`: the CLI ran the tests for you. Fix, commit, rerun the same command.
 - `deploy run ... failed in` / `test run ... failed in` / `spark preview ... failed`: the error ends
   with the last lines of the failing tests. Fix that, commit, and rerun the same `ship`, `pr` or
   `gateway-pr`. A rerun of `pr` or `gateway-pr` updates the same PR and its preview comment.
 - `deploy step was skipped`: the org secrets or `app.config.json` need Michael. Stop and tell him; do not rerun.
-- `did not finish within`, `did not report a preview` or `No preview`: give Michael the URL from
-  the error and stop; do not push again.
+- `did not finish within`, `did not report a preview` or `No preview`: give Michael the error's URL; stop.
 - `there are uncommitted changes`: run `cd ~/workspace/apps/<name> && git add -A && git commit -m "..."`, then rerun.
 - `pr will not run on main` / `gateway-pr will not run on main`: create a branch first (Change step 2).
+- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr`.
+- `predates gateway support`: stop and tell Michael; the app needs the current template's gateway files.
 - `ship only works on the main branch`: run `cd ~/workspace/apps/<name> && git switch main`, then rerun.
 - Stop and tell Michael (quote the reason from `RESULT`) when the same command fails with exit 1
   twice and you can't fix it, or when the error mentions login, permissions, secrets or a token.

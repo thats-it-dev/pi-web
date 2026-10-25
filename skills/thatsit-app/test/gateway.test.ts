@@ -248,9 +248,13 @@ test("gatewayPreviewUrl is 9500+N", () => {
 // ---- pr --gateway-pr ----
 
 const SUB = "foo-930.pages.dev";
-function appDir(gateway = true) {
+function appDir(gateway = true, files: { client?: boolean; workflow?: string } = {}) {
 	const d = tmp();
 	writeFileSync(join(d, "app.config.json"), JSON.stringify({ name: "foo", gateway }));
+	mkdirSync(join(d, "src"));
+	if (files.client !== false) writeFileSync(join(d, "src", "gateway.ts"), "export {};\n");
+	mkdirSync(join(d, ".github", "workflows"), { recursive: true });
+	writeFileSync(join(d, ".github", "workflows", "deploy.yml"), files.workflow ?? "run: GATEWAY_URL=$(node scripts/gateway-url.ts)\n");
 	return d;
 }
 const appComment = (gw: boolean) => `<!-- thatsit-preview -->\nPreview: https://feat-x.${SUB}\n\nCommit ${SHA.slice(0, 7)}${gw ? `\n\nGateway preview: ${PREVIEW}` : ""}`;
@@ -297,6 +301,17 @@ test("pr --gateway-pr needs \"gateway\": true in app.config.json", async () => {
 	assert.ok(!f.lines().some((l) => l.startsWith("git push")));
 });
 
+test("pr --gateway-pr refuses an app that predates gateway support, before pushing", async () => {
+	for (const files of [{ client: false }, { workflow: "run: npm test\n" }]) {
+		const f = fakeRun(appPrTable());
+		await assert.rejects(
+			openPr(appDir(true, files), { title: "t", body: "b", gatewayPr: 12 }, f.run, { clock: clock() }),
+			/^Error: foo predates gateway support; tell Michael \(it needs the current template's gateway files\)$/,
+		);
+		assert.ok(!f.lines().some((l) => l.startsWith("git push")));
+	}
+});
+
 test("gateway-pr: a failure status without a comment for the head fails after a minute with the status description", async () => {
 	const { dir } = gwDir();
 	const c = clock();
@@ -313,9 +328,10 @@ test("pr --gateway-pr fails when the app preview was not deployed with the Gatew
 		"gh pr view": { stdout: JSON.stringify({ url: "https://github.com/thats-it-dev/foo/pull/5", state: "OPEN", body: "Old body" }) },
 		"gh api": { stdout: JSON.stringify([{ user: { login: "github-actions[bot]" }, body: appComment(false) }]) },
 	}));
-	await assert.rejects(openPr(appDir(), { title: "t", body: "b", gatewayPr: 12 }, f.run, { clock: clock() }), (e: Error) => {
+	const dir = appDir();
+	await assert.rejects(openPr(dir, { title: "t", body: "b", gatewayPr: 12 }, f.run, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /not using gateway preview #12/);
-		assert.match(e.message, /git commit --allow-empty -m "Use gateway preview #12"/);
+		assert.ok(e.message.includes(`cd ${dir} && git commit --allow-empty -m "Use gateway preview #12"`), e.message);
 		return true;
 	});
 });
