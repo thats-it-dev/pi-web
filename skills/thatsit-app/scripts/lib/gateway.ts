@@ -90,7 +90,7 @@ export async function gatewayPr(
 	if ((await branchOf(dir, run)) === "main") throw new Error("gateway-pr will not run on main; create one with git switch -c <name>, commit, then run gateway-pr");
 	await requireClean(dir, run);
 	await requireAhead(dir, run);
-	const changed = (await must(run, "git", ["diff", "--name-only", "origin/main...HEAD"], { cwd: dir })).split("\n").map((s) => s.trim()).filter(Boolean);
+	const changed = (await must(run, "git", ["diff", "--name-only", "--no-renames", "origin/main...HEAD"], { cwd: dir })).split("\n").map((s) => s.trim()).filter(Boolean);
 	const bad = changed.filter((p) => !ALLOWED(p) || p.startsWith("apps/example/"));
 	if (bad.length) throw new Error(`gateway-pr only sends apps.json and apps/<app>/ changes; this branch also changes: ${bad.join(", ")}. Undo those (never edit src/)`);
 	await localChecks(dir, run, [["run", "typecheck"], ["test"]]);

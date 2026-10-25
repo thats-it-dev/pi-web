@@ -80,7 +80,13 @@ export async function openPr(
 		const c = parseComments(out).filter((c) => c.user?.login === "github-actions[bot]" && c.body?.includes("<!-- thatsit-preview -->")).pop();
 		const url = c?.body?.match(/^Preview: (\S+)/m)?.[1];
 		if (url && c?.body?.match(/^Commit (\w+)/m)?.[1] === short) {
-			return o.gatewayPr === undefined ? { pr: prUrl, preview: url } : { pr: prUrl, preview: url, gatewayPreview: gatewayPreviewUrl(o.gatewayPr) };
+			if (o.gatewayPr === undefined) return { pr: prUrl, preview: url };
+			// Editing the body starts no run, so a deploy from before the Gateway line was added is not wired to it.
+			const gw = gatewayPreviewUrl(o.gatewayPr);
+			if (!c.body!.split("\n").some((l) => l.trim() === `Gateway preview: ${gw}`)) {
+				throw new Error(`the preview ${url} is not using gateway preview #${o.gatewayPr} (it was deployed before the Gateway line was in the PR body); run git commit --allow-empty -m "Use gateway preview #${o.gatewayPr}", then rerun the same pr`);
+			}
+			return { pr: prUrl, preview: url, gatewayPreview: gw };
 		}
 		if (clock.now() - start >= wait) throw new Error(`the PR ${prUrl} deployed, but no preview link for commit ${short} was posted within ${wait / 1000}s; check the PR comments`);
 		await clock.sleep(5000);

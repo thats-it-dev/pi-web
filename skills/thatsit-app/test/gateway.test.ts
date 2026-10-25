@@ -135,7 +135,7 @@ const gwPrTable = (over: T = {}): T => ({
 	"git status --porcelain": { stdout: "" },
 	"git fetch origin main": {},
 	"git rev-list --count origin/main..HEAD": { stdout: "1\n" },
-	"git diff --name-only origin/main...HEAD": { stdout: "apps.json\napps/tips/routes.ts\napps/tips/routes.test.ts\n" },
+	"git diff --name-only --no-renames origin/main...HEAD": { stdout: "apps.json\napps/tips/routes.ts\napps/tips/routes.test.ts\n" },
 	"npm run typecheck": {},
 	"npm test": {},
 	"gh pr view": { code: 1, stderr: "no pull requests found" },
@@ -222,8 +222,8 @@ test("gateway-pr refuses main, a dirty tree, changes outside apps/, and a non-ga
 	for (const [over, re] of [
 		[{ "git rev-parse --abbrev-ref HEAD": { stdout: "main\n" } }, /main/],
 		[{ "git status --porcelain": { stdout: " M src/x.ts\n" } }, /uncommitted/],
-		[{ "git diff --name-only origin/main...HEAD": { stdout: "apps/tips/routes.ts\nsrc/server.ts\n" } }, /src\/server\.ts/],
-		[{ "git diff --name-only origin/main...HEAD": { stdout: "apps/README.md\n" } }, /apps\/README\.md/],
+		[{ "git diff --name-only --no-renames origin/main...HEAD": { stdout: "apps/tips/routes.ts\nsrc/server.ts\n" } }, /src\/server\.ts/],
+		[{ "git diff --name-only --no-renames origin/main...HEAD": { stdout: "apps/README.md\n" } }, /apps\/README\.md/],
 		[{ "git remote get-url origin": { stdout: "https://github.com/thats-it-dev/tips.git\n" } }, /spark-gateway/],
 	] as [T, RegExp][]) {
 		const { dir } = gwDir();
@@ -253,6 +253,7 @@ function appDir(gateway = true) {
 	writeFileSync(join(d, "app.config.json"), JSON.stringify({ name: "foo", gateway }));
 	return d;
 }
+const appComment = (gw: boolean) => `<!-- thatsit-preview -->\nPreview: https://feat-x.${SUB}\n\nCommit ${SHA.slice(0, 7)}${gw ? `\n\nGateway preview: ${PREVIEW}` : ""}`;
 const appPrTable = (over: T = {}): T => ({
 	"git rev-parse --abbrev-ref HEAD": { stdout: "feat-x\n" },
 	"git status --porcelain": { stdout: "" },
@@ -268,7 +269,7 @@ const appPrTable = (over: T = {}): T => ({
 	"gh run list": { stdout: JSON.stringify([{ databaseId: 9 }]) },
 	"gh run watch": {},
 	"gh run view": { stdout: JSON.stringify({ jobs: [{ steps: [{ name: "Deploy to Cloudflare Pages", conclusion: "success" }] }] }) },
-	"gh api": { stdout: JSON.stringify([{ user: { login: "github-actions[bot]" }, body: `<!-- thatsit-preview -->\nPreview: https://feat-x.${SUB}\n\nCommit ${SHA.slice(0, 7)}` }]) },
+	"gh api": { stdout: JSON.stringify([{ user: { login: "github-actions[bot]" }, body: appComment(true) }]) },
 	...over,
 });
 
@@ -305,4 +306,45 @@ test("gateway-pr: a failure status without a comment for the head fails after a 
 	}));
 	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: c }), /failed \(health check failed\)/);
 	assert.ok(c.t >= 60_000 && c.t < 2 * 60_000);
+});
+
+test("pr --gateway-pr fails when the app preview was not deployed with the Gateway line", async () => {
+	const f = fakeRun(appPrTable({
+		"gh pr view": { stdout: JSON.stringify({ url: "https://github.com/thats-it-dev/foo/pull/5", state: "OPEN", body: "Old body" }) },
+		"gh api": { stdout: JSON.stringify([{ user: { login: "github-actions[bot]" }, body: appComment(false) }]) },
+	}));
+	await assert.rejects(openPr(appDir(), { title: "t", body: "b", gatewayPr: 12 }, f.run, { clock: clock() }), (e: Error) => {
+		assert.match(e.message, /not using gateway preview #12/);
+		assert.match(e.message, /git commit --allow-empty -m "Use gateway preview #12"/);
+		return true;
+	});
+});
+
+// git reports a rename as the new path only unless --no-renames; a real repo proves the guard sees both sides.
+test("gateway-pr diff guard sees a src/ rename and a src/ deletion", async () => {
+	const { realRun } = await import("../scripts/lib/run.ts");
+	const { execFileSync } = await import("node:child_process");
+	const repo = tmp();
+	const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: repo, stdio: "pipe" });
+	g("init", "-q", "-b", "main");
+	mkdirSync(join(repo, "src"));
+	writeFileSync(join(repo, "src", "server.ts"), "export const a = 1;\n".repeat(20));
+	writeFileSync(join(repo, "src", "other.ts"), "export const b = 2;\n");
+	g("add", "-A");
+	g("commit", "-qm", "base");
+	g("update-ref", "refs/remotes/origin/main", "HEAD");
+	g("switch", "-qc", "x");
+	mkdirSync(join(repo, "apps", "tips"), { recursive: true });
+	g("mv", "src/server.ts", "apps/tips/routes.ts");
+	g("rm", "-q", "src/other.ts");
+	g("commit", "-qm", "sneak");
+	const out = (await realRun("git", ["diff", "--name-only", "--no-renames", "origin/main...HEAD"], { cwd: repo })).stdout;
+	const f = fakeRun(gwPrTable({ "git diff --name-only --no-renames origin/main...HEAD": { stdout: out } }));
+	const { dir } = gwDir();
+	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: clock() }), (e: Error) => {
+		assert.match(e.message, /src\/server\.ts/);
+		assert.match(e.message, /src\/other\.ts/);
+		return true;
+	});
+	assert.ok(!f.lines().some((l) => l.startsWith("git push")));
 });

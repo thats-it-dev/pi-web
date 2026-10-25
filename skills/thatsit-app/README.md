@@ -59,6 +59,7 @@ If the app is already registered, skip steps 2-3 and run `pr` without `--gateway
 
 - `test run ... failed in` (GitHub CI) or `spark preview ... failed` (the spark's own run): the error ends with the failing test output. Fix the gateway files, commit, rerun `gateway-pr`; it updates the same PR.
 - `gateway-pr only sends apps.json and apps/<app>/ changes`: restore the listed files to their `main` version (or delete the ones you added), commit, rerun.
+- `is not using gateway preview #N` (app `pr`): the app preview was deployed before the Gateway line was in the PR body. Run `git commit --allow-empty -m "Use gateway preview #N"` in the app, then rerun the same `pr`.
 - `is already registered`: skip `gateway-register`. `has no Pages project`: run `new` first.
 - `No preview`, `did not report a preview` or `did not finish within`: give Michael the PR URL and stop.
 

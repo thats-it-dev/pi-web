@@ -59,16 +59,16 @@ Never merge a PR (`gh pr merge`) or push to `main` after the first version.
 
 ## Needs spark data
 
-Only for an app that reads the spark (models, GPU, pi sessions) or keeps data there; it works
-only on Michael's tailnet. Read "Spark gateway" in `~/.pi/agent/skills/thatsit-app/README.md` first.
+Only for an app that reads the spark (models, GPU, pi sessions) or keeps data there (tailnet only). Read "Spark gateway" in `~/.pi/agent/skills/thatsit-app/README.md` first.
 - App: set `"gateway": true` in `app.config.json`, use `kv` / `system` from `src/gateway.ts`,
   render `<tk-tailnet-only>` on `OffTailnetError`, stub the gateway in e2e with `page.route`.
 - Gateway checkout `~/workspace/apps/spark-gateway`, before the app's `ship` or `pr`:
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-checkout`
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-register <name>` (if not in `apps.json`; makes a branch)
   Only if `/system/models|gpu|sessions` and the store are not enough: on a branch, write
-  `apps/<name>/routes.ts` + `routes.test.ts` following that repo's `apps/README.md`, commit.
+  `apps/<name>/routes.ts` + `routes.test.ts` following that repo's `apps/README.md`, commit. Then:
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-pr ~/workspace/apps/spark-gateway --title "..." --body "..."`
+  If you committed nothing in the gateway checkout (app already registered, no custom routes), skip gateway-pr and --gateway-pr.
 - For an app change, add `--gateway-pr <N>` (`number` from `gateway-pr`) to the app's `pr`. Reply
   with every `pr` and `preview` URL from the `RESULT`s; the app works for real once Michael merges
   the gateway PR. Never edit the gateway's `src/`, never merge, never touch `~/.local/share/spark-gateway`.

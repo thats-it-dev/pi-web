@@ -40,6 +40,7 @@ test("SKILL.md has the spark gateway flow", () => {
 	assert.match(sec, /[Nn]ever merge/);
 	assert.match(sec, /never edit .*`src\/`/i);
 	assert.match(sec, /~\/\.local\/share\/spark-gateway/);
+	assert.ok(sec.includes("If you committed nothing in the gateway checkout (app already registered, no custom routes), skip gateway-pr and --gateway-pr."), "missing the skip rule");
 });
 
 test("Change says to branch before editing", () => {
