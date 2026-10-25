@@ -31,8 +31,9 @@ export async function requireClean(dir: string, run: Run): Promise<void> {
 }
 
 // Same checks CI runs, so a push is unlikely to go red for something found locally.
-export async function localChecks(dir: string, run: Run): Promise<void> {
-	for (const args of [["run", "typecheck"], ["test"], ["run", "e2e"]]) {
+export const APP_CHECKS = [["run", "typecheck"], ["test"], ["run", "e2e"]];
+export async function localChecks(dir: string, run: Run, checks = APP_CHECKS): Promise<void> {
+	for (const args of checks) {
 		const r = await run("npm", args, { cwd: dir });
 		if (r.code !== 0) {
 			const out = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
@@ -46,15 +47,16 @@ export async function headSha(dir: string, run: Run): Promise<string> {
 }
 
 // A run can take a few seconds to show up after a push.
-export async function findRun(repo: string, sha: string, run: Run, clock: Clock, timeoutMs = RUN_LOOKUP_MS): Promise<number> {
+// `workflow` narrows the lookup to one workflow file of a repo that has several.
+export async function findRun(repo: string, sha: string, run: Run, clock: Clock, timeoutMs = RUN_LOOKUP_MS, workflow?: string): Promise<number> {
 	const start = clock.now();
 	for (;;) {
-		const args = ["run", "list", "--repo", repo, "--commit", sha, "--json", "databaseId,status,conclusion"];
+		const args = ["run", "list", "--repo", repo, "--commit", sha, ...(workflow ? ["--workflow", workflow] : []), "--json", "databaseId,status,conclusion"];
 		const r = await run("gh", args);
 		if (r.code !== 0) throw fail("gh", args, r);
 		const runs: { databaseId: number }[] = JSON.parse(r.stdout || "[]");
 		if (runs.length > 0) return runs[0].databaseId;
-		if (clock.now() - start >= timeoutMs) throw new Error(`no deploy run appeared for commit ${sha.slice(0, 7)} within ${timeoutMs / 1000}s; check ${repo} Actions`);
+		if (clock.now() - start >= timeoutMs) throw new Error(`no ${workflow ? workflow.replace(/\.ya?ml$/, "") : "deploy"} run appeared for commit ${sha.slice(0, 7)} within ${timeoutMs / 1000}s; check ${repo} Actions`);
 		await clock.sleep(5000);
 	}
 }
@@ -74,14 +76,15 @@ export async function deployStepOk(repo: string, id: number, run: Run): Promise<
 }
 
 // Blocks until the run ends; on failure the error carries the tail of the failing step logs.
-export async function watchRun(repo: string, id: number, run: Run, timeoutMs = WATCH_TIMEOUT_MS): Promise<void> {
+// kind "test" is a plain CI run (no deploy step to check).
+export async function watchRun(repo: string, id: number, run: Run, timeoutMs = WATCH_TIMEOUT_MS, kind: "deploy" | "test" = "deploy"): Promise<void> {
 	const r = await run("gh", ["run", "watch", String(id), "--repo", repo, "--exit-status"], { timeoutMs });
-	if (r.timedOut) throw new Error(`deploy run ${id} did not finish within ${timeoutMs / 60_000} min; it may be queued or stuck: https://github.com/${repo}/actions/runs/${id}`);
+	if (r.timedOut) throw new Error(`${kind} run ${id} did not finish within ${Math.ceil(timeoutMs / 60_000)} min; it may be queued or stuck: https://github.com/${repo}/actions/runs/${id}`);
 	if (r.code === 0) {
-		if (!(await deployStepOk(repo, id, run))) throw new Error(`deploy run ${id} finished green but the ${SKIPPED}`);
+		if (kind === "deploy" && !(await deployStepOk(repo, id, run))) throw new Error(`deploy run ${id} finished green but the ${SKIPPED}`);
 		return;
 	}
 	const log = await run("gh", ["run", "view", String(id), "--repo", repo, "--log-failed"]);
 	const tail = log.stdout.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
-	throw new Error(`deploy run ${id} failed in ${repo}. Last lines of the failing step:\n${tail || r.stderr.trim()}`);
+	throw new Error(`${kind} run ${id} failed in ${repo}. Last lines of the failing step:\n${tail || r.stderr.trim()}`);
 }

@@ -1,40 +1,72 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { GATEWAY_REPO, gatewayPreviewUrl } from "./names.ts";
 import { must, type Run } from "./run.ts";
 import { appRepo, branchOf, findRun, headSha, localChecks, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
 
 export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number };
 
-type Comment = { user?: { login?: string }; body?: string };
+export type Comment = { user?: { login?: string }; body?: string };
 
 // --paginate prints one JSON array per page back to back.
-function parseComments(out: string): Comment[] {
+export function parseComments(out: string): Comment[] {
 	return JSON.parse(`[${out.trim().replace(/^\[|\]$/g, "").replace(/\]\s*\[/g, ",")}]`);
 }
 
-export async function openPr(
-	dir: string,
-	o: { title: string; body: string },
-	run: Run,
-	opts: PrOpts = {},
-): Promise<{ pr: string; preview: string }> {
-	const clock = opts.clock ?? realClock;
-	const { repo } = appRepo(dir);
-	if ((await branchOf(dir, run)) === "main") throw new Error("pr will not run on main; create one with git switch -c <name>, commit, then run pr");
-	await requireClean(dir, run);
+export async function requireAhead(dir: string, run: Run): Promise<void> {
 	await must(run, "git", ["fetch", "origin", "main"], { cwd: dir });
 	const ahead = Number((await must(run, "git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: dir })).trim());
 	if (!(ahead > 0)) throw new Error("this branch has no commits ahead of origin/main; commit your change first");
+}
 
-	await localChecks(dir, run);
+// The branch's PR, if one is open. `gh pr view` also finds closed/merged PRs for the branch; only an open one is reused.
+export async function openPrOf(dir: string, run: Run): Promise<{ url: string; number: number; body: string } | undefined> {
+	const r = await run("gh", ["pr", "view", "--json", "url,state,body"], { cwd: dir });
+	const info = r.code === 0 ? JSON.parse(r.stdout) : undefined;
+	return info?.state === "OPEN" ? { url: info.url, number: prNumber(info.url), body: info.body ?? "" } : undefined;
+}
+
+export function prNumber(url: string): number {
+	const num = url.match(/\/pull\/(\d+)$/)?.[1];
+	if (!num) throw new Error(`could not read the PR number from: ${url}`);
+	return Number(num);
+}
+
+// Pushes the branch, then opens a PR unless one is already open. A rerun on a branch that has one (fixing a red run) only pushes.
+export async function pushAndOpen(dir: string, repo: string, o: { title: string; body: string }, run: Run, existing: { url: string; number: number } | undefined): Promise<{ url: string; number: number }> {
 	await must(run, "git", ["push", "-u", "origin", "HEAD"], { cwd: dir });
-	// A rerun on a branch that already has a PR (fixing a red run) only pushes.
-	const existing = await run("gh", ["pr", "view", "--json", "url,state"], { cwd: dir });
-	// `gh pr view` also finds closed/merged PRs for the branch; only an open one is reused.
-	const prInfo = existing.code === 0 ? JSON.parse(existing.stdout) : undefined;
-	const prUrl = prInfo?.state === "OPEN"
-		? prInfo.url
-		: (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
-	const num = prUrl.match(/\/pull\/(\d+)$/)?.[1];
-	if (!num) throw new Error(`could not read the PR number from: ${prUrl}`);
+	if (existing) return existing;
+	const url = (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
+	return { url, number: prNumber(url) };
+}
+
+export const gatewayLine = (n: number) => `Gateway: ${GATEWAY_REPO}#${n}`;
+
+export async function openPr(
+	dir: string,
+	o: { title: string; body: string; gatewayPr?: number },
+	run: Run,
+	opts: PrOpts = {},
+): Promise<{ pr: string; preview: string; gatewayPreview?: string }> {
+	const clock = opts.clock ?? realClock;
+	const { repo } = appRepo(dir);
+	if (o.gatewayPr !== undefined && JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway !== true) {
+		throw new Error('--gateway-pr needs "gateway": true in app.config.json; set it, commit, then rerun');
+	}
+	if ((await branchOf(dir, run)) === "main") throw new Error("pr will not run on main; create one with git switch -c <name>, commit, then run pr");
+	await requireClean(dir, run);
+	await requireAhead(dir, run);
+	await localChecks(dir, run);
+
+	// App CI reads the Gateway line from the PR body of the pull_request event, so it must be there before the push.
+	const existing = await openPrOf(dir, run);
+	const line = o.gatewayPr === undefined ? undefined : gatewayLine(o.gatewayPr);
+	const body = line ? `${o.body}\n\n${line}` : o.body;
+	if (existing && line && !existing.body.split("\n").some((l) => l.trim() === line)) {
+		const kept = existing.body.split("\n").filter((l) => !l.startsWith(`Gateway: ${GATEWAY_REPO}#`)).join("\n").trimEnd();
+		await must(run, "gh", ["pr", "edit", String(existing.number), "--repo", repo, "--body", `${kept}\n\n${line}`], { cwd: dir });
+	}
+	const { url: prUrl, number: num } = await pushAndOpen(dir, repo, { title: o.title, body }, run, existing);
 
 	const sha = await headSha(dir, run);
 	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs);
@@ -47,7 +79,9 @@ export async function openPr(
 		const out = await must(run, "gh", ["api", `repos/${repo}/issues/${num}/comments`, "--paginate"]);
 		const c = parseComments(out).filter((c) => c.user?.login === "github-actions[bot]" && c.body?.includes("<!-- thatsit-preview -->")).pop();
 		const url = c?.body?.match(/^Preview: (\S+)/m)?.[1];
-		if (url && c?.body?.match(/^Commit (\w+)/m)?.[1] === short) return { pr: prUrl, preview: url };
+		if (url && c?.body?.match(/^Commit (\w+)/m)?.[1] === short) {
+			return o.gatewayPr === undefined ? { pr: prUrl, preview: url } : { pr: prUrl, preview: url, gatewayPreview: gatewayPreviewUrl(o.gatewayPr) };
+		}
 		if (clock.now() - start >= wait) throw new Error(`the PR ${prUrl} deployed, but no preview link for commit ${short} was posted within ${wait / 1000}s; check the PR comments`);
 		await clock.sleep(5000);
 	}

@@ -43,3 +43,9 @@ export async function checkName(name: string, run: Run): Promise<CheckResult> {
 	if ((await dnsRecords(name, run)).length > 0) return { ok: false, reason: `DNS record exists: ${name}.${ZONE}` };
 	return { ok: true };
 }
+
+// The spark gateway: private repo, tailnet-only. Preview for gateway PR #N is on port 9500+N (N 1-499).
+export const GATEWAY_REPO = `${ORG}/spark-gateway`;
+export const GATEWAY_HOST = "spark-713a.tail9274fa.ts.net";
+export const MAX_GATEWAY_PR = 499;
+export const gatewayPreviewUrl = (n: number) => `https://${GATEWAY_HOST}:${9500 + n}`;

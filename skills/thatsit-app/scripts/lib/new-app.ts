@@ -7,13 +7,8 @@ export type NewAppOpts = { name: string; title: string; description: string; col
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pagesSubdomain: string }> {
-	const { name } = o;
-	const fqdn = `${name}.${ZONE}`;
-	if (!/^#[0-9A-Fa-f]{6}$/.test(o.color)) throw new Error(`color must look like #RRGGBB, got "${o.color}"`);
-	if (!NAME_RE.test(name)) throw new Error(`invalid name "${name}"`);
-
-	// The machine may have no global git identity; resolve one from the gh account before creating anything.
+// The machine may have no global git identity; commits use one from the gh account, set clone-locally.
+export async function ghIdentity(run: Run): Promise<{ gitName: string; gitEmail: string }> {
 	const idArgs = ["api", "user", "--jq", "{id,login,name}"];
 	const idr = await run("gh", idArgs);
 	if (idr.code !== 0) throw new Error(`could not read the GitHub account identity (needed for git commits): ${fail("gh", idArgs, idr).message}`);
@@ -26,6 +21,22 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	if (!who.login || !who.id) throw new Error("could not read the GitHub account identity: gh api user returned no id/login");
 	const gitName = who.name || who.login;
 	const gitEmail = `${who.id}+${who.login}@users.noreply.github.com`;
+	return { gitName, gitEmail };
+}
+
+export async function setIdentity(dir: string, id: { gitName: string; gitEmail: string }, run: Run): Promise<void> {
+	await must(run, "git", ["config", "user.name", id.gitName], { cwd: dir });
+	await must(run, "git", ["config", "user.email", id.gitEmail], { cwd: dir });
+}
+
+export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pagesSubdomain: string }> {
+	const { name } = o;
+	const fqdn = `${name}.${ZONE}`;
+	if (!/^#[0-9A-Fa-f]{6}$/.test(o.color)) throw new Error(`color must look like #RRGGBB, got "${o.color}"`);
+	if (!NAME_RE.test(name)) throw new Error(`invalid name "${name}"`);
+
+	// Resolve the identity before creating anything.
+	const id = await ghIdentity(run);
 
 	// 1. name check (a resume expects its own half-made resources to exist)
 	if (o.resume) {
@@ -61,8 +72,7 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 		}
 	}
 
-	await must(run, "git", ["config", "user.name", gitName], { cwd: dir });
-	await must(run, "git", ["config", "user.email", gitEmail], { cwd: dir });
+	await setIdentity(dir, id, run);
 
 	// 4. configure
 	if (!(o.resume && (await configured(dir, name, run)))) {
