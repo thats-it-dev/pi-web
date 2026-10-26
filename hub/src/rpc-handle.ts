@@ -58,6 +58,7 @@ export interface RpcHandleOptions {
 	promptAckMs?: number; // how long a prompt waits for pi's ack before returning `pending`
 	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
 	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
+	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
 
 export class RpcHandle implements SessionHandle {
@@ -239,6 +240,10 @@ export class RpcHandle implements SessionHandle {
 	private async boot(): Promise<void> {
 		const args = ["--mode", "rpc"];
 		if (this.opts.sessionFile) args.push("--session", this.opts.sessionFile);
+		else if (this.opts.model) {
+			args.push("--model", `${this.opts.model.provider}/${this.opts.model.modelId}`);
+			if (this.opts.model.thinking) args.push("--thinking", this.opts.model.thinking);
+		}
 		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env: { ...process.env, ...this.opts.env, PI_WEB: "1" } });
 		this.proc = proc;
 		proc.stdout.setEncoding("utf8");
@@ -508,6 +513,6 @@ export class RpcHandle implements SessionHandle {
 	}
 }
 
-function slimModel(m: ModelInfo): ModelInfo {
+export function slimModel(m: ModelInfo): ModelInfo {
 	return { id: m.id, name: m.name, provider: m.provider, reasoning: m.reasoning, input: m.input, contextWindow: m.contextWindow, maxTokens: m.maxTokens, cost: m.cost };
 }

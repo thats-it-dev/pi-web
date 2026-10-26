@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { AgentMessage, Dialog, LiveState, ModelInfo, PiEvent, SessionStats, WatchStreamFrame } from "../../shared/src/protocol.ts";
+import { LastModelStore } from "../src/last-model.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { SessionIndex } from "../src/sessions.ts";
@@ -702,6 +703,31 @@ test("startRingSession rejects when the first prompt is refused", async () => {
 	});
 	const svc = new WatchService({ registry, index, viewers: new Viewers(), home: dir });
 	await assert.rejects(svc.startRingSession("hi"), /nope/);
+	svc.close();
+});
+
+test("startRingSession starts on the hub's default model", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "watch-test-"));
+	const index = new SessionIndex(dir);
+	const models: unknown[] = [];
+	const registry = new Registry({
+		factory: {
+			startRpc: async (o) => {
+				models.push(o.model);
+				return new FakeHandle("s-1", o.cwd, null);
+			},
+		},
+		lookup: index,
+		maxHeadless: 6,
+		idleMs: 60_000,
+	});
+	const m = (id: string): ModelInfo => ({ id, name: id, provider: "fake", reasoning: false, input: ["text"], contextWindow: 1, maxTokens: 1 });
+	const catalog = { get: async () => ({ models: [m("fake-a"), m("fake-b")], piDefault: { provider: "fake", modelId: "fake-a", thinking: null }, levels: {} }) };
+	const lastModel = new LastModelStore(join(dir, "last-model.json"));
+	lastModel.set({ provider: "fake", modelId: "fake-b", thinking: null });
+	const svc = new WatchService({ registry, index, viewers: new Viewers(), home: dir, catalog, lastModel });
+	await svc.startRingSession("hi");
+	assert.deepEqual(models, [{ provider: "fake", modelId: "fake-b", thinking: null }]);
 	svc.close();
 });
 

@@ -12,6 +12,7 @@ function setup(opts: Partial<RegistryOptions> = {}) {
 		"disk-2": { cwd: "/w", file: "/s/disk-2.jsonl" },
 	};
 	const started: FakeHandle[] = [];
+	const starts: Array<Parameters<RegistryOptions["factory"]["startRpc"]>[0]> = [];
 	let n = 0;
 	let clock = 0;
 	const changes: ListMessage[] = [];
@@ -19,6 +20,7 @@ function setup(opts: Partial<RegistryOptions> = {}) {
 		factory: {
 			async startRpc(o) {
 				await sleep(5);
+				starts.push(o);
 				const id = o.sessionFile ? o.sessionFile.replace(/^.*\/|\.jsonl$/g, "") : `new-${++n}`;
 				const h = new FakeHandle(id, o.cwd, o.sessionFile ?? null);
 				started.push(h);
@@ -32,7 +34,7 @@ function setup(opts: Partial<RegistryOptions> = {}) {
 		...opts,
 	});
 	registry.onChange((m) => changes.push(m));
-	return { registry, started, changes, setClock: (t: number) => (clock = t) };
+	return { registry, started, starts, changes, setClock: (t: number) => (clock = t) };
 }
 
 test("concurrent ensure() starts one process per session", async () => {
@@ -42,6 +44,15 @@ test("concurrent ensure() starts one process per session", async () => {
 	assert.equal(started.length, 1);
 	assert.deepEqual(registry.info("disk-1"), { live: true, handleKind: "rpc", state: "idle" });
 	assert.equal(await registry.ensure("disk-1"), a);
+});
+
+test("create() passes the model choice to the factory; reopening a session passes none", async () => {
+	const { registry, starts } = setup();
+	const choice = { provider: "fake", modelId: "fake-b", thinking: "high" as const };
+	await registry.create("/w", choice);
+	await registry.ensure("disk-1");
+	assert.deepEqual(starts[0], { cwd: "/w", model: choice });
+	assert.equal(starts[1].model, undefined);
 });
 
 test("ensure() of an unknown session is a 404", async () => {

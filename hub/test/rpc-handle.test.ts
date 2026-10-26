@@ -137,6 +137,17 @@ test("set_model reports the pick through onModelPicked", async (t) => {
 	assert.equal(picks.length, 3);
 });
 
+test("a new session starts on the given model and thinking level", async (t) => {
+	const env = makePiEnv({ modelUrl: model.url, settings: { defaultModel: "fake-b" } });
+	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, exportDir: join(env.root, "exports"), env: env.env, model: { provider: "fake", modelId: "fake-a", thinking: "high" } });
+	t.after(() => {
+		h.close();
+		env.cleanup();
+	});
+	assert.equal(h.snapshot().state.model?.id, "fake-a");
+	assert.equal(h.snapshot().state.thinkingLevel, "high");
+});
+
 // A permission extension of the kind people install: every tool call asks Allow / Deny.
 const PERMISSION_EXTENSION = `
 export default function (pi) {

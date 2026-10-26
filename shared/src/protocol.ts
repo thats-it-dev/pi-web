@@ -259,6 +259,19 @@ export interface HealthInfo {
 	vapidPublicKey: string | null;
 }
 
+// GET /api/defaults: what an unsent chat starts with. `model` is the last pick
+// made in pi-web while pi still offers it, else pi's own default;
+// `thinkingLevels` are that model's levels (empty when it doesn't reason) and
+// `levels` every model's, keyed `provider/id`.
+export interface DefaultsInfo {
+	models: ModelInfo[];
+	model: { provider: string; modelId: string; thinking: ThinkingLevel | null } | null;
+	thinkingLevels: ThinkingLevel[];
+	levels: Record<string, ThinkingLevel[]>;
+	approvalMode: ApprovalMode;
+	home: string;
+}
+
 // GET /api/update: where the hub's checkout stands against origin/master.
 export interface UpdateStatus {
 	version: string; // hub/package.json

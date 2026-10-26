@@ -6,13 +6,14 @@
 import type { HandleKind, ListMessage, LiveState } from "../../shared/src/protocol.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
+import type { ModelChoice } from "./last-model.ts";
 
 export const BUSY_NOTICE = "This session is running in pi-web. Wait for it to finish, or /quit.";
 export const ELSEWHERE_NOTICE = "This session is open in another terminal; pi-web follows that one.";
 export const FREE_NOTICE = "This session is free now. /resume it to continue here with the latest messages.";
 
 export interface HandleFactory {
-	startRpc(opts: { cwd: string; sessionFile?: string }): Promise<SessionHandle>;
+	startRpc(opts: { cwd: string; sessionFile?: string; model?: ModelChoice | null }): Promise<SessionHandle>;
 }
 
 export interface SessionLookup {
@@ -90,8 +91,8 @@ export class Registry {
 		}
 	}
 
-	create(cwd: string): Promise<SessionHandle> {
-		return this.launch({ cwd });
+	create(cwd: string, choice?: ModelChoice | null): Promise<SessionHandle> {
+		return this.launch(choice ? { cwd, model: choice } : { cwd });
 	}
 
 	close(id: string): void {
@@ -169,7 +170,7 @@ export class Registry {
 		return h.subscriberCount() === 0 && !h.isBusy();
 	}
 
-	private async launch(o: { cwd: string; sessionFile?: string }): Promise<SessionHandle> {
+	private async launch(o: Parameters<HandleFactory["startRpc"]>[0]): Promise<SessionHandle> {
 		this.makeRoom();
 		this.pending++;
 		try {

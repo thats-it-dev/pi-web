@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { applyEvent } from "../../shared/src/reducer.ts";
+import type { ModelInfo } from "../../shared/src/protocol.ts";
 import type { HubConfig } from "../src/config.ts";
 import { ImageStore } from "../src/images.ts";
+import { LastModelStore, type ModelChoice } from "../src/last-model.ts";
+import type { Catalog } from "../src/model-catalog.ts";
 import { Registry } from "../src/registry.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { createHubServer } from "../src/server.ts";
@@ -40,16 +43,28 @@ const cfg: HubConfig = {
 };
 const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };
 
+const fakeModel = (id: string, reasoning: boolean): ModelInfo => ({ id, name: id, provider: "fake", reasoning, input: ["text"], contextWindow: 1000, maxTokens: 100 });
+const catalogValue: Catalog = {
+	models: [fakeModel("fake-a", true), fakeModel("fake-b", false)],
+	piDefault: { provider: "fake", modelId: "fake-a", thinking: "medium" },
+	levels: { "fake/fake-a": ["off", "low", "medium", "high"], "fake/fake-b": [] },
+};
+const catalog = { get: async () => catalogValue };
+const lastModel = new LastModelStore(join(root, "last-model.json"));
+
 const handles = new Map<string, FakeHandle>();
+const starts: Array<{ cwd: string; sessionFile?: string; model?: ModelChoice | null }> = [];
 let n = 0;
 let nextId: string | null = null; // forces the id of the next started handle
 const index = new SessionIndex(sessions);
 const registry = new Registry({
 	factory: {
 		async startRpc(o) {
+			starts.push(o);
 			const id = nextId ?? (o.sessionFile ? "disk-1" : `new-${++n}`);
 			nextId = null;
 			const h = new FakeHandle(id, o.cwd, o.sessionFile ?? null);
+			h.model = o.model ? (catalogValue.models.find((m) => m.id === o.model?.modelId) ?? null) : null;
 			handles.set(id, h);
 			return h;
 		},
@@ -66,7 +81,7 @@ const updater = {
 	status: async () => ({ ...updateStatus }),
 	apply: async () => ({ output: "Updating abc1234..def5678", commit: "def5678" }),
 };
-const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers, updater, restart: () => restarts++ });
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: (m) => logs.push(m), viewers, updater, restart: () => restarts++, catalog, lastModel });
 // A second hub over the same registry with its own tiny store: the "after a restart" cases.
 const freshServer = (images: ImageStore) => createHubServer({ cfg, registry, index, version: "0.1.0-test", home: work, log: () => {}, images });
 let port = 0;
@@ -134,6 +149,56 @@ test("a relative folder is resolved against home, not the hub's working director
 	const missing = await call(port, "POST", "/api/sessions", GOOD, { cwd: "nope" });
 	assert.equal(missing.status, 400);
 	assert.equal(missing.body.error, `Not a folder: ${join(work, "nope")}`);
+});
+
+test("defaults report the last pick when it is still available", async () => {
+	lastModel.set({ provider: "fake", modelId: "fake-b", thinking: null });
+	const r = await call(port, "GET", "/api/defaults", GOOD);
+	assert.equal(r.status, 200);
+	assert.deepEqual(r.body.model, { provider: "fake", modelId: "fake-b", thinking: null });
+	assert.deepEqual(r.body.models.map((m: ModelInfo) => m.id), ["fake-a", "fake-b"]);
+	assert.deepEqual(r.body.thinkingLevels, []);
+	assert.deepEqual(r.body.levels, catalogValue.levels);
+	assert.equal(r.body.approvalMode, "manual");
+	assert.equal(r.body.home, work);
+});
+
+test("defaults fall back to pi's default when the last pick is gone", async () => {
+	lastModel.set({ provider: "fake", modelId: "gone", thinking: "high" });
+	const r = await call(port, "GET", "/api/defaults", GOOD);
+	assert.deepEqual(r.body.model, catalogValue.piDefault);
+	assert.deepEqual(r.body.thinkingLevels, ["off", "low", "medium", "high"]);
+});
+
+test("a new session starts on the requested model and records it", async () => {
+	lastModel.set({ provider: "fake", modelId: "fake-a", thinking: null });
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "fake-b" }, thinking: "high" });
+	assert.equal(r.status, 200);
+	assert.equal(handles.get(r.body.sessionId)?.snapshot().state.model?.id, "fake-b");
+	assert.deepEqual(starts.at(-1)?.model, { provider: "fake", modelId: "fake-b", thinking: null }, "a level the model can't do is dropped");
+	assert.deepEqual((await call(port, "GET", "/api/defaults", GOOD)).body.model, { provider: "fake", modelId: "fake-b", thinking: null });
+	const a = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "fake-a" }, thinking: "high" });
+	assert.deepEqual(starts.at(-1)?.model, { provider: "fake", modelId: "fake-a", thinking: "high" });
+	assert.equal(handles.get(a.body.sessionId)?.snapshot().state.model?.id, "fake-a");
+	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "fake-a", thinking: "high" });
+});
+
+test("an unknown model is a 400", async () => {
+	const before = starts.length;
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "gone" } });
+	assert.equal(r.status, 400);
+	assert.equal(r.body.error, "Unknown model: fake/gone");
+	assert.equal(starts.length, before, "no pi was started");
+});
+
+test("a new session with no model starts on the resolved default", async () => {
+	lastModel.set({ provider: "fake", modelId: "fake-b", thinking: null });
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	assert.equal(handles.get(r.body.sessionId)?.snapshot().state.model?.id, "fake-b");
+	lastModel.set({ provider: "fake", modelId: "gone", thinking: null });
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	assert.deepEqual(starts.at(-1)?.model, catalogValue.piDefault);
+	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "gone", thinking: null }, "a default start records nothing");
 });
 
 test("commands: validated, 404 for unknown sessions, forwarded to the session's handle", async () => {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { LastModelStore } from "./last-model.ts";
+import { ModelCatalog } from "./model-catalog.ts";
 import { PushStore } from "./push.ts";
 import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
@@ -35,6 +36,7 @@ mkdirSync(exportDir, { recursive: true });
 mkdirSync(join(cfg.dataDir, "index"), { recursive: true }); // webhook drop folder
 const index = new SessionIndex(sessionsDir());
 const lastModel = new LastModelStore(join(cfg.dataDir, "last-model.json"));
+const catalog = new ModelCatalog({ piBin: cfg.piBin });
 const registry = new Registry({
 	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, onModelPicked: (c) => lastModel.set(c) }) },
 	lookup: index,
@@ -45,7 +47,7 @@ setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
 watchPush(registry, (p) => void push.send(p), viewers);
-const watch = new WatchService({ registry, index, viewers, home: homedir() });
+const watch = new WatchService({ registry, index, viewers, home: homedir(), catalog, lastModel });
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
 	bridge = await startBridgeServer({ socketPath: join(cfg.dataDir, "bridge.sock"), registry, log: (m) => console.log(m) });
@@ -56,7 +58,7 @@ try {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch });
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);

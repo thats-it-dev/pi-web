@@ -14,6 +14,8 @@ import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
 import { sessionTitle, type Viewers } from "./push-watch.ts";
+import type { LastModelStore } from "./last-model.ts";
+import { type ModelCatalog, resolveChoice } from "./model-catalog.ts";
 import type { Registry } from "./registry.ts";
 import { type FileSummary, readHistory, type SessionIndex } from "./sessions.ts";
 import { watchTurns } from "./turns.ts";
@@ -33,6 +35,8 @@ export interface WatchDeps {
 	index: SessionIndex;
 	viewers: Viewers;
 	home: string;
+	catalog?: Pick<ModelCatalog, "get">; // with lastModel, picks the model a new session starts on (pi's own default if absent)
+	lastModel?: LastModelStore;
 	now?: () => number;
 	log?: (m: string) => void;
 }
@@ -259,7 +263,7 @@ export class WatchService {
 	async startRingSession(text: string): Promise<string> {
 		const cwd = join(this.deps.home, "pebble");
 		mkdirSync(cwd, { recursive: true });
-		const h = await this.deps.registry.create(cwd);
+		const h = await this.deps.registry.create(cwd, this.deps.catalog ? resolveChoice(await this.deps.catalog.get(), this.deps.lastModel?.get() ?? null) : null);
 		await this.send(h, { type: "prompt", text, mode: "send" });
 		this.deps.log?.(`index: started session ${h.sessionId} in ~/pebble`);
 		return h.sessionId;

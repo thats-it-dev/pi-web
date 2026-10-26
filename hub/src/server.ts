@@ -5,9 +5,11 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type HealthInfo, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
+import { APPROVAL_MODES, APP_COMMAND_TYPES, type AppCommand, type DefaultsInfo, type HealthInfo, type ThinkingLevel, type ListMessage, type SessionSummary, type StreamMessage, type UpdateResult } from "../../shared/src/protocol.ts";
 import { checkHostAndLogin, checkRequest, corsHeaders } from "./auth.ts";
 import type { HubConfig } from "./config.ts";
+import type { LastModelStore, ModelChoice } from "./last-model.ts";
+import { type Catalog, type ModelCatalog, modelKey, resolveChoice } from "./model-catalog.ts";
 import { ImageStore } from "./images.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
@@ -38,6 +40,8 @@ export interface HubDeps {
 	images?: ImageStore; // image bytes by ref; absent means a private store
 	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
 	launchFn?: typeof launchOnPhone; // watch launch relay; tests stub it
+	catalog?: Pick<ModelCatalog, "get">; // models for /api/defaults and new sessions; absent means none known
+	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
 	now?: () => number;
 }
 
@@ -51,6 +55,7 @@ export function createHubServer(deps: HubDeps): Server {
 	const fileLister = new FileLister();
 	const replays = new ReplayCache();
 	const images = deps.images ?? new ImageStore();
+	const catalog = deps.catalog ?? { get: async (): Promise<Catalog> => ({ models: [], piDefault: null, levels: {} }) };
 
 	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
 		const { pathname: p, searchParams } = new URL(req.url ?? "/", "http://hub");
@@ -81,13 +86,25 @@ export function createHubServer(deps: HubDeps): Server {
 		if (m === "GET" && p === "/api/sessions") return sendJson(res, 200, { sessions: await listSessions(), home }, cors);
 		if (m === "GET" && p === "/api/cwds") return sendJson(res, 200, { cwds: knownCwds(await index.list(), home), home }, cors);
 		if (m === "GET" && p === "/api/events") return listStream(req, res, cors);
+		if (m === "GET" && p === "/api/defaults") {
+			const cat = await catalog.get();
+			const model = resolveChoice(cat, deps.lastModel?.get() ?? null);
+			const thinkingLevels = model ? (cat.levels[modelKey(model.provider, model.modelId)] ?? []) : [];
+			const body: DefaultsInfo = { models: cat.models, model, thinkingLevels, levels: cat.levels, approvalMode: cfg.approvalMode, home };
+			return sendJson(res, 200, body, cors);
+		}
 		if (m === "POST" && p === "/api/sessions") {
-			const body = (await readJson(req)) as { cwd?: unknown };
+			const body = (await readJson(req)) as { cwd?: unknown; model?: unknown; thinking?: unknown };
 			// Relative folders are relative to home, not to wherever the hub was started.
 			const raw = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : "~";
 			const cwd = resolve(home, raw.replace(/^~(?=\/|$)/, home));
 			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
-			const h = await registry.create(cwd);
+			const wanted = parseModel(body);
+			const cat = await catalog.get();
+			if (wanted && !cat.models.some((x) => x.provider === wanted.provider && x.id === wanted.modelId)) throw new HttpError(400, `Unknown model: ${wanted.provider}/${wanted.modelId}`);
+			const choice = resolveChoice(cat, wanted ?? deps.lastModel?.get() ?? null);
+			const h = await registry.create(cwd, choice);
+			if (wanted && choice) deps.lastModel?.set(choice);
 			return sendJson(res, 200, { sessionId: h.sessionId }, cors);
 		}
 		if (m === "POST" && (p === "/api/push/subscribe" || p === "/api/push/unsubscribe")) {
@@ -299,6 +316,14 @@ function openSse(res: ServerResponse, cors: Cors) {
 			clearInterval(ping);
 		},
 	};
+}
+
+// The draft's model for a new session; its thinking level is checked against the model later (resolveChoice).
+function parseModel(body: { model?: unknown; thinking?: unknown }): ModelChoice | null {
+	if (body.model == null) return null;
+	const { provider, modelId } = body.model as { provider?: unknown; modelId?: unknown };
+	if (typeof provider !== "string" || typeof modelId !== "string") throw new HttpError(400, "A model needs a provider and a modelId");
+	return { provider, modelId, thinking: typeof body.thinking === "string" ? (body.thinking as ThinkingLevel) : null };
 }
 
 function parseCommand(body: unknown): AppCommand {
