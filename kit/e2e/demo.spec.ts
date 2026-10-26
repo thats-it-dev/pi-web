@@ -54,3 +54,11 @@ test("light-DOM .btn is styled from the kit tokens", async ({ page }) => {
 	expect(s.bg).toBe(s.primary);
 	expect(s.radius).toBeGreaterThan(0);
 });
+
+test("header actions slot sits at the right end of the title line", async ({ page }) => {
+	const action = page.locator("tk-header button[slot='actions']");
+	await expect(action).toBeVisible();
+	const a = (await action.boundingBox())!;
+	const t = (await page.locator("tk-header h1[slot='title']").boundingBox())!;
+	expect(a.x).toBeGreaterThanOrEqual(t.x + t.width);
+});
