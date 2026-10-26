@@ -101,10 +101,23 @@ export function createHubServer(deps: HubDeps): Server {
 			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
 			const wanted = parseModel(body);
 			const cat = await catalog.get();
+			const fallback = resolveChoice(cat, deps.lastModel?.get() ?? null);
+			// No catalog (the probe failed): pi gets what the app sent, and judges it itself.
+			if (!cat.models.length) {
+				const h = await registry.create(cwd, wanted);
+				return sendJson(res, 200, { sessionId: h.sessionId }, cors);
+			}
 			if (wanted && !cat.models.some((x) => x.provider === wanted.provider && x.id === wanted.modelId)) throw new HttpError(400, `Unknown model: ${wanted.provider}/${wanted.modelId}`);
-			const choice = resolveChoice(cat, wanted ?? deps.lastModel?.get() ?? null);
+			const choice = wanted ? resolveChoice(cat, wanted) : fallback;
 			const h = await registry.create(cwd, choice);
-			if (wanted && choice) deps.lastModel?.set(choice);
+			// Only a real pick is remembered: sending the default as-is leaves pi's own default free to change.
+			if (choice && !sameChoice(choice, fallback)) {
+				try {
+					deps.lastModel?.set(choice);
+				} catch (err) {
+					log(`couldn't save the last model: ${(err as Error).message}`);
+				}
+			}
 			return sendJson(res, 200, { sessionId: h.sessionId }, cors);
 		}
 		if (m === "POST" && (p === "/api/push/subscribe" || p === "/api/push/unsubscribe")) {
@@ -319,6 +332,8 @@ function openSse(res: ServerResponse, cors: Cors) {
 }
 
 // The draft's model for a new session; its thinking level is checked against the model later (resolveChoice).
+const sameChoice = (a: ModelChoice, b: ModelChoice | null) => a.provider === b?.provider && a.modelId === b.modelId && a.thinking === b.thinking;
+
 function parseModel(body: { model?: unknown; thinking?: unknown }): ModelChoice | null {
 	if (body.model == null) return null;
 	const { provider, modelId } = body.model as { provider?: unknown; modelId?: unknown };

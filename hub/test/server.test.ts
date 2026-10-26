@@ -49,7 +49,8 @@ const catalogValue: Catalog = {
 	piDefault: { provider: "fake", modelId: "fake-a", thinking: "medium" },
 	levels: { "fake/fake-a": ["off", "low", "medium", "high"], "fake/fake-b": [] },
 };
-const catalog = { get: async () => catalogValue };
+let catalogNow = catalogValue; // swapped for an empty one to stand in for a failed probe
+const catalog = { get: async () => catalogNow };
 const lastModel = new LastModelStore(join(root, "last-model.json"));
 
 const handles = new Map<string, FakeHandle>();
@@ -189,6 +190,40 @@ test("an unknown model is a 400", async () => {
 	assert.equal(r.status, 400);
 	assert.equal(r.body.error, "Unknown model: fake/gone");
 	assert.equal(starts.length, before, "no pi was started");
+});
+
+test("with no catalog (a failed probe), the requested model goes to pi as sent", async (t) => {
+	catalogNow = { models: [], piDefault: null, levels: {} };
+	t.after(() => {
+		catalogNow = catalogValue;
+	});
+	lastModel.set({ provider: "fake", modelId: "fake-b", thinking: null });
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "other", modelId: "x" }, thinking: "high" });
+	assert.equal(r.status, 200);
+	assert.deepEqual(starts.at(-1)?.model, { provider: "other", modelId: "x", thinking: "high" });
+	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "fake-b", thinking: null }, "an unchecked model isn't remembered");
+	const bad = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "other" } });
+	assert.equal(bad.status, 400, "the body's shape is still checked");
+});
+
+test("sending the default as-is records nothing, so pi's own default can still change", async () => {
+	lastModel.set({ provider: "fake", modelId: "gone", thinking: null }); // resolves to pi's default
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "fake-a" }, thinking: "medium" });
+	assert.equal(r.status, 200);
+	assert.deepEqual(starts.at(-1)?.model, catalogValue.piDefault);
+	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "gone", thinking: null });
+	await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "fake-a" }, thinking: "high" });
+	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "fake-a", thinking: "high" }, "a different level is a pick");
+});
+
+test("a last model that can't be saved doesn't fail the new session", async (t) => {
+	t.mock.method(lastModel, "set", () => {
+		throw new Error("disk full");
+	});
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, model: { provider: "fake", modelId: "fake-b" } });
+	assert.equal(r.status, 200);
+	assert.ok(handles.has(r.body.sessionId));
+	assert.ok(logs.some((l) => l.includes("disk full")));
 });
 
 test("a new session with no model starts on the resolved default", async () => {

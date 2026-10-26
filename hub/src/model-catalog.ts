@@ -11,6 +11,7 @@ import { slimModel } from "./rpc-handle.ts";
 import type { RpcCommand } from "./translate.ts";
 
 const PROBE_TIMEOUT_MS = 30_000;
+const KILL_GRACE_MS = 2_000;
 
 export interface Catalog {
 	models: ModelInfo[];
@@ -20,29 +21,39 @@ export interface Catalog {
 
 const EMPTY: Catalog = { models: [], piDefault: null, levels: {} };
 
+interface CatalogOptions {
+	piBin: string;
+	env?: Record<string, string>;
+	ttlMs?: number;
+	killGraceMs?: number; // how long pi gets to exit on SIGTERM before SIGKILL
+}
+
 export const modelKey = (provider: string, id: string) => `${provider}/${id}`;
 
 export class ModelCatalog {
-	private opts: { piBin: string; env?: Record<string, string>; ttlMs?: number };
+	private opts: CatalogOptions;
 	private cached: { at: number; cat: Catalog } | null = null;
 	private inFlight: Promise<Catalog> | null = null;
 
-	constructor(opts: { piBin: string; env?: Record<string, string>; ttlMs?: number }) {
+	constructor(opts: CatalogOptions) {
 		this.opts = opts;
 	}
 
+	// Stale-while-revalidate: once there is a catalog, an expired one is still
+	// answered at once while one refresh runs behind it; only the first call waits.
 	get(): Promise<Catalog> {
-		if (this.cached && Date.now() - this.cached.at < (this.opts.ttlMs ?? 10 * 60_000)) return Promise.resolve(this.cached.cat);
-		this.inFlight ??= probe(this.opts.piBin, this.opts.env)
+		const cached = this.cached;
+		if (cached && Date.now() - cached.at < (this.opts.ttlMs ?? 10 * 60_000)) return Promise.resolve(cached.cat);
+		this.inFlight ??= probe(this.opts.piBin, this.opts.env, this.opts.killGraceMs)
 			.then((cat) => {
 				this.cached = { at: Date.now(), cat };
 				return cat;
 			})
-			.catch(() => EMPTY)
+			.catch(() => this.cached?.cat ?? EMPTY) // a failed refresh keeps the stale catalog
 			.finally(() => {
 				this.inFlight = null;
 			});
-		return this.inFlight;
+		return cached ? Promise.resolve(cached.cat) : this.inFlight;
 	}
 }
 
@@ -54,7 +65,7 @@ export function resolveChoice(cat: Catalog, wanted: ModelChoice | null): ModelCh
 	return { ...wanted, thinking: wanted.thinking && levels.includes(wanted.thinking) ? wanted.thinking : null };
 }
 
-async function probe(piBin: string, env?: Record<string, string>): Promise<Catalog> {
+async function probe(piBin: string, env?: Record<string, string>, killGraceMs = KILL_GRACE_MS): Promise<Catalog> {
 	const proc = spawn(piBin, ["--mode", "rpc", "--no-session"], { cwd: homedir(), env: { ...process.env, ...env, PI_WEB: "1" } });
 	const pending = new Map<string, (r: { success: boolean; data?: unknown; error?: string }) => void>();
 	let n = 0;
@@ -117,6 +128,10 @@ async function probe(piBin: string, env?: Record<string, string>): Promise<Catal
 			levels,
 		};
 	} finally {
-		proc.kill("SIGKILL");
+		// SIGTERM first so pi's extensions can stop their own children; SIGKILL if it hangs on.
+		proc.kill("SIGTERM");
+		setTimeout(() => {
+			if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+		}, killGraceMs).unref();
 	}
 }
