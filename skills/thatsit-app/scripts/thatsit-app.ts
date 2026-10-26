@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { checkName } from "./lib/names.ts";
+import { gatewayCheckout, gatewayPr, gatewayRegister } from "./lib/gateway.ts";
+import { checkName, MAX_GATEWAY_PR } from "./lib/names.ts";
 import { newApp } from "./lib/new-app.ts";
 import { openPr } from "./lib/pr.ts";
 import { realRun } from "./lib/run.ts";
@@ -10,7 +11,10 @@ import { ship } from "./lib/ship.ts";
 export type Args =
 	| { cmd: "check"; name: string }
 	| { cmd: "ship"; name: string }
-	| { cmd: "pr"; name: string; title: string; body: string }
+	| { cmd: "pr"; name: string; title: string; body: string; gatewayPr?: number }
+	| { cmd: "gateway-checkout" }
+	| { cmd: "gateway-register"; name: string }
+	| { cmd: "gateway-pr"; name: string; title: string; body: string }
 	| { cmd: "new"; name: string; title: string; description: string; color: string; resume: boolean };
 
 export const DEFAULT_COLOR = "#FFAA00";
@@ -18,17 +22,21 @@ export const DEFAULT_COLOR = "#FFAA00";
 // null means a usage error.
 export function parseArgs(argv: string[]): Args | null {
 	const [cmd, name, ...rest] = argv;
+	if (cmd === "gateway-checkout") return argv.length === 1 ? { cmd } : null;
 	if (!name || name.startsWith("--")) return null;
-	if (cmd === "check") return rest.length === 0 ? { cmd, name } : null;
-	if (cmd === "ship") return rest.length === 0 ? { cmd, name } : null;
-	if (cmd === "pr") {
-		if (rest.length !== 4) return null;
+	if (cmd === "check" || cmd === "ship" || cmd === "gateway-register") return rest.length === 0 ? { cmd, name } : null;
+	if (cmd === "pr" || cmd === "gateway-pr") {
+		const flags = cmd === "pr" ? ["--title", "--body", "--gateway-pr"] : ["--title", "--body"];
 		const o: Record<string, string> = {};
-		for (let i = 0; i < 4; i += 2) {
-			if (rest[i] !== "--title" && rest[i] !== "--body") return null;
+		for (let i = 0; i < rest.length; i += 2) {
+			if (!flags.includes(rest[i]) || rest[i + 1] === undefined || rest[i].slice(2) in o) return null;
 			o[rest[i].slice(2)] = rest[i + 1];
 		}
-		return o.title && o.body ? { cmd, name, title: o.title, body: o.body } : null;
+		if (!o.title || !o.body) return null;
+		if (o["gateway-pr"] === undefined) return { cmd, name, title: o.title, body: o.body };
+		// Accept "12" or "#12"; only 1-499 have a gateway preview.
+		const n = /^#?[1-9]\d*$/.test(o["gateway-pr"]) ? Number(o["gateway-pr"].replace("#", "")) : 0;
+		return n >= 1 && n <= MAX_GATEWAY_PR ? { cmd: "pr", name, title: o.title, body: o.body, gatewayPr: n } : null;
 	}
 	if (cmd !== "new") return null;
 	const o: Record<string, string> = {};
@@ -56,7 +64,7 @@ const result = (v: unknown) => console.log(`RESULT ${JSON.stringify(v)}`);
 async function main(): Promise<number> {
 	const a = parseArgs(process.argv.slice(2));
 	if (!a) {
-		console.error('usage: thatsit-app check <name> | ship <dir> | pr <dir> --title "..." --body "..." | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume]');
+		console.error('usage: thatsit-app check <name> | ship <dir> | pr <dir> --title "..." --body "..." [--gateway-pr <N>] | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume] | gateway-checkout | gateway-register <app> | gateway-pr <dir> --title "..." --body "..."');
 		return 2;
 	}
 	try {
@@ -76,10 +84,22 @@ async function main(): Promise<number> {
 			return 0;
 		}
 		if (a.cmd === "pr") {
-			result({ ok: true, ...(await openPr(a.name, { title: a.title, body: a.body }, realRun)) });
+			result({ ok: true, ...(await openPr(a.name, { title: a.title, body: a.body, gatewayPr: a.gatewayPr }, realRun)) });
+			return 0;
+		}
+		if (a.cmd === "gateway-pr") {
+			result({ ok: true, ...(await gatewayPr(a.name, { title: a.title, body: a.body }, realRun)) });
 			return 0;
 		}
 		const appsDir = process.env.THATSIT_APPS_DIR ?? join(homedir(), "workspace", "apps");
+		if (a.cmd === "gateway-checkout") {
+			result({ ok: true, ...(await gatewayCheckout(appsDir, realRun)) });
+			return 0;
+		}
+		if (a.cmd === "gateway-register") {
+			result({ ok: true, ...(await gatewayRegister(appsDir, a.name, realRun)) });
+			return 0;
+		}
 		const r = await newApp({ ...a, appsDir }, realRun);
 		result({ ok: true, name: a.name, dir: r.dir, pagesSubdomain: r.pagesSubdomain, url: `https://${a.name}.thatsit.app` });
 		return 0;
