@@ -10,14 +10,15 @@ import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
+import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
 import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
 import "./pi-header.ts";
 import "./pi-messages.ts";
 
-type Sheet = "model" | "stats" | "fork" | "settings";
-const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", settings: "session settings" };
+type Sheet = "model" | "stats" | "fork" | "menu";
+const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", menu: "this chat" };
 const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])";
 
 export class PiSession extends LitElement {
@@ -27,6 +28,7 @@ export class PiSession extends LitElement {
 		home: { attribute: false },
 		version: { state: true },
 		sheet: { state: true },
+		menuStep: { state: true },
 		forkPoints: { state: true },
 		tucked: { state: true },
 	};
@@ -35,6 +37,7 @@ export class PiSession extends LitElement {
 	declare home: string;
 	declare version: number;
 	declare sheet: Sheet | null;
+	declare menuStep: MenuStep;
 	declare forkPoints: ForkPoint[];
 	declare tucked: boolean;
 
@@ -51,6 +54,7 @@ export class PiSession extends LitElement {
 	static styles = [
 		sharedStyles,
 		sheetStyles,
+		chatMenuStyles,
 		css`
 			:host { display: flex; flex-direction: column; min-height: 0; height: 100%; }
 			.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -66,6 +70,7 @@ export class PiSession extends LitElement {
 		this.home = "";
 		this.version = 0;
 		this.sheet = null;
+		this.menuStep = "root";
 		this.forkPoints = [];
 		this.tucked = false;
 	}
@@ -315,6 +320,7 @@ export class PiSession extends LitElement {
 
 	private openSheet(sheet: Sheet): void {
 		this.sheet = sheet;
+		this.menuStep = "root";
 		if (!this.store?.snapshot) void this.run({ type: "attach" }); // models and stats need a running pi
 	}
 
@@ -351,7 +357,7 @@ export class PiSession extends LitElement {
 	// Move focus into a sheet when it opens; give it back to the composer when it closes.
 	private syncFocus(): void {
 		const dialog = this.store?.dialogs[0];
-		const key = dialog ? `dialog:${dialog.id}` : this.sheet;
+		const key = dialog ? `dialog:${dialog.id}` : this.sheet === "menu" ? `menu:${this.menuStep}` : this.sheet;
 		if (key === this.openSheetKey) return;
 		this.openSheetKey = key;
 		if (!key) {
@@ -386,13 +392,11 @@ export class PiSession extends LitElement {
 				.streaming=${s.conv.streaming}
 				.detached=${s.status === "history"}
 				.items=${slashItems(snap?.commands ?? [])}
-				.canImages=${Boolean(snap?.state.model?.input.includes("image"))}
 				.rpcOnlyDisabled=${snap?.handleKind === "bridge"}
 				.queue=${s.conv.queue}
 				.statuses=${statuses}
 				.model=${snap?.state.model ?? null}
 				.thinking=${snap?.state.thinkingLevel ?? null}
-				.approvalMode=${snap?.approvalMode ?? null}
 				.searchFiles=${this.searchFiles}
 				@pi-submit=${this.onSubmit}
 				@pi-abort=${this.onAbort}
@@ -415,8 +419,8 @@ export class PiSession extends LitElement {
 				void this.run({ type: "fork", entryId: p.entryId });
 			});
 		if (!snap) return html`<p class="hint">starting pi…</p>`;
+		if (sheet === "menu") return this.renderMenu(snap);
 		if (sheet === "stats") return statsSheet(snap, this.home, this.store?.live.speed() ?? null);
-		if (sheet === "settings") return settingsSheet(snap, (mode) => void this.run({ type: "set_approval", mode }));
 		return modelSheet(snap, {
 			pickModel: (m) => {
 				this.sheet = null;
@@ -424,6 +428,40 @@ export class PiSession extends LitElement {
 			},
 			pickThinking: (level) => void this.run({ type: "set_thinking", level }),
 		});
+	}
+
+	private renderMenu(snap: Snapshot) {
+		const step = this.menuStep;
+		const model = snap.state.model;
+		const menu = chatMenu(
+			{
+				step,
+				canImages: Boolean(model?.input.includes("image")),
+				cwd: abbreviateCwd(snap.cwd, this.home),
+				cwdFixed: true, // a running session's folder can't change
+				model: model ? `${model.name} · ${snap.state.thinkingLevel}` : "—",
+				approval: snap.capabilities.dialogs === "terminal" ? null : snap.approvalMode,
+				recentCwds: [],
+			},
+			{
+				step: (s) => (this.menuStep = s),
+				attach: () => {
+					this.sheet = null;
+					this.composer?.pickImages();
+				},
+				pickCwd: () => {},
+			},
+		);
+		if (step === "model")
+			return html`${menu}${modelSheet(snap, {
+				pickModel: (m) => {
+					this.menuStep = "root";
+					void this.run({ type: "set_model", provider: m.provider, modelId: m.id });
+				},
+				pickThinking: (level) => void this.run({ type: "set_thinking", level }),
+			})}`;
+		if (step === "approvals") return html`${menu}${settingsSheet(snap, (mode) => void this.run({ type: "set_approval", mode }))}`;
+		return menu;
 	}
 
 	private renderTray(snap: Snapshot | null) {

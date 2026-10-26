@@ -7,11 +7,18 @@ export const UNAVAILABLE_IN_TERMINAL = "Not available while open in the terminal
 
 export type DialogAnswer = { value?: string; confirmed?: boolean; cancelled?: boolean };
 
+export type ModelChoice = { models: ModelInfo[]; current: ModelInfo | null; thinkingLevels: ThinkingLevel[]; thinking: ThinkingLevel | null };
+
 export function modelSheet(snap: Snapshot, on: { pickModel(m: ModelInfo): void; pickThinking(l: ThinkingLevel): void }) {
-	const cur = snap.state.model;
+	return modelPicker({ models: snap.models, current: snap.state.model, thinkingLevels: snap.thinkingLevels, thinking: snap.state.thinkingLevel }, on);
+}
+
+// The model sheet's body, without a running session (an unsent chat has no Snapshot).
+export function modelPicker(v: ModelChoice, on: { pickModel(m: ModelInfo): void; pickThinking(l: ThinkingLevel): void }) {
+	const cur = v.current;
 	return html`
 		<div class="models" role="listbox" aria-label="Models">
-			${snap.models.map((m) => {
+			${v.models.map((m) => {
 				const selected = cur?.provider === m.provider && cur?.id === m.id;
 				return html`<button role="option" aria-selected=${selected ? "true" : "false"} class="model ${selected ? "on" : ""}" @click=${() => on.pickModel(m)}>
 					<span class="name">${m.name}</span>
@@ -19,11 +26,11 @@ export function modelSheet(snap: Snapshot, on: { pickModel(m: ModelInfo): void; 
 				</button>`;
 			})}
 		</div>
-		${snap.thinkingLevels.length > 1
+		${v.thinkingLevels.length > 1
 			? html`<h3 class="label">thinking</h3>
 					<div class="seg" role="radiogroup" aria-label="Thinking level">
-						${snap.thinkingLevels.map(
-							(l) => html`<button role="radio" aria-checked=${snap.state.thinkingLevel === l ? "true" : "false"} class=${snap.state.thinkingLevel === l ? "on" : ""} @click=${() => on.pickThinking(l)}>${l}</button>`,
+						${v.thinkingLevels.map(
+							(l) => html`<button role="radio" aria-checked=${v.thinking === l ? "true" : "false"} class=${v.thinking === l ? "on" : ""} @click=${() => on.pickThinking(l)}>${l}</button>`,
 						)}
 					</div>`
 			: html`<p class="hint">${cur?.name ?? "This model"} doesn't support thinking levels.</p>`}
@@ -38,7 +45,11 @@ const APPROVAL_HINTS: Record<ApprovalMode, string> = {
 
 export function settingsSheet(snap: Snapshot, pickApproval: (m: ApprovalMode) => void) {
 	if (snap.capabilities.dialogs === "terminal") return html`<p class="hint">This pi is open in a terminal, which answers its own permission prompts.</p>`;
-	const cur = snap.approvalMode;
+	return approvalPicker(snap.approvalMode, pickApproval);
+}
+
+// The session-settings body, without a running session.
+export function approvalPicker(cur: ApprovalMode, pickApproval: (m: ApprovalMode) => void) {
 	return html`
 		<h3 class="label">approvals</h3>
 		<div class="seg" role="radiogroup" aria-label="Approval mode">

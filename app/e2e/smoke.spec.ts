@@ -26,9 +26,11 @@ test("desktop: start a session, stream a reply, switch model, rename and compact
 	await page.getByRole("option", { name: /Fake B/ }).click();
 	await expect(page.getByRole("button", { name: /^Model Fake B/ })).toBeVisible();
 
-	await page.getByRole("button", { name: /^Session settings/ }).click();
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await page.getByRole("button", { name: /^approvals/ }).click();
 	await page.getByRole("radio", { name: "semi" }).click();
-	await expect(page.getByRole("button", { name: "Session settings (semi)" })).toBeVisible();
+	await page.getByRole("button", { name: "Back" }).click();
+	await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("semi");
 	await page.keyboard.press("Escape");
 
 	await input.fill("/na");

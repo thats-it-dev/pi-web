@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
-import type { ApprovalMode, ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { type MentionEntry, applyMention, mentionAt } from "../lib/mention.ts";
 import { checkImageFile } from "../lib/images.ts";
@@ -19,8 +19,8 @@ export type FileSearch = (query: string, signal: AbortSignal) => Promise<Mention
 
 type Menu = { kind: "slash"; items: SlashItem[] } | { kind: "files"; items: MentionEntry[] };
 
-// Lucide icons (ISC): sliders-horizontal, arrow-up and square.
-const SLIDERS_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4" /><line x1="10" x2="3" y1="4" y2="4" /><line x1="21" x2="12" y1="12" y2="12" /><line x1="8" x2="3" y1="12" y2="12" /><line x1="21" x2="16" y1="20" y2="20" /><line x1="12" x2="3" y1="20" y2="20" /><line x1="14" x2="14" y1="2" y2="6" /><line x1="8" x2="8" y1="10" y2="14" /><line x1="16" x2="16" y1="18" y2="22" /></svg>`;
+// Lucide icons (ISC): plus, arrow-up and square.
+const PLUS_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>`;
 const SEND_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>`;
 const STOP_ICON = html`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect width="14" height="14" x="5" y="5" rx="2" /></svg>`;
 
@@ -29,13 +29,12 @@ export class PiComposer extends LitElement {
 		streaming: { attribute: false },
 		detached: { attribute: false },
 		items: { attribute: false },
-		canImages: { attribute: false },
 		rpcOnlyDisabled: { attribute: false },
 		queue: { attribute: false },
 		statuses: { attribute: false },
 		model: { attribute: false },
 		thinking: { attribute: false },
-		approvalMode: { attribute: false },
+		folder: { attribute: false },
 		searchFiles: { attribute: false },
 		text: { state: true },
 		cursor: { state: true },
@@ -47,13 +46,12 @@ export class PiComposer extends LitElement {
 	declare streaming: boolean;
 	declare detached: boolean;
 	declare items: SlashItem[];
-	declare canImages: boolean;
 	declare rpcOnlyDisabled: boolean;
 	declare queue: { steering: string[]; followUp: string[] };
 	declare statuses: string[];
 	declare model: ModelInfo | null;
 	declare thinking: ThinkingLevel | null;
-	declare approvalMode: ApprovalMode | null;
+	declare folder: string | null; // an unsent chat shows its folder after the model
 	declare searchFiles: FileSearch | null;
 	declare text: string;
 	declare cursor: number;
@@ -87,10 +85,10 @@ export class PiComposer extends LitElement {
 			textarea { width: 100%; min-width: 0; border: 0; padding: 4px 0; resize: none; background: transparent; line-height: 1.45; max-height: 40vh; outline: none; }
 			textarea:focus-visible { outline: none; }
 			.row { display: flex; gap: 6px; align-items: center; }
-			.model { color: var(--primary); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+			.lead { display: flex; align-items: center; min-width: 0; margin-right: auto; font-size: 0.8rem; white-space: nowrap; }
+			.model { color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 			.model b { font-weight: 500; }
-			.settings { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; margin-right: auto; padding: 4px 2px; }
-			.settings svg { width: 15px; height: 15px; }
+			.folder { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1000 auto; }
 			.icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius); color: var(--text-secondary); font-size: 1.1rem; cursor: pointer; flex: none; }
 			.icon svg { width: 20px; height: 20px; }
 			.icon.send { color: #000; background: var(--primary); border-radius: 50%; }
@@ -106,13 +104,12 @@ export class PiComposer extends LitElement {
 		this.streaming = false;
 		this.detached = false;
 		this.items = [];
-		this.canImages = false;
 		this.rpcOnlyDisabled = false;
 		this.queue = { steering: [], followUp: [] };
 		this.statuses = [];
 		this.model = null;
 		this.thinking = null;
-		this.approvalMode = null;
+		this.folder = null;
 		this.searchFiles = null;
 		this.text = "";
 		this.cursor = 0;
@@ -179,6 +176,10 @@ export class PiComposer extends LitElement {
 				},
 			);
 		}, FILE_SEARCH_DELAY_MS);
+	}
+
+	private openSheet(sheet: "menu" | "model"): void {
+		this.dispatchEvent(new CustomEvent("pi-open-sheet", { detail: sheet, bubbles: true, composed: true }));
 	}
 
 	private submit(mode: PromptMode): void {
@@ -307,6 +308,11 @@ export class PiComposer extends LitElement {
 		if (ok.length) this.images = [...this.images, ...ok];
 	};
 
+	// Opens the file picker; the ＋ menu's attach image row calls this.
+	pickImages(): void {
+		this.renderRoot.querySelector<HTMLInputElement>("input[type=file]")?.click();
+	}
+
 	willUpdate(): void {
 		this.refreshFiles();
 	}
@@ -345,13 +351,14 @@ export class PiComposer extends LitElement {
 			<div class="box">
 				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu ? "true" : "false"} aria-activedescendant=${menu ? `slash-opt-${Math.min(this.menuIndex, menu.items.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, / for commands, @ for files"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey} @keyup=${this.onCaret} @click=${this.onCaret}></textarea>
 				<div class="row">
-					<button class="model u" aria-label=${`Model ${this.model?.name ?? "not loaded"}`} @click=${() => this.dispatchEvent(new CustomEvent("pi-open-sheet", { detail: "model", bubbles: true, composed: true }))}>
-						${this.model ? html`<b>${this.model.name}</b> · ${this.thinking}` : "model"}
-					</button>
-					<button class="settings u" aria-label=${`Session settings${this.approvalMode ? ` (${this.approvalMode})` : ""}`} @click=${() => this.dispatchEvent(new CustomEvent("pi-open-sheet", { detail: "settings", bubbles: true, composed: true }))}>
-						${SLIDERS_ICON}${this.approvalMode ?? nothing}
-					</button>
-					${this.canImages ? html`<label class="icon" aria-label="Attach image">＋<input class="sr-only" type="file" accept="image/*" multiple @change=${this.onFiles} /></label>` : nothing}
+					<button class="icon" aria-label="Chat options" @click=${() => this.openSheet("menu")}>${PLUS_ICON}</button>
+					<input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" @change=${this.onFiles} />
+					<div class="lead">
+						<button class="model u" aria-label=${`Model ${this.model?.name ?? "not loaded"}`} @click=${() => this.openSheet("model")}>
+							${this.model ? html`<b>${this.model.name}</b>${this.thinking ? ` · ${this.thinking}` : nothing}` : "model"}
+						</button>
+						${this.folder ? html`<span class="folder">&nbsp;· ${this.folder}</span>` : nothing}
+					</div>
 					${this.streaming && !this.text.trim() && !this.images.length
 						? html`<button class="icon stop" aria-label="stop" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>${STOP_ICON}</button>`
 						: html`<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>`}
