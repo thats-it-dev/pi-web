@@ -62,3 +62,14 @@ test("header actions slot sits at the right end of the title line", async ({ pag
 	const t = (await page.locator("tk-header h1[slot='title']").boundingBox())!;
 	expect(a.x).toBeGreaterThanOrEqual(t.x + t.width);
 });
+
+test("header action keeps its width and stays in view with a long title", async ({ page }) => {
+	const action = page.locator("tk-header button[slot='actions']");
+	const before = (await action.boundingBox())!;
+	await page.locator("tk-header h1[slot='title']").evaluate((h) => (h.textContent = "A very long title ".repeat(30)));
+	const after = (await action.boundingBox())!;
+	const vw = page.viewportSize()!.width;
+	expect(after.width).toBeCloseTo(before.width, 0);
+	expect(after.x + after.width).toBeLessThanOrEqual(vw);
+	await expect(action).toBeInViewport({ ratio: 1 });
+});

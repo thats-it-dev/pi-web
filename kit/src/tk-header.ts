@@ -1,8 +1,9 @@
 import { LitElement, css, html } from "lit";
 import { sharedStyles } from "./styles.ts";
 
-// Sticky top bar: a menu button (phones only) beside the slotted title (and optional right-hand actions), then
-// whatever else the app puts underneath in the default slot.
+// Sticky top bar: a menu button (phones only) beside the slotted title, an optional
+// right-hand actions slot, then whatever else the app puts underneath in the
+// default slot.
 export class TkHeader extends LitElement {
 	static properties = { tucked: { type: Boolean, reflect: true }, menuLabel: { attribute: "menu-label" } };
 	declare tucked: boolean;
@@ -39,7 +40,7 @@ export class TkHeader extends LitElement {
 			<div class="l1">
 				<button class="menu" aria-label=${this.menuLabel} @click=${this.openNav}>☰</button>
 				<slot name="title"></slot>
-					<slot name="actions"></slot>
+				<slot name="actions"></slot>
 			</div>
 			<slot></slot>
 		</header>`;
