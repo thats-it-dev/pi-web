@@ -59,7 +59,7 @@ export class PiNewSession extends LitElement {
 		if (!cwd || this.busy) return;
 		this.busy = true;
 		try {
-			const { sessionId } = await this.api.createSession(cwd);
+			const { sessionId } = await this.api.createSession({ cwd });
 			location.hash = hrefFor({ name: "session", id: sessionId });
 		} catch (err) {
 			toast((err as Error).message, "error");

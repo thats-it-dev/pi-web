@@ -26,7 +26,16 @@ describe("HubApi", () => {
 	});
 	it("turns hub errors into HubError with the hub's message", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "6 pi sessions are already running. Close one first." }), { status: 503 })));
-		await expect(new HubApi("http://x").createSession("~")).rejects.toMatchObject({ status: 503, message: "6 pi sessions are already running. Close one first." });
+		await expect(new HubApi("http://x").createSession({ cwd: "~" })).rejects.toMatchObject({ status: 503, message: "6 pi sessions are already running. Close one first." });
+	});
+	it("createSession sends model and omits a null thinking", async () => {
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify({ sessionId: "s2" }), { status: 200 }));
+		vi.stubGlobal("fetch", fetchMock);
+		const model = { provider: "p", modelId: "m" };
+		expect(await new HubApi("http://x").createSession({ cwd: "~", model, thinking: null })).toEqual({ sessionId: "s2" });
+		const calls = fetchMock.mock.calls as unknown as [string, { body: string }][];
+		expect(JSON.parse(calls[0][1].body)).toEqual({ cwd: "~", model });
+		expect(calls[0][1].body).not.toContain("thinking");
 	});
 	it("explains network failures", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));

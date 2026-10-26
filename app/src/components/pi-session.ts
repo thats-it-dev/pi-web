@@ -268,7 +268,7 @@ export class PiSession extends LitElement {
 				this.openSheet("stats");
 				return true;
 			case "new":
-				location.hash = hrefFor({ name: "new", cwd: snap?.cwd ?? this.store?.cwdHint ?? undefined });
+				location.hash = hrefFor({ name: "new" });
 				return true;
 			case "resume":
 				this.dispatchEvent(new CustomEvent("tk-open-nav", { bubbles: true, composed: true }));

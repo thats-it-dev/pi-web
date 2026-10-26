@@ -1,4 +1,4 @@
-import type { AgentMessage, AppCommand, CommandResult, HealthInfo, PushSubscriptionInfo, SessionSummary, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
+import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
 export class HubError extends Error {
 	status: number;
@@ -56,8 +56,12 @@ export class HubApi {
 	cwds() {
 		return this.req<{ cwds: string[]; home: string }>("GET", "/api/cwds");
 	}
-	createSession(cwd: string) {
-		return this.req<{ sessionId: string }>("POST", "/api/sessions", { cwd });
+	defaults() {
+		return this.req<DefaultsInfo>("GET", "/api/defaults");
+	}
+	createSession(o: { cwd: string; model?: { provider: string; modelId: string }; thinking?: ThinkingLevel | null }) {
+		const { thinking, ...rest } = o;
+		return this.req<{ sessionId: string }>("POST", "/api/sessions", thinking ? { ...rest, thinking } : rest);
 	}
 	history(id: string) {
 		return this.req<HistoryResponse>("GET", `/api/sessions/${encodeURIComponent(id)}/history`);

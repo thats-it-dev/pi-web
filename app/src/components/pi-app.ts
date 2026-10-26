@@ -91,7 +91,7 @@ export class PiApp extends LitElement {
 	private renderMain(r: Route) {
 		if (!this.api || r.name === "settings") return html`<pi-settings @pi-hub-changed=${this.connectHub}></pi-settings>`;
 		if (r.name === "session") return html`<pi-session .api=${this.api} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
-		if (r.name === "new") return html`<pi-new-session .api=${this.api} .cwd=${r.cwd ?? null}></pi-new-session>`;
+		if (r.name === "new") return html`<pi-new-session .api=${this.api}></pi-new-session>`;
 		return html`<div class="empty">
 			<button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button>
 			<h1><span class="u on">pi</span></h1>
