@@ -197,7 +197,7 @@ export class PiSettings extends LitElement {
 				${newChatButton()}
 			</tk-header>
 			<div class="wrap">
-				<a class="back u" href="#/">← sessions</a>
+				<a class="back u" href="#/">← chat</a>
 				<form @submit=${this.connect}>
 					<label for="hub">hub address</label>
 					<p class="hint">The tailnet address of the pi-web hub on spark, for example <code>spark-713a.tail9274fa.ts.net:7878</code>.</p>

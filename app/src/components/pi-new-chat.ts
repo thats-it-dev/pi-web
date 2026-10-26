@@ -24,6 +24,7 @@ export class PiNewChat extends LitElement {
 		api: { attribute: false },
 		home: { attribute: false },
 		defaults: { state: true },
+		defaultsFailed: { state: true },
 		recentCwds: { state: true },
 		sheet: { state: true },
 		menuStep: { state: true },
@@ -32,6 +33,7 @@ export class PiNewChat extends LitElement {
 	declare api: HubApi;
 	declare home: string;
 	declare defaults: DefaultsInfo | null;
+	declare defaultsFailed: boolean;
 	declare recentCwds: string[];
 	declare sheet: Sheet | null;
 	declare menuStep: MenuStep;
@@ -56,6 +58,7 @@ export class PiNewChat extends LitElement {
 		super();
 		this.home = "";
 		this.defaults = null;
+		this.defaultsFailed = false;
 		this.recentCwds = [];
 		this.sheet = null;
 		this.menuStep = "root";
@@ -67,7 +70,10 @@ export class PiNewChat extends LitElement {
 		this.api
 			.defaults()
 			.then((d) => (this.defaults = d))
-			.catch((e: Error) => toast(`Couldn't load the models: ${e.message}`, "error")); // sending still works, on the hub's default
+			.catch((e: Error) => {
+				this.defaultsFailed = true;
+				toast(`Couldn't load the models: ${e.message}`, "error"); // sending still works, on the hub's default
+			});
 		this.api
 			.cwds()
 			.then((r) => (this.recentCwds = r.cwds))
@@ -236,7 +242,7 @@ export class PiNewChat extends LitElement {
 
 	private renderModels(picked: () => void) {
 		const defaults = this.defaults;
-		if (!defaults) return html`<p class="hint">loading models…</p>`;
+		if (!defaults) return html`<p class="hint">${this.defaultsFailed ? "couldn't load models" : "loading models…"}</p>`;
 		const { model, thinking } = this.choice;
 		return modelPicker(
 			{ models: defaults.models, current: model, thinkingLevels: model ? this.levelsOf(model) : [], thinking },
@@ -279,7 +285,8 @@ export class PiNewChat extends LitElement {
 			},
 		);
 		if (step === "model") return html`${menu}${this.renderModels(() => (this.menuStep = "root"))}`;
-		if (step === "approvals") return html`${menu}${approval ? approvalPicker(approval, (mode) => this.edit({ approval: mode })) : html`<p class="hint">loading…</p>`}`;
+		if (step === "approvals")
+			return html`${menu}${approval ? approvalPicker(approval, (mode) => this.edit({ approval: mode })) : html`<p class="hint">${this.defaultsFailed ? "couldn't load" : "loading…"}</p>`}`;
 		return menu;
 	}
 }

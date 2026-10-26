@@ -72,12 +72,12 @@ export function chatMenu(v: ChatMenuView, on: ChatMenuHandlers): TemplateResult 
 			const body = html`<span class="ic">${ICONS[r.key]}</span>
 				<span class="lbl">${r.label}${r.hint ? html`<small>${r.hint}</small>` : nothing}</span>
 				<span class="val">${r.value}</span>
-				${r.disabled ? html`<span class="chev"></span>` : html`<span class="chev" aria-hidden="true">›</span>`}`;
+				${r.disabled ? html`<span class="chev" aria-hidden="true"></span>` : html`<span class="chev" aria-hidden="true">›</span>`}`;
 			if (r.disabled) return html`<div class="mrow off" aria-disabled="true">${body}</div>`;
 			return html`<button class="mrow" @click=${() => (r.key === "attach" ? on.attach() : on.step(r.key))}>${body}</button>`;
 		})}</div>`;
 	}
-	const back = html`<button class="back u" aria-label="Back" @click=${() => on.step("root")}>‹ ${STEP_TITLES[v.step]}</button>`;
+	const back = html`<button class="back u" @click=${() => on.step("root")}>‹ ${STEP_TITLES[v.step]}</button>`;
 	if (v.step !== "folder") return back;
 	const submit = (e: Event) => {
 		e.preventDefault();

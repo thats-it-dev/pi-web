@@ -83,6 +83,36 @@ test("new chat: the model picked in the draft is the one pi starts with, and the
 	}
 });
 
+test("new chat: the approvals picked in the draft are the running session's", async ({ page }) => {
+	await page.goto("/#/new");
+	await expect(page.getByRole("button", { name: /^Model Fake/ })).toBeVisible();
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("auto"); // the hub's default
+	await page.getByRole("button", { name: /^approvals/ }).click();
+	await page.getByRole("radio", { name: "manual" }).click();
+	await page.getByRole("button", { name: "‹ approvals" }).click();
+	await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("manual");
+	await page.keyboard.press("Escape");
+	await page.getByLabel("Message").fill("hi");
+	await page.getByRole("button", { name: "send" }).click();
+	await expect(page).toHaveURL(/#\/s\//);
+	await expect(page.locator("pi-messages")).toContainText("Hello world");
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("manual");
+});
+
+test("new chat: when the models can't load, the menu says so instead of loading forever", async ({ page }) => {
+	await page.route(/\/api\/defaults$/, (route) => route.fulfill({ status: 500, json: { error: "probe failed" } }));
+	await page.goto("/#/new");
+	await expect(page.locator("tk-toasts")).toContainText("Couldn't load the models");
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await page.getByRole("button", { name: /^model/ }).click();
+	await expect(page.locator("tk-sheet")).toContainText("couldn't load models");
+	await page.getByRole("button", { name: "‹ model" }).click();
+	await page.getByRole("button", { name: /^approvals/ }).click();
+	await expect(page.locator("tk-sheet")).toContainText("couldn't load");
+});
+
 test("launch reopens a session active within 2 hours", async ({ page }) => {
 	await startChat(page, "hi");
 	const url = page.url();
@@ -105,7 +135,7 @@ test("desktop: start a session, stream a reply, switch model, rename and compact
 	await page.getByRole("button", { name: "Chat options" }).click();
 	await page.getByRole("button", { name: /^approvals/ }).click();
 	await page.getByRole("radio", { name: "semi" }).click();
-	await page.getByRole("button", { name: "Back" }).click();
+	await page.getByRole("button", { name: "‹ approvals" }).click();
 	await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("semi");
 	await page.keyboard.press("Escape");
 

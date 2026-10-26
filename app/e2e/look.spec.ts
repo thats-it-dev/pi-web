@@ -77,6 +77,7 @@ for (const scheme of ["light", "dark"] as const) {
 			await expect(page.getByRole("button", { name: /^Model Fake A/ })).toBeVisible();
 			await page.getByRole("button", { name: "Chat options" }).click();
 			await expect(page.getByRole("button", { name: /^approvals/ })).toContainText("semi");
+			await page.mouse.move(0, 0); // no row hover in the shot
 			await shot(page, "chat-menu");
 		});
 

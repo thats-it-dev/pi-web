@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, css, html } from "lit";
 import { sharedStyles } from "@thatsit/kit";
 import { HubApi } from "../lib/api.ts";
 import { launchRoute } from "../lib/launch.ts";
@@ -21,6 +21,11 @@ export class PiApp extends LitElement {
 		sharedStyles,
 		css`
 			:host { display: block; height: 100%; }
+			.waiting { margin: auto; flex: none; padding: 24px; }
+			.waiting .menu { display: none; font-size: 1.4rem; }
+			@media (max-width: 899px) {
+				.waiting .menu { display: inline-block; }
+			}
 		`,
 	];
 
@@ -83,6 +88,11 @@ export class PiApp extends LitElement {
 		void resyncPush(this.api, browserPushEnv());
 	};
 
+	// Sent from the button, not this host: tk-shell sits inside pi-app and only hears events from its own children.
+	private openNav = (e: Event) => {
+		e.currentTarget?.dispatchEvent(new CustomEvent("tk-open-nav", { bubbles: true, composed: true }));
+	};
+
 	render() {
 		const r = this.route;
 		return html`
@@ -98,7 +108,8 @@ export class PiApp extends LitElement {
 		if (!this.api || r.name === "settings") return html`<pi-settings @pi-hub-changed=${this.connectHub}></pi-settings>`;
 		if (r.name === "session") return html`<pi-session .api=${this.api} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
 		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
-		return nothing; // home: launch() picks the route once the sessions are in
+		// home: launch() picks the route once the sessions are in; till then, a way to the sessions.
+		return html`<div class="waiting"><button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button></div>`;
 	}
 }
 customElements.define("pi-app", PiApp);
