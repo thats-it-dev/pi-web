@@ -5,6 +5,7 @@ import { after, before, test, type TestContext } from "node:test";
 import type { AgentMessage, ApprovalMode, StreamMessage } from "../../shared/src/protocol.ts";
 import { HttpError } from "../src/errors.ts";
 import type { HandleEvent } from "../src/handle.ts";
+import type { ModelChoice } from "../src/last-model.ts";
 import { RpcHandle } from "../src/rpc-handle.ts";
 import { type FakeModel, type FakeScript, HELLO, startFakeModel } from "./support/fake-model.ts";
 import { makePiEnv } from "./support/pi-env.ts";
@@ -115,6 +116,25 @@ test("switches model and thinking level", async (t) => {
 	await h.command({ type: "set_thinking", level: "high" });
 	assert.equal(h.snapshot().state.thinkingLevel, "high");
 	assert.equal((await h.command({ type: "set_model", provider: "fake", modelId: "nope" })).ok, false);
+});
+
+test("set_model reports the pick through onModelPicked", async (t) => {
+	const env = makePiEnv({ modelUrl: model.url });
+	const picks: ModelChoice[] = [];
+	const h = await RpcHandle.start({ piBin: env.piBin, cwd: env.workDir, exportDir: join(env.root, "exports"), env: env.env, onModelPicked: (c) => picks.push(c) });
+	t.after(() => {
+		h.close();
+		env.cleanup();
+	});
+	assert.equal((await h.command({ type: "set_model", provider: "fake", modelId: "fake-b" })).ok, true);
+	assert.equal(picks.length, 1);
+	assert.equal(picks[0].provider, "fake");
+	assert.equal(picks[0].modelId, "fake-b");
+	await h.command({ type: "set_model", provider: "fake", modelId: "fake-a" });
+	await h.command({ type: "set_thinking", level: "high" });
+	assert.deepEqual(picks.at(-1), { provider: "fake", modelId: "fake-a", thinking: "high" });
+	await h.command({ type: "set_model", provider: "fake", modelId: "nope" });
+	assert.equal(picks.length, 3);
 });
 
 // A permission extension of the kind people install: every tool call asks Allow / Deny.

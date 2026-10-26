@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
+import { LastModelStore } from "./last-model.ts";
 import { PushStore } from "./push.ts";
 import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
@@ -33,8 +34,9 @@ const exportDir = join(cfg.dataDir, "exports");
 mkdirSync(exportDir, { recursive: true });
 mkdirSync(join(cfg.dataDir, "index"), { recursive: true }); // webhook drop folder
 const index = new SessionIndex(sessionsDir());
+const lastModel = new LastModelStore(join(cfg.dataDir, "last-model.json"));
 const registry = new Registry({
-	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode }) },
+	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, onModelPicked: (c) => lastModel.set(c) }) },
 	lookup: index,
 	maxHeadless: cfg.maxHeadless,
 	idleMs: cfg.idleMinutes * 60_000,

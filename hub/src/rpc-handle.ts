@@ -31,6 +31,7 @@ import { applyEvent, createConversation } from "../../shared/src/reducer.ts";
 import { HttpError } from "./errors.ts";
 import type { HandleEvent, SessionHandle } from "./handle.ts";
 import { lineSplitter } from "../../shared/src/jsonl.ts";
+import type { ModelChoice } from "./last-model.ts";
 import { type RpcCommand, toRpc } from "./translate.ts";
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
@@ -56,6 +57,7 @@ export interface RpcHandleOptions {
 	env?: Record<string, string>;
 	promptAckMs?: number; // how long a prompt waits for pi's ack before returning `pending`
 	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
+	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
 }
 
 export class RpcHandle implements SessionHandle {
@@ -353,6 +355,7 @@ export class RpcHandle implements SessionHandle {
 			case "set_thinking":
 				await this.refresh({ catalog: true });
 				this.broadcast(this.meta());
+				if (this.state?.model) this.opts.onModelPicked?.({ provider: this.state.model.provider, modelId: this.state.model.id, thinking: this.state.thinkingLevel });
 				return;
 			case "rename":
 				await this.refresh();
