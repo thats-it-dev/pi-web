@@ -1,11 +1,12 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles } from "@thatsit/kit";
 import { HubApi } from "../lib/api.ts";
+import { launchRoute } from "../lib/launch.ts";
 import { ListStore } from "../lib/list-store.ts";
 import { browserPushEnv, resyncPush } from "../lib/push.ts";
 import { type Route, hrefFor, parseRoute } from "../lib/route.ts";
 import { getHubUrl } from "../lib/settings.ts";
-import "./pi-new-session.ts";
+import "./pi-new-chat.ts";
 import "./pi-session.ts";
 import "./pi-settings.ts";
 import "./pi-sidebar.ts";
@@ -20,12 +21,6 @@ export class PiApp extends LitElement {
 		sharedStyles,
 		css`
 			:host { display: block; height: 100%; }
-			.empty { margin: auto; flex: none; text-align: center; padding: 24px; color: var(--text-secondary); }
-			.empty h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 3rem; color: var(--text-primary); margin: 0 0 10px; }
-			.empty .menu { display: none; }
-			@media (max-width: 899px) {
-				.empty .menu { display: inline-block; font-size: 1.4rem; margin-bottom: 12px; }
-			}
 		`,
 	];
 
@@ -38,6 +33,7 @@ export class PiApp extends LitElement {
 
 	private onHash = () => {
 		this.route = parseRoute(location.hash);
+		this.launch();
 	};
 	private onRouteReplaced = (e: Event) => {
 		this.route = (e as CustomEvent<Route>).detail;
@@ -53,12 +49,26 @@ export class PiApp extends LitElement {
 	disconnectedCallback(): void {
 		window.removeEventListener("hashchange", this.onHash);
 		this.removeEventListener("pi-route-replaced", this.onRouteReplaced);
-		this.list?.stop();
+		this.stopList();
 		super.disconnectedCallback();
 	}
 
-	private connectHub = () => {
+	// No route in the URL: open a recent chat, or a new one, once the hub's list is in (not the cached one).
+	private launch = () => {
+		const list = this.list;
+		if (this.route.name !== "home" || !list?.loaded) return;
+		const r = launchRoute(list.sessions, Date.now());
+		history.replaceState(null, "", hrefFor(r));
+		this.route = r;
+	};
+
+	private stopList(): void {
+		this.list?.removeEventListener("change", this.launch);
 		this.list?.stop();
+	}
+
+	private connectHub = () => {
+		this.stopList();
 		const url = getHubUrl();
 		if (!url) {
 			this.api = null;
@@ -68,13 +78,9 @@ export class PiApp extends LitElement {
 		}
 		this.api = new HubApi(url);
 		this.list = new ListStore(this.api);
+		this.list.addEventListener("change", this.launch);
 		this.list.start();
 		void resyncPush(this.api, browserPushEnv());
-	};
-
-	// Sent from the button, not this host: tk-shell sits inside pi-app and only hears events from its own children.
-	private openNav = (e: Event) => {
-		e.currentTarget?.dispatchEvent(new CustomEvent("tk-open-nav", { bubbles: true, composed: true }));
 	};
 
 	render() {
@@ -91,12 +97,8 @@ export class PiApp extends LitElement {
 	private renderMain(r: Route) {
 		if (!this.api || r.name === "settings") return html`<pi-settings @pi-hub-changed=${this.connectHub}></pi-settings>`;
 		if (r.name === "session") return html`<pi-session .api=${this.api} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
-		if (r.name === "new") return html`<pi-new-session .api=${this.api}></pi-new-session>`;
-		return html`<div class="empty">
-			<button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button>
-			<h1><span class="u on">pi</span></h1>
-			<p>Pick a session, or <a class="u" href="#/new">start a new one</a>.</p>
-		</div>`;
+		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
+		return nothing; // home: launch() picks the route once the sessions are in
 	}
 }
 customElements.define("pi-app", PiApp);

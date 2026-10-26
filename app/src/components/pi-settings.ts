@@ -5,6 +5,7 @@ import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setThe
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import type { UpdateStatus } from "../../../shared/src/protocol.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
+import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiSettings extends LitElement {
 	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true } };
@@ -21,10 +22,10 @@ export class PiSettings extends LitElement {
 
 	static styles = [
 		sharedStyles,
+		newChatStyles,
 		css`
 			:host { display: block; overflow-y: auto; height: 100%; }
-			.wrap { max-width: 560px; margin: 0 auto; padding: calc(24px + env(safe-area-inset-top)) 18px 40px; display: grid; gap: 14px; }
-			h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.1em; font-size: 2rem; margin: 0; }
+			.wrap { max-width: 560px; margin: 0 auto; padding: 18px 18px 40px; display: grid; gap: 14px; }
 			h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.08em; font-size: 1.2rem; margin: 18px 0 0; }
 			label { font-family: var(--font-display); letter-spacing: 0.06em; }
 			.hint { color: var(--text-secondary); font-size: 0.85rem; margin: 0; }
@@ -190,45 +191,50 @@ export class PiSettings extends LitElement {
 	}
 
 	render() {
-		return html`<div class="wrap">
-			<a class="back u" href="#/">← sessions</a>
-			<h1>settings</h1>
-			<form @submit=${this.connect}>
-				<label for="hub">hub address</label>
-				<p class="hint">The tailnet address of the pi-web hub on spark, for example <code>spark-713a.tail9274fa.ts.net:7878</code>.</p>
-				<div class="row">
-					<input id="hub" .value=${this.url} @input=${(e: Event) => (this.url = (e.target as HTMLInputElement).value)} placeholder="spark-713a.tail9274fa.ts.net:7878" autocomplete="off" autocapitalize="off" spellcheck="false" />
-					<button class="btn" ?disabled=${this.checking}>${this.checking ? "checking…" : "connect"}</button>
+		return html`
+			<tk-header menu-label="Open sessions">
+				<h1 slot="title">settings</h1>
+				${newChatButton()}
+			</tk-header>
+			<div class="wrap">
+				<a class="back u" href="#/">← sessions</a>
+				<form @submit=${this.connect}>
+					<label for="hub">hub address</label>
+					<p class="hint">The tailnet address of the pi-web hub on spark, for example <code>spark-713a.tail9274fa.ts.net:7878</code>.</p>
+					<div class="row">
+						<input id="hub" .value=${this.url} @input=${(e: Event) => (this.url = (e.target as HTMLInputElement).value)} placeholder="spark-713a.tail9274fa.ts.net:7878" autocomplete="off" autocapitalize="off" spellcheck="false" />
+						<button class="btn" ?disabled=${this.checking}>${this.checking ? "checking…" : "connect"}</button>
+					</div>
+					${this.status ? html`<p class="status ${this.status.ok ? "ok" : "bad"}" role="status">${this.status.text}</p>` : nothing}
+				</form>
+				<h2>hub</h2>
+				<p class="hint">Pull the latest master on spark, install, and restart the hub. A session mid-turn would be cut off, so the hub refuses while one is running unless you say so.</p>
+				${this.renderUpdate()}
+				<h2>theme</h2>
+				<div class="seg" role="radiogroup" aria-label="Theme">
+					${(["system", "light", "dark"] as const).map(
+						(t) => html`<button role="radio" aria-checked=${this.theme === t ? "true" : "false"} class=${this.theme === t ? "on" : ""} @click=${() => {
+							setTheme(t);
+							this.theme = t;
+						}}>${t}</button>`,
+					)}
 				</div>
-				${this.status ? html`<p class="status ${this.status.ok ? "ok" : "bad"}" role="status">${this.status.text}</p>` : nothing}
-			</form>
-			<h2>hub</h2>
-			<p class="hint">Pull the latest master on spark, install, and restart the hub. A session mid-turn would be cut off, so the hub refuses while one is running unless you say so.</p>
-			${this.renderUpdate()}
-			<h2>theme</h2>
-			<div class="seg" role="radiogroup" aria-label="Theme">
-				${(["system", "light", "dark"] as const).map(
-					(t) => html`<button role="radio" aria-checked=${this.theme === t ? "true" : "false"} class=${this.theme === t ? "on" : ""} @click=${() => {
-						setTheme(t);
-						this.theme = t;
-					}}>${t}</button>`,
-				)}
+				<h2>notifications</h2>
+				<p class="hint">${PUSH_COPY.hint}</p>
+				${this.renderPush()}
+				<h2>watch</h2>
+				<p class="hint">The Pebble face and app, and the Index ring's webhook, need only this hub's address; your tailnet login is the key. Mute pi-web in the Pebble app's notifications so requests don't arrive twice.</p>
+				<h2>display diagnostics</h2>
+				<p class="hint">Temporary: shows the screen measurements on top of the app, for fixing the iPhone layout.</p>
+				<div class="seg" role="radiogroup" aria-label="Display diagnostics">
+					${(["off", "on"] as const).map(
+						(v) => html`<button role="radio" aria-checked=${vpDebugOn() === (v === "on") ? "true" : "false"} class=${vpDebugOn() === (v === "on") ? "on" : ""} @click=${() => setVpDebug(v === "on")}>${v}</button>`,
+					)}
+				</div>
+				<h2>install</h2>
+				<p class="hint">On iPhone or iPad, open this page in Safari and choose Share → Add to Home Screen.</p>
 			</div>
-			<h2>notifications</h2>
-			<p class="hint">${PUSH_COPY.hint}</p>
-			${this.renderPush()}
-			<h2>watch</h2>
-			<p class="hint">The Pebble face and app, and the Index ring's webhook, need only this hub's address; your tailnet login is the key. Mute pi-web in the Pebble app's notifications so requests don't arrive twice.</p>
-			<h2>display diagnostics</h2>
-			<p class="hint">Temporary: shows the screen measurements on top of the app, for fixing the iPhone layout.</p>
-			<div class="seg" role="radiogroup" aria-label="Display diagnostics">
-				${(["off", "on"] as const).map(
-					(v) => html`<button role="radio" aria-checked=${vpDebugOn() === (v === "on") ? "true" : "false"} class=${vpDebugOn() === (v === "on") ? "on" : ""} @click=${() => setVpDebug(v === "on")}>${v}</button>`,
-				)}
-			</div>
-			<h2>install</h2>
-			<p class="hint">On iPhone or iPad, open this page in Safari and choose Share → Add to Home Screen.</p>
-		</div>`;
+		`;
 	}
 }
 customElements.define("pi-settings", PiSettings);

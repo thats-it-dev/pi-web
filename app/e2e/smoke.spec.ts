@@ -1,24 +1,100 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 import { startTerminalPi } from "../../hub/test/support/terminal-pi.ts";
 
 const WORKDIR = join(tmpdir(), "pi-web-e2e-work"); // keep in sync with hub-for-e2e.ts
 
-async function startSession(page: import("@playwright/test").Page) {
+// A new chat runs nothing on the hub until its first message: pick the folder, then send.
+async function startChat(page: Page, text: string, folder = WORKDIR) {
 	await page.goto("/#/new");
-	await page.getByLabel("Folder path").fill(WORKDIR);
-	await page.getByRole("button", { name: "start session" }).click();
+	await pickFolder(page, folder);
+	await page.getByLabel("Message").fill(text);
+	await page.getByRole("button", { name: "send" }).click(); // Enter doesn't send on the phone
 	await expect(page).toHaveURL(/#\/s\//);
 }
 
+async function pickFolder(page: Page, folder: string) {
+	await expect(page.getByRole("button", { name: /^Model Fake/ })).toBeVisible(); // the menu's rows move when the models arrive
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await page.getByRole("button", { name: /^folder/ }).click();
+	await page.getByLabel("Folder path").fill(folder);
+	await page.getByLabel("Folder path").press("Enter");
+	await expect(page.getByRole("button", { name: /^folder/ })).toContainText(folder);
+	await page.keyboard.press("Escape");
+}
+
+async function pickDraftModel(page: Page, name: string) {
+	await expect(page.getByRole("button", { name: /^Model Fake/ })).toBeVisible();
+	await page.getByRole("button", { name: "Chat options" }).click();
+	await page.getByRole("button", { name: /^model/ }).click();
+	await page.getByRole("option", { name: new RegExp(name) }).click();
+	await expect(page.getByRole("button", { name: /^model/ })).toContainText(name);
+	await page.keyboard.press("Escape");
+	await expect(page.getByRole("button", { name: new RegExp(`^Model ${name}`) })).toBeVisible();
+}
+
+const noSessions = (page: Page) =>
+	page.route(/\/api\/sessions$/, (route) => (route.request().method() === "GET" ? route.fulfill({ json: { sessions: [], home: "/home/e2e" } }) : route.fallback()));
+
+test("launch with no route opens a new chat when nothing is recent", async ({ page }) => {
+	await noSessions(page);
+	await page.goto("/");
+	await expect(page.getByRole("heading", { name: "new chat" })).toBeVisible();
+	await expect(page).toHaveURL(/#\/new$/);
+});
+
+test("new chat: send creates the session in ~ and the reply streams", async ({ page }) => {
+	await page.goto("/#/new");
+	await expect(page.locator("pi-composer .folder")).toContainText("~");
+	await page.getByLabel("Message").fill("hi");
+	await page.getByRole("button", { name: "send" }).click();
+	await expect(page).toHaveURL(/#\/s\//);
+	await expect(page.locator("pi-messages .user")).toContainText("hi");
+	await expect(page.locator("pi-messages")).toContainText("Hello world");
+	await page.getByRole("button", { name: "Session stats" }).click();
+	await expect(page.locator('dl.stats dt:has-text("folder") + dd')).toHaveText("~");
+});
+
+test("new chat: a bad folder keeps the message and says why", async ({ page }) => {
+	await page.goto("/#/new");
+	await pickFolder(page, "/nope");
+	await page.getByLabel("Message").fill("hi");
+	await page.getByRole("button", { name: "send" }).click();
+	await expect(page.locator("tk-toasts")).toContainText("Not a folder");
+	await expect(page.getByLabel("Message")).toHaveValue("hi");
+	await expect(page).toHaveURL(/#\/new$/);
+});
+
+test("new chat: the model picked in the draft is the one pi starts with, and the next new chat remembers it", async ({ page }) => {
+	// Both ways round, so the hub is left on Fake A (pi's default) for the tests after this one.
+	await page.goto("/#/new");
+	for (const name of ["Fake B", "Fake A"]) {
+		await pickDraftModel(page, name);
+		await page.getByLabel("Message").fill("hi");
+		await page.getByRole("button", { name: "send" }).click();
+		await expect(page).toHaveURL(/#\/s\//);
+		await expect(page.locator("pi-messages")).toContainText("Hello world");
+		await expect(page.getByRole("button", { name: new RegExp(`^Model ${name}`) })).toBeVisible();
+		await page.locator("pi-header").getByRole("button", { name: "New chat" }).click();
+		await expect(page).toHaveURL(/#\/new$/);
+		await expect(page.getByRole("button", { name: new RegExp(`^Model ${name}`) })).toBeVisible();
+	}
+});
+
+test("launch reopens a session active within 2 hours", async ({ page }) => {
+	await startChat(page, "hi");
+	const url = page.url();
+	await page.goto("/");
+	await expect(page).toHaveURL(url);
+	await expect(page.locator("pi-messages")).toContainText("Hello world");
+});
+
 test("desktop: start a session, stream a reply, switch model, rename and compact with slash commands", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
-	await startSession(page);
+	await startChat(page, "hi");
 	const input = page.getByLabel("Message");
-	await input.fill("hi");
-	await input.press("Enter");
 	await expect(page.locator("pi-messages")).toContainText("Hello world");
 	await expect(page.getByRole("button", { name: "Session stats" })).toContainText("/ 1k"); // fake-a has a 1000-token window
 
@@ -53,7 +129,8 @@ test("desktop: start a session, stream a reply, switch model, rename and compact
 
 test("desktop: @ mentions complete files and folders from the session's folder", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
-	await startSession(page);
+	await startChat(page, "hi"); // @ completes against a running session's folder
+	await expect(page.locator("pi-messages")).toContainText("Hello world");
 	const input = page.getByLabel("Message");
 	await input.pressSequentially("look at @do");
 	const files = page.getByRole("listbox", { name: "Files" });
@@ -67,10 +144,7 @@ test("desktop: @ mentions complete files and folders from the session's folder",
 });
 
 test("the agent's show_image appears and opens full screen", async ({ page }) => {
-	await startSession(page);
-	const input = page.getByLabel("Message");
-	await input.fill("show me the test card");
-	await page.getByRole("button", { name: "send" }).click();
+	await startChat(page, "show me the test card");
 	const figure = page.locator("pi-messages figure.shot");
 	await expect(figure).toHaveCount(1);
 	await figure.scrollIntoViewIfNeeded();
@@ -92,9 +166,7 @@ test("the agent's show_image appears and opens full screen", async ({ page }) =>
 
 test("phone: send with the button, then find the session from the menu", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
-	await startSession(page);
-	await page.getByLabel("Message").fill("hello from the phone");
-	await page.getByRole("button", { name: "send" }).click();
+	await startChat(page, "hello from the phone");
 	await expect(page.locator("pi-messages")).toContainText("Hello world");
 	await page.locator("pi-header").getByRole("button", { name: "Open sessions" }).click();
 	await expect(page.locator("pi-sidebar")).toContainText("hello from the phone");

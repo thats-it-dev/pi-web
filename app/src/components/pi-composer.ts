@@ -35,6 +35,7 @@ export class PiComposer extends LitElement {
 		model: { attribute: false },
 		thinking: { attribute: false },
 		folder: { attribute: false },
+		busy: { attribute: false },
 		searchFiles: { attribute: false },
 		text: { state: true },
 		cursor: { state: true },
@@ -52,6 +53,7 @@ export class PiComposer extends LitElement {
 	declare model: ModelInfo | null;
 	declare thinking: ThinkingLevel | null;
 	declare folder: string | null; // an unsent chat shows its folder after the model
+	declare busy: boolean; // the last send is still being taken (an unsent chat starting its session)
 	declare searchFiles: FileSearch | null;
 	declare text: string;
 	declare cursor: number;
@@ -110,6 +112,7 @@ export class PiComposer extends LitElement {
 		this.model = null;
 		this.thinking = null;
 		this.folder = null;
+		this.busy = false;
 		this.searchFiles = null;
 		this.text = "";
 		this.cursor = 0;
@@ -184,7 +187,7 @@ export class PiComposer extends LitElement {
 
 	private submit(mode: PromptMode): void {
 		const text = this.text.trim();
-		if (!text && this.images.length === 0) return;
+		if (this.busy || (!text && this.images.length === 0)) return;
 		this.dispatchEvent(new CustomEvent<SubmitDetail>("pi-submit", { detail: { text, images: this.images, mode }, bubbles: true, composed: true }));
 		this.text = "";
 		this.images = [];
@@ -361,7 +364,7 @@ export class PiComposer extends LitElement {
 					</div>
 					${this.streaming && !this.text.trim() && !this.images.length
 						? html`<button class="icon stop" aria-label="stop" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>${STOP_ICON}</button>`
-						: html`<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>`}
+						: html`<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} ?disabled=${this.busy} aria-busy=${this.busy ? "true" : "false"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>`}
 				</div>
 			</div>
 			${this.statuses.length ? html`<div class="status">${this.statuses.map((s) => html`<span>${s}</span>`)}</div>` : nothing}

@@ -1,8 +1,9 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
-import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import type { HubApi } from "../lib/api.ts";
+import { takeHandoff } from "../lib/draft.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
@@ -50,6 +51,7 @@ export class PiSession extends LitElement {
 	private ticker: ReturnType<typeof setInterval> | undefined;
 	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
+	private attaching = false; // the sheet closed for the file picker: leave the keyboard down
 
 	static styles = [
 		sharedStyles,
@@ -180,6 +182,7 @@ export class PiSession extends LitElement {
 	// Fork, clone and new move this pi process to another session id. The hub
 	// only follows the new id within one connection, so reopen under it.
 	private onSnapshot = () => {
+		void this.sendHandoff();
 		const id = this.store?.id;
 		if (!id || id === this.streamId) return;
 		history.replaceState(null, "", hrefFor({ name: "session", id }));
@@ -223,8 +226,22 @@ export class PiSession extends LitElement {
 		return true;
 	}
 
-	private onSubmit = async (e: Event) => {
+	// The first message of a chat started from the new-chat page, sent once pi is up.
+	private async sendHandoff(): Promise<void> {
+		const s = this.store;
+		const msg = s?.snapshot ? takeHandoff(s.id) : null;
+		if (!s?.snapshot || !msg) return;
+		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
+		await this.send(msg.text, msg.images, "send");
+	}
+
+	private onSubmit = (e: Event) => {
 		const { text, images, mode } = (e as CustomEvent<SubmitDetail>).detail;
+		void this.send(text, images, mode);
+	};
+
+	// Failures put the text and images back in the composer.
+	private async send(text: string, images: ImageInput[], mode: PromptMode): Promise<void> {
 		this.atBottom = true;
 		const parsed = parseInput(text);
 		let ok: boolean;
@@ -238,7 +255,7 @@ export class PiSession extends LitElement {
 			if (r?.pending) this.pendingPrompt = { text, images }; // may still fail later as a command_error
 		}
 		if (!ok) this.composer?.restore(text, images);
-	};
+	}
 
 	private onAbort = () => void this.run({ type: "abort" });
 
@@ -361,6 +378,9 @@ export class PiSession extends LitElement {
 		if (key === this.openSheetKey) return;
 		this.openSheetKey = key;
 		if (!key) {
+			const attaching = this.attaching;
+			this.attaching = false;
+			if (attaching && matchMedia("(pointer: coarse)").matches) return; // the keyboard would cover the file picker
 			this.composer?.updateComplete.then(() => this.composer?.renderRoot.querySelector("textarea")?.focus());
 			return;
 		}
@@ -446,6 +466,7 @@ export class PiSession extends LitElement {
 			{
 				step: (s) => (this.menuStep = s),
 				attach: () => {
+					this.attaching = true;
 					this.sheet = null;
 					this.composer?.pickImages();
 				},

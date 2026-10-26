@@ -37,6 +37,9 @@ writeFileSync(join(dataDir, "config.json"), JSON.stringify({ port: PORT, hostnam
 const E2E_ENV_FILE = join(tmpdir(), "pi-web-e2e-env.json"); // keep in sync with smoke.spec.ts
 writeFileSync(E2E_ENV_FILE, JSON.stringify({ piBin: pi.piBin, agentDir: pi.agentDir, socketPath: join(dataDir, "bridge.sock") }));
 
-Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir });
+// New chats start in ~: make that a throwaway folder, not the real home.
+const home = join(pi.root, "home");
+mkdirSync(home);
+Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir, HOME: home });
 process.on("exit", () => pi.cleanup());
 await import("../../hub/src/main.ts");
