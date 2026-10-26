@@ -17,6 +17,7 @@ export class TkHeader extends LitElement {
 			.l1 { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 			.menu { display: none; font-size: 1.2rem; line-height: 1; align-self: center; }
 			::slotted(h1) { font-family: var(--font-display); font-weight: 400; font-size: 1.15rem; letter-spacing: 0.02em; margin: 0; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+			::slotted([slot="actions"]) { flex: none; align-self: center; }
 			@media (max-width: 899px) {
 				header { padding: 8px 14px; }
 				.menu { display: inline-block; }
