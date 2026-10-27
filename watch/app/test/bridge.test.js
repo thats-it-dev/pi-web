@@ -300,7 +300,7 @@ test("open fetches the last turn and sends a reply; live text for that session i
 	t.pend([], [sess("s1", "done", { title: "Fix tests", updatedAt: new Date(2026, 9, 27, 9, 5).getTime() })]);
 	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
 	const g = t.hub.of("get")[0];
-	assert.equal(g.path, "/api/watch/history?session=s1&limit=1");
+	assert.equal(g.path, "/api/watch/history?session=s1&limit=6");
 	t.hub.reply(null, { turns: [{ i: 3, role: "agent", text: "All green." }], total: 4 });
 	t.drain();
 	assert.deepEqual(t.last("reply"), { MSG: "reply", SESSION_ID: "s1", LABEL: "Fix tests", TEXT: "All green.", AT: "09:05", STATUS: "d" });
@@ -359,7 +359,7 @@ test("launched with a session code (signed 32-bit) fetches launch-target and sen
 	t.bridge.onAppMessage({ CMD: "launched", CODE: 0x80000003 | 0 });
 	assert.equal(t.hub.of("get")[0].path, "/api/watch/launch-target?code=" + 0x80000003);
 	t.hub.reply(null, { sessionId: "s9" });
-	assert.equal(t.hub.of("get")[1].path, "/api/watch/history?session=s9&limit=1");
+	assert.equal(t.hub.of("get")[1].path, "/api/watch/history?session=s9&limit=6");
 	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "done it" }], total: 1 });
 	t.drain();
 	assert.equal(t.last("reply").SESSION_ID, "s9");
@@ -399,4 +399,62 @@ test("a dropped dict is retried once after 500 ms, then given up on", () => {
 	t.fail();
 	assert.equal(t.timers.pending().length, 0);
 	assert.ok(t.logs.some((m) => /drop notice/.test(m)));
+});
+
+test("open shows the last agent turn, not a trailing tool or you line", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "earlier" }, { i: 1, role: "agent", text: "the answer" }, { i: 2, role: "tool", text: "bash · ls" }, { i: 3, role: "you", text: "thanks" }], total: 4 });
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "the answer");
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "you", text: "hi" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "");
+});
+
+test("an open reply follows its session's status and time", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "running")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "working" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("reply").STATUS, "r");
+	const at = new Date(2026, 9, 27, 14, 2).getTime();
+	const out = t.pend([], [sess("s1", "done", { updatedAt: at })]);
+	const r = out.filter((d) => d.MSG === "reply");
+	assert.equal(r.length, 1);
+	assert.equal(r[0].STATUS, "d");
+	assert.equal(r[0].AT, "14:02");
+	assert.equal(r[0].TEXT, "working");
+	// Unchanged frames send nothing more.
+	assert.equal(t.pend([], [sess("s1", "done", { updatedAt: at })]).filter((d) => d.MSG === "reply").length, 0);
+});
+
+test("a reply of 600 multibyte characters still fits one dict", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "中".repeat(700) }], total: 1 });
+	t.drain();
+	assert.ok(dictBytes(t.last("reply")) <= 1000);
+	t.bridge.onText({ sessionId: "s1", text: "😀".repeat(300), streaming: true });
+	t.drain();
+	assert.ok(dictBytes(t.last("reply")) <= 1000);
+	assert.ok(t.last("reply").TEXT.length > 0);
+});
+
+test("launched before the first pending frame still makes that query current", () => {
+	const t = setup();
+	t.bridge.start();
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 7 });
+	t.hub.reply(null, { queryId: "q2" });
+	assert.equal(t.drain().filter((d) => d.MSG === "query").length, 0);
+	const out = t.pend([query("q1", 1), query("q2", 2)], []);
+	assert.deepEqual(out.filter((d) => d.MSG === "query").map((d) => d.ID), ["q2"]);
+	// Once a real frame lacks it, the oldest is current again.
+	const o2 = t.pend([query("q1", 1)], []);
+	assert.deepEqual(o2.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"], ["query", "q1"]]);
 });

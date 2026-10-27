@@ -167,6 +167,9 @@ function createBridge(deps) {
 	var answering = {}; // query ids with an answer or skip on its way to the hub
 	var runStart = {}; // session id -> when the phone first saw it running
 	var openSession = null; // the session whose reply the watch is looking at
+	var openText = ""; // the text last sent for it
+	var openMeta = ""; // its status and time as last sent
+	var gotFrame = false; // a real pending frame has arrived
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
 
 	var queue = [];
@@ -323,13 +326,17 @@ function createBridge(deps) {
 		if (q && (sentQuery !== q.id || force)) sendQuery(q);
 		for (var id in fullOptions) if (!findBy(frame.queries, "id", id)) delete fullOptions[id];
 		for (var a in answering) if (!findBy(frame.queries, "id", a)) delete answering[a];
-		if (launchQuery !== null && !findBy(frame.queries, "id", launchQuery)) launchQuery = null;
+		if (gotFrame && launchQuery !== null && !findBy(frame.queries, "id", launchQuery)) launchQuery = null;
 	}
 
 	function update(force) {
 		trackRuns();
 		sendHome(force);
 		syncQuery(force);
+		if (openSession !== null) {
+			var s = sessionById(openSession);
+			if (s && openMeta !== letterOf(s) + clock(s.updatedAt)) sendReply(openSession, openText, false);
+		}
 	}
 
 	function removeQuery(id) {
@@ -343,7 +350,7 @@ function createBridge(deps) {
 
 	function replyDict(sid, text) {
 		var s = sessionById(sid);
-		return {
+		var dict = {
 			MSG: "reply",
 			SESSION_ID: str(sid),
 			LABEL: s ? clipTo(clean(s.title), LABEL_MAX) : "",
@@ -351,19 +358,40 @@ function createBridge(deps) {
 			AT: s ? clock(s.updatedAt) : "",
 			STATUS: s ? letterOf(s) : "d",
 		};
+		// Multibyte text can exceed the dict even at TEXT_MAX characters.
+		var t = dict.TEXT;
+		while (dictBytes(dict) > MSG_BYTES && t.length > 0) {
+			t = cut(t, t.length - Math.max(1, Math.ceil(t.length / 8)));
+			dict.TEXT = t + ELLIPSIS;
+		}
+		return dict;
+	}
+
+	function sendReply(sid, text, force) {
+		var dict = replyDict(sid, text);
+		openText = text;
+		var s = sessionById(sid);
+		openMeta = s ? letterOf(s) + clock(s.updatedAt) : "";
+		enqueue(dict, force);
 	}
 
 	function open(sid) {
 		openSession = sid;
-		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=1", function (err, json) {
+		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=6", function (err, json) {
 			if (err || !json) {
 				log("pi-web: history for " + sid + " failed: " + (err && err.message));
 				notice("Couldn't load the reply");
 				return;
 			}
 			var turns = json.turns || [];
-			var text = turns.length ? str(turns[turns.length - 1].text) : "";
-			enqueue(replyDict(sid, text), true);
+			var text = "";
+			for (var i = turns.length - 1; i >= 0; i--) {
+				if (turns[i].role === "agent") {
+					text = str(turns[i].text);
+					break;
+				}
+			}
+			if (openSession === sid) sendReply(sid, text, true);
 		});
 	}
 
@@ -454,9 +482,8 @@ function createBridge(deps) {
 				return;
 			}
 			if (json.queryId) {
-				if (!findBy(frame.queries, "id", json.queryId)) return;
 				launchQuery = json.queryId;
-				syncQuery(true);
+				if (findBy(frame.queries, "id", json.queryId)) syncQuery(true);
 			} else if (json.sessionId) {
 				open(str(json.sessionId));
 			}
@@ -505,12 +532,13 @@ function createBridge(deps) {
 			if (!f) return;
 			var force = resync;
 			resync = false;
+			gotFrame = true;
 			frame = { queries: f.queries || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
 			update(force);
 		},
 		onText: function (f) {
 			if (!f || !f.sessionId || f.sessionId !== openSession) return;
-			enqueue(replyDict(f.sessionId, f.text));
+			sendReply(f.sessionId, str(f.text), false);
 		},
 		onNotice: function (f) {
 			if (f && f.text) notice(f.text);

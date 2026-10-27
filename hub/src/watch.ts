@@ -5,7 +5,7 @@
 // reports as on screen, and wakes long-pollers.
 
 import type { IncomingHttpHeaders } from "node:http";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
@@ -289,7 +289,8 @@ export class WatchService {
 		const file = this.archiveFile();
 		if (file) {
 			try {
-				writeFileSync(file, JSON.stringify(this.archived));
+				writeFileSync(`${file}.tmp`, JSON.stringify(this.archived));
+				renameSync(`${file}.tmp`, file);
 			} catch (e) {
 				this.deps.log?.(`watch: archive: ${e instanceof Error ? e.message : String(e)}`);
 			}
@@ -421,11 +422,9 @@ export class WatchService {
 		const asking = new Set(queries.map((q) => q.sessionId));
 		const all = [...handles.map((h) => liveSession(h, this.tracked.get(h)?.live)), ...closed.map(closedSession)];
 		const shown = all.filter((s) => this.archived[s.id] === undefined || s.updatedAt > this.archived[s.id]!);
-		all.length = 0;
-		all.push(...shown);
-		for (const s of all) s.status = this.statusOf(s, asking.has(s.id));
+		for (const s of shown) s.status = this.statusOf(s, asking.has(s.id));
 		const rank = (s: WatchSession) => (s.status === "waiting" ? 0 : 1);
-		return all.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
+		return shown.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
 	}
 
 	private statusOf(s: WatchSession, asked: boolean): SessionStatus {
