@@ -252,6 +252,23 @@ test("open session, no query on screen → prompt to that session", async () => 
 	watch.showing({ queryId: null, sessionId: null });
 });
 
+test("a new empty session from the watch, once shown, gets the next ring note as its first prompt", async () => {
+	const sid = await watch.newSession();
+	const h = registry.get(sid) as FakeHandle;
+	assert.deepEqual(h.received, []); // never prompted
+	watch.showing({ queryId: null, sessionId: sid });
+	const before = created.length;
+	const b = multipart({ transcription: "draft the release notes" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before);
+	assert.deepEqual(h.received, [{ type: "prompt", text: "draft the release notes", mode: "send" }]);
+	const j = sidecar(s.delivery);
+	assert.equal(j.action, "prompted");
+	assert.equal(j.sessionId, sid);
+	watch.showing({ queryId: null, sessionId: null });
+});
+
 test("on-screen query gone at answer time → no prompt, no new session, notice \"Already answered\"", async () => {
 	const h = (await registry.create("/work/race")) as FakeHandle;
 	const real = watch.onScreen.bind(watch);

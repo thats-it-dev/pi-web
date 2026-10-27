@@ -352,12 +352,25 @@ export class WatchService {
 
 	// A voice note with nothing to answer starts a session in ~/pebble (spec §10).
 	async startRingSession(text: string): Promise<string> {
-		const cwd = join(this.deps.home, "pebble");
-		mkdirSync(cwd, { recursive: true });
-		const h = await this.deps.registry.create(cwd, this.deps.catalog ? resolveChoice(await this.deps.catalog.get(), this.deps.lastModel?.get() ?? null) : null);
+		const h = await this.createPebble();
 		await this.send(h, { type: "prompt", text, mode: "send" });
 		this.deps.log?.(`index: started session ${h.sessionId} in ~/pebble`);
 		return h.sessionId;
+	}
+
+	// The watch's "+ New session": an empty session in ~/pebble, no prompt. The
+	// watch opens it, so the next ring note becomes its first prompt (spec §5, §8a).
+	async newSession(): Promise<string> {
+		const h = await this.createPebble();
+		this.deps.log?.(`watch: new session ${h.sessionId} in ~/pebble`);
+		return h.sessionId;
+	}
+
+	// A session in ~/pebble on the model a new web session would get.
+	private async createPebble(): Promise<SessionHandle> {
+		const cwd = join(this.deps.home, "pebble");
+		mkdirSync(cwd, { recursive: true });
+		return this.deps.registry.create(cwd, this.deps.catalog ? resolveChoice(await this.deps.catalog.get(), this.deps.lastModel?.get() ?? null) : null);
 	}
 
 	health(): { running: number; pending: number } {

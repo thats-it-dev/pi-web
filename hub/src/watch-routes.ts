@@ -82,7 +82,7 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 	}
 
 	if (m === "POST") {
-		const known = ["showing", "answer", "skip", "prompt", "model", "launch", "abort", "archive"].map((a) => `/api/watch/${a}`);
+		const known = ["showing", "answer", "skip", "prompt", "model", "launch", "abort", "archive", "new"].map((a) => `/api/watch/${a}`);
 		if (!known.includes(p)) return false;
 		const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
 		if (p === "/api/watch/showing") {
@@ -123,6 +123,7 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 			if (!str(body.sessionId)) throw new HttpError(400, "A sessionId is required");
 			return reply(await watch.abort(body.sessionId)), true;
 		}
+		if (p === "/api/watch/new") return reply({ ok: true, sessionId: await watch.newSession() }), true;
 		if (p === "/api/watch/archive") {
 			if (!str(body.sessionId)) throw new HttpError(400, "A sessionId is required");
 			watch.archive(body.sessionId);

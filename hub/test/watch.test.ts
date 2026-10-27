@@ -834,6 +834,44 @@ test("startRingSession creates ~/pebble once and prompts the new session", async
 	svc.close();
 });
 
+test("newSession creates an empty session in ~/pebble, with no prompt, listed for the watch", async () => {
+	const { registry, svc, dir } = setup();
+	const id = await svc.newSession();
+	const h = registry.get(id) as FakeHandle;
+	assert.equal(h.cwd, join(dir, "pebble"));
+	assert.ok(existsSync(join(dir, "pebble")));
+	assert.deepEqual(h.received, []);
+	assert.ok(svc.pending().sessions.some((s) => s.id === id));
+	svc.close();
+});
+
+test("newSession starts on the same model choice as a ring session", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "watch-test-"));
+	const index = new SessionIndex(dir);
+	const models: unknown[] = [];
+	let n = 0;
+	const registry = new Registry({
+		factory: {
+			startRpc: async (o) => {
+				models.push(o.model);
+				return new FakeHandle(`s-${++n}`, o.cwd, null);
+			},
+		},
+		lookup: index,
+		maxHeadless: 6,
+		idleMs: 60_000,
+	});
+	const m = (id: string): ModelInfo => ({ id, name: id, provider: "fake", reasoning: false, input: ["text"], contextWindow: 1, maxTokens: 1 });
+	const catalog = { get: async () => ({ models: [m("fake-a"), m("fake-b")], piDefault: { provider: "fake", modelId: "fake-a", thinking: null }, levels: {} }) };
+	const lastModel = new LastModelStore(join(dir, "last-model.json"));
+	lastModel.set({ provider: "fake", modelId: "fake-b", thinking: null });
+	const svc = new WatchService({ registry, index, viewers: new Viewers(), home: dir, catalog, lastModel });
+	await svc.newSession();
+	await svc.startRingSession("hi");
+	assert.deepEqual(models, [{ provider: "fake", modelId: "fake-b", thinking: null }, { provider: "fake", modelId: "fake-b", thinking: null }]);
+	svc.close();
+});
+
 test("subscribers get one pending frame per burst and text tails for the shown session only", async () => {
 	const { registry, svc, clock } = setup();
 	const h = await session(registry);

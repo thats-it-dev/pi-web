@@ -291,6 +291,15 @@ test("abort sends the abort command; a missing session is gone, a missing sessio
 	assert.equal((await call(port, "POST", "/api/watch/abort", WATCH, {})).status, 400);
 });
 
+test("new starts an empty session in ~/pebble and answers its id; it takes no prompt", async () => {
+	const r = await call(port, "POST", "/api/watch/new", WATCH, {});
+	assert.equal(r.status, 200);
+	assert.equal(r.body.ok, true);
+	const h = registry.get(r.body.sessionId) as FakeHandle;
+	assert.equal(h.cwd, join(root, "pebble"));
+	assert.deepEqual(h.received, []);
+});
+
 test("archive hides a session until it is active again, and persists across restarts", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-archive-"));
 	let t = 5_000;
