@@ -6,14 +6,17 @@ int main(void) {
 
   // pebble-ui's machine sizes (see the using-pebble-ui skill): the default
   // 32 kB machine aborts with "memory full". They mirror
-  // src/embeddedjs/manifest.json (config.creation).
+  // src/embeddedjs/manifest.json (config.creation). The stack is 1 kB over
+  // pebble-ui's 5120: popping back to Home builds its menu inside the slide
+  // transition, which overflowed 5120 (5632 was enough). The extra 1 kB
+  // comes out of the emulator's mc.xsa ceiling (about 43,000 B at 5120).
   moddable_createMachine(&(ModdableCreationRecord){
     .recordSize = sizeof(ModdableCreationRecord),
 #ifdef PBL_DEBUG
     // Built with `pebble build --debug`: enable the xsbug JavaScript debugger.
     .flags = kModdableCreationFlagDebug,
 #endif
-    .stack = 5120,
+    .stack = 6144,
     .slot = 45056,
     .chunk = 21504,
   });

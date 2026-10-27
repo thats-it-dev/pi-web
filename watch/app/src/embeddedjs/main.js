@@ -4,6 +4,7 @@
 // batch of dicts.
 import WindowStack from "pebble-ui/WindowStack";
 import Vibes from "pebble/vibes";
+import Timer from "timer";
 import { createModel } from "model";
 import { createLink } from "link";
 
@@ -14,6 +15,9 @@ export const KEYS = (
 ).split(" ");
 
 const DARK_KEY = "pi-web.dark";
+const CONNECTING_MS = 10000; // "connecting" for this long reads as offline
+const SESSION_BIT = 0x80000000; // a launch code for a session alert; without it, a query
+const LAUNCH_QUIET_MS = 5000; // the alert that launched the app has buzzed already
 
 class PiStack extends WindowStack {
 	onCreate(application, $) {
@@ -28,7 +32,7 @@ class PiStack extends WindowStack {
 		this.link = createLink({
 			keys: KEYS,
 			onMessage: (dict) => {
-				const dark = model.dark, kind = model.apply(dict);
+				const dark = model.dark, net = model.net, kind = model.apply(dict);
 				if (!kind)
 					return;
 				if (dark !== model.dark) {
@@ -37,14 +41,47 @@ class PiStack extends WindowStack {
 					} catch (e) {
 					}
 				}
-				if (!this.kinds) {
-					this.kinds = [];
-					application.defer("onModelChanged");
-				}
-				if (!this.kinds.includes(kind))
-					this.kinds.push(kind);
+				if (net !== model.net)
+					this.watchNet();
+				this.changed(kind);
 			},
 		});
+		this.watchNet();
+		this.launch();
+	}
+	// Queues kind for the one deferred onModelChanged.
+	changed(kind) {
+		if (!this.kinds) {
+			this.kinds = [];
+			this.container.defer("onModelChanged");
+		}
+		if (!this.kinds.includes(kind))
+			this.kinds.push(kind);
+	}
+	// A phone stuck connecting shows as offline ("Hub unreachable") after 10 s.
+	watchNet() {
+		if (this.netTimer !== undefined)
+			Timer.clear(this.netTimer);
+		this.netTimer = undefined;
+		if (this.model.net === "connecting")
+			this.netTimer = Timer.set(() => {
+				this.netTimer = undefined;
+				this.model.net = "offline";
+				this.changed("net");
+			}, CONNECTING_MS);
+	}
+	// Opened from an alert: the phone resolves the launch code to a query
+	// (sent as query) or a session (sent as reply). The reason and arguments
+	// are logged to check them on the watch.
+	launch() {
+		const launch = watch.launch ?? {};
+		console.log("pi-web: launch reason " + launch.reason + " arguments " + launch.arguments);
+		const code = Number(launch.arguments) >>> 0;
+		if (!code)
+			return;
+		this.launched = code >= SESSION_BIT ? "session" : "query";
+		this.quietUntil = Date.now() + LAUNCH_QUIET_MS;
+		this.link.send("launched", { CODE: code | 0 });
 	}
 	onModelChanged(application) {
 		// The first dicts can arrive before Home is up: wait for it.
@@ -55,6 +92,10 @@ class PiStack extends WindowStack {
 		const kinds = this.kinds;
 		this.kinds = null;
 		this.syncQuery(kinds.includes("query"));
+		if (this.launched === "session" && kinds.includes("reply")) {
+			this.launched = null;
+			this.open("session", this.model.reply.sessionId);
+		}
 		for (const kind of kinds)
 			application.distribute("onModel", kind);
 	}
@@ -72,12 +113,12 @@ class PiStack extends WindowStack {
 			this.pop(windows.length - at);
 		if (arrived && id !== null && id !== this.buzzed) {
 			this.buzzed = id;
-			Vibes.shortPulse();
+			if (!(Date.now() < this.quietUntil))
+				Vibes.shortPulse();
 			this.open("query", id);
 		}
 	}
-	// windows/text arrives with the session and query screens (Task 9); until
-	// then opening one only logs.
+	// A window that fails to build logs instead of stopping the app.
 	open(mode, id) {
 		try {
 			this.push("windows/text", { mode, id });

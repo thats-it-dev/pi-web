@@ -180,6 +180,18 @@ test("oldest visible query -> query dict; resolved -> query_gone then the next q
 	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"]]);
 });
 
+test("the query dict names its session; a ring query has none; long ids still fit", () => {
+	const t = setup();
+	t.pend([query("q1", 1)], []);
+	assert.equal(t.last("query").SESSION_ID, "s1");
+	t.pend([query("q2", 0, { source: "ring-profile", sessionId: null })], []);
+	assert.equal(t.last("query").SESSION_ID, "");
+	t.pend([query("q3", -1, { sessionId: "s".repeat(64), text: "T".repeat(600), options: ["x".repeat(60), "y".repeat(60)] })], []);
+	const q = t.last("query");
+	assert.equal(q.SESSION_ID, "s".repeat(64));
+	assert.ok(dictBytes(q) <= 1000);
+});
+
 test("a late-arriving older query becomes the one shown", () => {
 	const t = setup();
 	t.pend([query("q2", 2)], []);

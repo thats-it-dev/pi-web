@@ -3,7 +3,7 @@
 		"$(MODDABLE)/examples/manifest_mod.json"
 	],
 	"config": {
-		"creation": { "stack": 5120, "slot": 45056, "chunk": 21504 }
+		"creation": { "stack": 6144, "slot": 45056, "chunk": 21504 }
 	},
 	"modules": {
 		"pebble-ui/sdk": "../../../pebble-ui/modules/sdk",

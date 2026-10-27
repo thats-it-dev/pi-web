@@ -123,10 +123,11 @@ function removeQuery(id) {
 	return true;
 }
 
-// Launch codes: 1 opens the first query, 2 the first session.
+// Launch codes: 1 opens the first query; 2, or any code with the session bit
+// (0x80000000, as the hub's Notifier marks session alerts), the first session.
 function launchTarget(code) {
 	if (code === 1 && queries[0]) return { queryId: queries[0].id };
-	if (code === 2 && sessions[0]) return { sessionId: sessions[0].id };
+	if ((code === 2 || code >= 0x80000000) && sessions[0]) return { sessionId: sessions[0].id };
 	return null;
 }
 

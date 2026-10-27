@@ -81,7 +81,10 @@ class HomeBehavior extends View.Behavior {
 	}
 	onDisplayed(screen) {
 		this.displayed = true;
+		if (this.stale)
+			this.build(screen);
 		super.onDisplayed(screen);
+		this.menu?.focus();
 	}
 	onUndisplaying(screen) {
 		this.displayed = false;
@@ -95,14 +98,20 @@ class HomeBehavior extends View.Behavior {
 			this.view.selected = menu.items[menu.selection]?.id;
 	}
 	onModel(screen, kind) {
+		// Not while sliding in or out: changing a window's contents during the
+		// transition leaves the screen unpainted. One sliding in rebuilds when it lands.
 		if (kind === "home" || kind === "net" || kind === "cfg") {
-			this.build(screen);
-			if (this.displayed)
+			if (!this.displayed)
+				this.stale = true;
+			else {
+				this.build(screen);
 				(this.menu ?? screen).focus();
+			}
 		}
 	}
 	build(screen) {
 		const view = this.view, m = stack().model, p = palette(m.dark);
+		this.stale = false;
 		this.remember();
 		// A held Up/Down repeats on a timer: stop it with the old menu.
 		if (this.menu)
@@ -128,10 +137,10 @@ class HomeBehavior extends View.Behavior {
 	}
 }
 
-// Select: the pending query for a waiting session, else the session.
+// Select: the session's pending query when it is the current one, else the session.
 function open(index, row) {
 	const s = stack(), query = s.model.query;
-	if (row.status === "w" && query)
+	if (row.status === "w" && query && query.sessionId === row.id)
 		s.open("query", query.id);
 	else {
 		s.link.send("open", { SESSION_ID: row.id });

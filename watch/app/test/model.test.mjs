@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createModel, parseRows, parseOptions } from "../src/embeddedjs/modules/model.js";
+import { createModel, parseRows, parseOptions, scrollClamp, drawerItems } from "../src/embeddedjs/modules/model.js";
 
 const M = (o) => new Map(Object.entries(o));
-const QUERY = { MSG: "query", ID: "q1", SOURCE: "pi", LABEL: "pi · notesky", TEXT: "Allow bash?", OPTIONS: "Allow\x1fAlways allow\x1fDeny", AT: "14:02" };
+const QUERY = { MSG: "query", ID: "q1", SOURCE: "pi", SESSION_ID: "s1", LABEL: "pi · notesky", TEXT: "Allow bash?", OPTIONS: "Allow\x1fAlways allow\x1fDeny", AT: "14:02" };
 
 test("parseRows splits rows and fields", () => {
 	assert.deepEqual(parseRows("s1\x1fnotesky sync\x1fw\x1f\x1es2\x1fpi-web watch\x1fr\x1f4:12"), [
@@ -34,7 +34,7 @@ test("apply(query) then apply(query_gone same id) clears query", () => {
 	const m = createModel();
 	assert.equal(m.query, null);
 	assert.equal(m.apply(M(QUERY)), "query");
-	assert.deepEqual(m.query, { id: "q1", source: "pi", label: "pi · notesky", text: "Allow bash?", options: ["Allow", "Always allow", "Deny"], at: "14:02" });
+	assert.deepEqual(m.query, { id: "q1", source: "pi", sessionId: "s1", label: "pi · notesky", text: "Allow bash?", options: ["Allow", "Always allow", "Deny"], at: "14:02" });
 	assert.equal(m.apply(M({ MSG: "query_gone", ID: "q1" })), "query_gone");
 	assert.equal(m.query, null);
 });
@@ -66,4 +66,42 @@ test("apply(net), apply(notice), apply(reply); unknown MSG is no change", () => 
 	assert.deepEqual(m.reply, { sessionId: "s1", label: "pi-web watch", text: "Done.", at: "14:01", status: "d" });
 	assert.equal(m.apply(M({ MSG: "bogus" })), null);
 	assert.equal(m.apply(M({})), null);
+});
+
+test("a ring query has no session", () => {
+	const m = createModel();
+	m.apply(M({ ...QUERY, SOURCE: "ring", SESSION_ID: "" }));
+	assert.equal(m.query.sessionId, "");
+});
+
+test("apply(models) parses the list for its session", () => {
+	const m = createModel();
+	assert.equal(m.apply(M({ MSG: "models", SESSION_ID: "s2", LIST: "spark\x1fqwen3\x1fQwen3 30B\x1eanthropic\x1fsonnet\x1fClaude Sonnet" })), "models");
+	assert.deepEqual(m.models, { sessionId: "s2", list: [
+		{ provider: "spark", id: "qwen3", name: "Qwen3 30B" },
+		{ provider: "anthropic", id: "sonnet", name: "Claude Sonnet" },
+	] });
+	m.apply(M({ MSG: "models", SESSION_ID: "s2", LIST: "" }));
+	assert.deepEqual(m.models.list, []);
+});
+
+test("scrollClamp stops at content end", () => {
+	assert.equal(scrollClamp(40, 300, 200), 40);
+	assert.equal(scrollClamp(160, 300, 200), 100);
+	assert.equal(scrollClamp(100, 300, 200), 100);
+});
+
+test("scrollClamp never negative", () => {
+	assert.equal(scrollClamp(-40, 300, 200), 0);
+	assert.equal(scrollClamp(40, 100, 200), 0);
+	assert.equal(scrollClamp(0, 0, 200), 0);
+});
+
+test("drawerItems(query) appends Skip", () => {
+	assert.deepEqual(drawerItems("query", ["Allow", "Always allow", "Deny"]), ["Allow", "Always allow", "Deny", "Skip"]);
+	assert.deepEqual(drawerItems("query", []), ["Skip"]);
+});
+
+test("drawerItems(session) is Continue/Stop/Model/Archive", () => {
+	assert.deepEqual(drawerItems("session"), ["Continue", "Stop", "Model", "Archive"]);
 });

@@ -301,6 +301,7 @@ function createBridge(deps) {
 			MSG: "query",
 			ID: str(q.id),
 			SOURCE: q.source === "ring-profile" ? "ring" : "pi",
+			SESSION_ID: q.sessionId ? str(q.sessionId) : "",
 			LABEL: clipTo(clean(q.label), LABEL_MAX),
 			TEXT: clipTo(clean(q.text), TEXT_MAX),
 			OPTIONS: "",
