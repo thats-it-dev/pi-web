@@ -36,7 +36,7 @@ Goals
 - **Finished and errored turns also alert** when the app is closed (Michael's
   call). They use the same notification path, and the action opens that
   session (§4.2).
-- Light and dark themes, chosen in a setting.
+- Light and dark themes, chosen in the phone's Clay config page with the hub URL (§4.4).
 
 Non-goals
 - A watchface. The pi-web watchface (`watch/face`) is retired.
@@ -82,8 +82,7 @@ Anti-goals
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
   background, white text). Header colours, status dots, the selected row and
-  the action menu are the same in both. The setting is in the app (§4.4)
-  and persists on the watch.
+  the action menu are the same in both. The theme is chosen on the phone (§4.4).
 - Mockups: `pi-web/.superpowers/brainstorm/280854-1793118289/content/`
   (`query-flow-v2.html`, `sessions.html`, `thatsit-palette.html` option A,
   `dark-mode.html`). The fonts there are browser stand-ins.
@@ -100,7 +99,6 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   (orange waiting, blue running, grey done, red error).
 - Order: sessions waiting on Michael first, then by most recent activity.
 - The selected row is highlighted in blue.
-- The last row is **Settings**.
 - Select opens a session. If a session has a pending query, Select opens the
   query instead.
 
@@ -134,8 +132,15 @@ Home), Select opens the action menu, and Up/Down scroll or move.
 - If several queries are pending, they queue: the next shows after one is
   answered. Home's ordering keeps them visible.
 
-### 4.4 Settings
-An action menu with a single item for now: **Theme: Light / Dark**.
+### 4.4 Settings (phone, Clay)
+Settings live in the **Clay** config page in the Pebble phone app, not on the
+watch (Michael's call). They are:
+- **Hub URL** (the Tailscale address);
+- **Theme** (Light / Dark).
+
+Keep the existing Clay setup in `watch/app/src/pkjs/config.js` and `index.js`
+(`HUB_URL`, `DARK`, saved via `webviewclosed`). Restyle or extend it only if
+needed. The theme reaches the watch as today and persists there.
 
 ## 5. Ring input (decided in the ring-profile design)
 
@@ -250,7 +255,8 @@ Decided by Michael:
 - left-aligned, smaller text with a coloured header bar for the source;
 - the thatsit palette;
 - Gothic plus LECO digits (option A);
-- light and dark themes via a setting;
+- light and dark themes;
+- settings (hub URL, theme) in the Clay phone config, not on the watch;
 - the session list as home;
 - the last reply on the session screen;
 - the open session is the ring's target;
@@ -265,7 +271,6 @@ Decided by Michael:
 
 Claude's calls:
 - emery only for v1;
-- Settings as the last row of the session list;
 - the action-menu items for sessions (Continue / Stop / Model / Archive);
 - queries queue one at a time;
 - `/api/watch/showing` carries the open session;
