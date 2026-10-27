@@ -27,6 +27,46 @@ function clean(s) {
 	return str(s).replace(/[\t\n\r\x1e\x1f]/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
+// Markdown -> plain text for the watch. Regex-based and forgiving: any
+// surprise returns the input unchanged.
+var HTML_TAGS = "br|hr|b|i|u|s|em|strong|p|div|span|a|code|pre|ul|ol|li|h[1-6]|table|thead|tbody|tr|td|th|sup|sub|details|summary|img|blockquote|kbd|del|ins|mark|small|center";
+var HTML_RE = new RegExp("<\\/?(?:" + HTML_TAGS + ")(?:\\s[^>\\n]*)?\\/?>", "gi");
+function scrubMarkdown(text) {
+	var input = str(text);
+	try {
+		var s = input.replace(/\r\n?/g, "\n");
+		// Fenced blocks (an unterminated one runs to the end).
+		s = s.replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g, function (m, body) {
+			var lines = body.split("\n");
+			for (var i = 0; i < lines.length; i++) {
+				var l = lines[i].replace(/^\s+|\s+$/g, "");
+				if (l) return l.length <= 40 ? "[code] " + l : "[code]";
+			}
+			return "[code]";
+		});
+		s = s.replace(/<br\s*\/?>/gi, "\n").replace(HTML_RE, "");
+		s = s.replace(/`([^`\n]+)`/g, "$1");
+		s = s.replace(/!\[([^\]\n]*)\]\([^)\n]*\)/g, function (m, alt) { return alt || "[image]"; });
+		s = s.replace(/\[([^\]\n]+)\]\([^)\n]*\)/g, "$1");
+		s = s.replace(/^[ \t]*#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/gm, "$1");
+		s = s.replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, "");
+		s = s.replace(/^[ \t]*\|?[ \t:-]*-[ \t:|-]*$\n?/gm, function (m) { return m.indexOf("|") >= 0 ? "" : m; });
+		s = s.replace(/^[ \t]*\|(.*?)\|?[ \t]*$/gm, function (m, row) {
+			return row.split("|").map(function (c) { return c.replace(/^\s+|\s+$/g, ""); }).join(" · ");
+		});
+		s = s.replace(/^(?:[ \t]*>)+[ \t]?/gm, "");
+		s = s.replace(/^[ \t]*[-*+][ \t]+/gm, "• ");
+		s = s.replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g, "$1");
+		s = s.replace(/(^|[^\w])__(?=\S)([^\n]*?\S)__(?!\w|\.\w)/gm, "$1$2");
+		s = s.replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])/gm, "$1$2");
+		s = s.replace(/(^|[^\w])_(?=[^\s_])([^_\n]*?[^\s_])_(?!\w)/gm, "$1$2");
+		s = s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+		return s.replace(/^\s+|\s+$/g, "");
+	} catch (e) {
+		return input;
+	}
+}
+
 // Piu wraps only at spaces (and CJK), so a long path would run off the
 // watch's edge: within a long Latin token, a space after a "/" once the piece
 // is 8 characters, and at most every 15 (16 with a clipping ellipsis).
@@ -324,7 +364,7 @@ function createBridge(deps) {
 			SOURCE: q.source === "ring-profile" ? "ring" : "pi",
 			SESSION_ID: q.sessionId ? str(q.sessionId) : "",
 			LABEL: clipTo(clean(q.label), LABEL_MAX),
-			TEXT: clipTo(breakable(clean(q.text)), TEXT_MAX),
+			TEXT: clipTo(breakable(clean(scrubMarkdown(q.text))), TEXT_MAX),
 			OPTIONS: "",
 			AT: clock(q.createdAt),
 		};
@@ -376,7 +416,7 @@ function createBridge(deps) {
 			MSG: "reply",
 			SESSION_ID: str(sid),
 			LABEL: s ? clipTo(clean(s.title), LABEL_MAX) : "",
-			TEXT: clipTo(breakable(clean(text)), TEXT_MAX),
+			TEXT: clipTo(breakable(clean(scrubMarkdown(text))), TEXT_MAX),
 			AT: s ? clock(s.updatedAt) : "",
 			STATUS: s ? letterOf(s) : "d",
 		};
@@ -587,6 +627,7 @@ module.exports = {
 	createBridge: createBridge,
 	clean: clean,
 	breakable: breakable,
+	scrubMarkdown: scrubMarkdown,
 	clock: clock,
 	elapsed: elapsed,
 	dictBytes: dictBytes,

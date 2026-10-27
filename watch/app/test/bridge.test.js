@@ -498,3 +498,73 @@ test("query and reply TEXT carry breakable long paths and still fit one dict", (
 	assert.ok(longest(r.TEXT) <= 16, r.TEXT);
 	assert.ok(dictBytes(r) <= 1000);
 });
+
+// scrubMarkdown ------------------------------------------------------------
+
+const { scrubMarkdown } = require("../src/pkjs/bridge.js");
+
+test("scrub: fenced code becomes [code] plus a short first line", () => {
+	assert.equal(scrubMarkdown("a\n```js\nconst x = 1;\nmore\n```\nb"), "a\n[code] const x = 1;\nb");
+	assert.equal(scrubMarkdown("```\n" + "x".repeat(41) + "\n```"), "[code]");
+	assert.equal(scrubMarkdown("```\n\n\n  \n```"), "[code]");
+	assert.equal(scrubMarkdown("```\nunterminated line"), "[code] unterminated line");
+});
+test("scrub: inline code, bold, emphasis lose their markers", () => {
+	assert.equal(scrubMarkdown("run `npm test` now"), "run npm test now");
+	assert.equal(scrubMarkdown("**bold** and __bold2__"), "bold and bold2");
+	assert.equal(scrubMarkdown("*em* and _em2_ here"), "em and em2 here");
+	assert.equal(scrubMarkdown("a **two words** b"), "a two words b");
+});
+test("scrub: snake_case and underscore paths survive", () => {
+	assert.equal(scrubMarkdown("snake_case_name"), "snake_case_name");
+	assert.equal(scrubMarkdown("/home/x/my_file_name.ts"), "/home/x/my_file_name.ts");
+	assert.equal(scrubMarkdown("see __init__.py and 2 * 3 * 4"), "see __init__.py and 2 * 3 * 4");
+});
+test("scrub: headings keep their text on their own line", () => {
+	assert.equal(scrubMarkdown("# Title\ntext\n### Sub ###\nmore"), "Title\ntext\nSub\nmore");
+});
+test("scrub: links and images", () => {
+	assert.equal(scrubMarkdown("[docs](https://x.io/a) ok"), "docs ok");
+	assert.equal(scrubMarkdown("![logo](a.png) ![](b.png)"), "logo [image]");
+	assert.equal(scrubMarkdown("see https://x.io/a/b"), "see https://x.io/a/b");
+});
+test("scrub: bullets, numbered lists, blockquotes", () => {
+	assert.equal(scrubMarkdown("- a\n* b\n+ c"), "• a\n• b\n• c");
+	assert.equal(scrubMarkdown("1. one\n2. two"), "1. one\n2. two");
+	assert.equal(scrubMarkdown("> quoted\n> > deep"), "quoted\ndeep");
+});
+test("scrub: tables lose separators and become dotted rows", () => {
+	assert.equal(scrubMarkdown("| a | b |\n|---|:-:|\n| 1 | 2 |"), "a · b\n1 · 2");
+});
+test("scrub: horizontal rules and html tags drop", () => {
+	assert.equal(scrubMarkdown("a\n---\nb\n***\nc\n___\nd"), "a\n\nb\n\nc\n\nd");
+	assert.equal(scrubMarkdown("x<br>y <b>bold</b> Vec<String>"), "x\ny bold Vec<String>");
+});
+test("scrub: collapses blank lines, trims, tolerates junk", () => {
+	assert.equal(scrubMarkdown("\n\na\n\n\n\n\nb\n\n"), "a\n\nb");
+	assert.equal(scrubMarkdown(""), "");
+	assert.equal(scrubMarkdown(null), "");
+	assert.equal(typeof scrubMarkdown("**unclosed `tick [x]( ``"), "string");
+	assert.equal(scrubMarkdown(42), "42");
+});
+test("scrub: a realistic agent reply", () => {
+	const md = "## Summary\n\nI fixed the **flaky test** in `bridge.js`:\n\n- renamed `foo_bar`\n- see [the PR](https://github.com/x/y/pull/1)\n\n```sh\nnpm test\n```\n\nAll green.";
+	assert.equal(scrubMarkdown(md), "Summary\n\nI fixed the flaky test in bridge.js:\n\n• renamed foo_bar\n• see the PR\n\n[code] npm test\n\nAll green.");
+});
+test("queryDict and replyDict scrub markdown and stay within 1000 B", () => {
+	const md = "## Plan\n**Run** `x`:\n```sh\nrm -rf build\n```\n" + "- item **b** [l](http://u)\n".repeat(60);
+	const t = setup();
+	const out = t.pend([query("q1", 1, { text: md })], []);
+	const q = out.filter((d) => d.MSG === "query").pop();
+	assert.ok(!/```|\*\*/.test(q.TEXT));
+	assert.ok(q.TEXT.indexOf("[code]") >= 0);
+	assert.ok(dictBytes(q) <= 1000);
+	const r = setup();
+	r.pend([], [sess("s1", "done")]);
+	r.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	r.hub.reply(null, { turns: [{ i: 1, role: "agent", text: md }], total: 2 });
+	r.drain();
+	const reply = r.last("reply");
+	assert.ok(!/```|\*\*/.test(reply.TEXT));
+	assert.ok(dictBytes(reply) <= 1000);
+});
