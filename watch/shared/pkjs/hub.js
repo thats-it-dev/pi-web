@@ -77,6 +77,10 @@ function createHubClient(opts) {
 			if (x.status < 200 || x.status >= 300) {
 				var e = new Error("hub answered " + x.status);
 				e.status = x.status;
+				try {
+					var body = JSON.parse(x.responseText);
+					if (body && typeof body.error === "string" && body.error) e.hubError = body.error;
+				} catch (ignored) {}
 				finish(e);
 				return;
 			}

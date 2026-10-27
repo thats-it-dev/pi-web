@@ -11,6 +11,7 @@ var LABEL_MAX = 40;
 var TEXT_MAX = 600;
 var OPTION_MAX = 24;
 var NOTICE_MAX = 120;
+var HUB_ERROR_MAX = 40; // the notice box fits about this many characters
 var RETRY_MS = 500;
 var NOTICE_FAIL = "Hub unreachable";
 var DARK_KEY = "pi-web.dark";
@@ -310,6 +311,13 @@ function createBridge(deps) {
 		);
 	}
 
+	// What a failed hub call tells the user: the hub's own words when it answered, else reachability.
+	function failText(err) {
+		if (!err || typeof err.status !== "number") return NOTICE_FAIL;
+		if (typeof err.hubError === "string" && clean(err.hubError)) return clipLabel(clean(err.hubError), HUB_ERROR_MAX);
+		return "Hub error " + err.status;
+	}
+
 	function notice(text) {
 		enqueue({ MSG: "notice", NOTICE: clipLabel(clean(text), NOTICE_MAX) });
 	}
@@ -477,7 +485,7 @@ function createBridge(deps) {
 		hub.post(path, body, function (err, json) {
 			if (err) {
 				log("pi-web: " + path + " failed: " + err.message);
-				notice(NOTICE_FAIL);
+				notice(failText(err));
 			}
 			if (done) done(err, json);
 		});

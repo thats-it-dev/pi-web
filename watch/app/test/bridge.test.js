@@ -602,3 +602,27 @@ test("scrub: adversarial 20k inputs finish fast", () => {
 		assert.ok(Date.now() - t0 < 200, "slow: " + c.slice(0, 6));
 	}
 });
+
+function failNotice(err) {
+	const t = setup();
+	t.pend([query("q1", 1)], []);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	t.hub.reply(err);
+	return t.drain().filter((d) => d.MSG === "notice").map((d) => d.NOTICE);
+}
+function httpErr(status, hubError) {
+	const e = new Error("hub answered " + status);
+	e.status = status;
+	if (hubError !== undefined) e.hubError = hubError;
+	return e;
+}
+
+test("hub error notices: HTTP message is shown clipped; no message gives Hub error <status>; network/timeout stay Hub unreachable", () => {
+	const msg = "Couldn't start pi (pi): spawn pi ENOENT and a lot more detail";
+	const [n] = failNotice(httpErr(502, msg));
+	assert.ok(n.length <= 40 && n.endsWith("\u2026") && msg.startsWith(n.slice(0, -1)), n);
+	assert.deepEqual(failNotice(httpErr(502, "short")), ["short"]);
+	assert.deepEqual(failNotice(httpErr(404)), ["Hub error 404"]);
+	assert.deepEqual(failNotice(new Error("network error")), ["Hub unreachable"]);
+	assert.deepEqual(failNotice(new Error("timeout")), ["Hub unreachable"]);
+});

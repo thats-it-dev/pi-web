@@ -155,6 +155,7 @@ test("post sends JSON with content-type and 15 s timeout; non-2xx → err.status
 	xhr().respond(409, '{"error":"gone"}');
 	assert.ok(results[1][0] instanceof Error);
 	assert.equal(results[1][0].status, 409);
+	assert.equal(results[1][0].hubError, "gone");
 
 	t.hub.get("/api/watch/y", (err, json) => results.push([err, json]));
 	assert.equal(xhr().method, "GET");
@@ -238,4 +239,17 @@ test("a throwing onPending does not end the poll loop or the socket handler", ()
 	assert.doesNotThrow(() => sock().onmessage({ data: '{"type":"pending","cursor":1}' }));
 	sock().onmessage({ data: '{"type":"pending","cursor":2}' });
 	assert.equal(w.pending.length, 2);
+});
+
+test("non-2xx without a usable JSON error leaves hubError unset", () => {
+	const t = setup();
+	const errs = [];
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().respond(404, "");
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().respond(502, "<html>bad gateway</html>");
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().respond(500, '{"error":42}');
+	assert.deepEqual(errs.map((e) => e.status), [404, 502, 500]);
+	assert.deepEqual(errs.map((e) => e.hubError), [undefined, undefined, undefined]);
 });
