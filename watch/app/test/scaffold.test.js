@@ -8,8 +8,8 @@ test("uuid is a v4 uuid", () => {
   assert.match(pkg.pebble.uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
-test("targets emery and gabbro", () => {
-  assert.deepEqual(pkg.pebble.targetPlatforms, ["emery", "gabbro"]);
+test("targets emery only", () => {
+  assert.deepEqual(pkg.pebble.targetPlatforms, ["emery"]);
 });
 
 test("main.js KEYS match messageKeys in order (pebble/message maps index n to 10000 + n)", () => {

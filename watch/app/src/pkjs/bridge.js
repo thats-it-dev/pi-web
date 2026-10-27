@@ -1,45 +1,48 @@
 // The phone-side model: turns hub frames into AppMessage dicts for the watch
 // and watch commands into hub calls. ES5 only; all dependencies are injected.
+// The dict shapes are the contract with the watch (see the task 7 report).
 
-var TEXT_MAX = 240;
 var MSG_BYTES = 1000; // spec §6.4: one AppMessage, whole dict
-var TITLE_MAX = 60;
-var NAME_MAX = 40;
-var STATS_MS = 1000;
+var ROW_SEP = "\x1e"; // between rows of a list
+var FIELD_SEP = "\x1f"; // between fields of a row, and between options
+var HOME_ROWS = 12;
+var TITLE_MAX = 40;
+var LABEL_MAX = 40;
+var TEXT_MAX = 600;
+var OPTION_MAX = 24;
+var NOTICE_MAX = 120;
 var RETRY_MS = 500;
-var HISTORY_PAGE = 12;
-var LAST_SESSION = "pi-web.lastSession";
+var NOTICE_FAIL = "Hub unreachable";
 var DARK_KEY = "pi-web.dark";
-var COALESCE = { home: true, stats: true, text: true, net: true, cfg: true };
+var COALESCE = { home: true, net: true, cfg: true, reply: true };
 var NETS = { connecting: true, online: true, offline: true, unconfigured: true };
+var STATUS_LETTER = { waiting: "w", running: "r", done: "d", error: "e" };
 
 function str(s) {
 	return s === null || s === undefined ? "" : String(s);
 }
 
+// One line of text that cannot be mistaken for a separator.
 function clean(s) {
-	return str(s).replace(/[\t\n\r]/g, " ").replace(/^\s+|\s+$/g, "");
+	return str(s).replace(/[\t\n\r\x1e\x1f]/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
-function clipTo(s, n) {
-	s = str(s);
-	return s.length > n ? s.slice(0, n) : s;
+function pad2(n) {
+	return (n < 10 ? "0" : "") + n;
 }
 
-function clip(s) {
-	return clipTo(s, TEXT_MAX);
+// "HH:MM", 24 h, phone local time; "" for no time.
+function clock(ms) {
+	if (typeof ms !== "number" || !isFinite(ms)) return "";
+	var d = new Date(ms);
+	return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
 }
 
-function num(n) {
-	return typeof n === "number" && isFinite(n) ? Math.round(n) : -1;
-}
-
-function ageLabel(ms) {
-	var m = Math.max(0, Math.floor(ms / 60000));
-	if (m < 60) return m + "m";
-	var h = Math.floor(m / 60);
-	if (h < 24) return h + "h";
-	return Math.floor(h / 24) + "d";
+// "4:12" (m:ss) under an hour, "1:05" (h:mm) after.
+function elapsed(ms) {
+	var s = Math.max(0, Math.floor(ms / 1000));
+	if (s < 3600) return Math.floor(s / 60) + ":" + pad2(s % 60);
+	return Math.floor(s / 3600) + ":" + pad2(Math.floor((s % 3600) / 60));
 }
 
 function utf8Length(s) {
@@ -67,76 +70,25 @@ function dictBytes(dict) {
 	return n;
 }
 
-// Rows joined by "\n" per chunk, each chunk at most maxBytes of UTF-8; a row is
-// never split, and a row that alone exceeds maxBytes travels alone.
-function packRows(rows, maxBytes) {
-	var chunks = [];
-	var cur = null;
-	var curBytes = 0;
-	for (var i = 0; i < rows.length; i++) {
-		var row = rows[i];
-		var b = utf8Length(row);
-		if (cur !== null && curBytes + 1 + b <= maxBytes) {
-			cur += "\n" + row;
-			curBytes += 1 + b;
-		} else {
-			if (cur !== null) chunks.push(cur);
-			cur = row;
-			curBytes = b;
-		}
-	}
-	if (cur !== null) chunks.push(cur);
-	return chunks;
-}
-
-function byCreated(requests) {
-	return (requests || []).slice().sort(function (a, b) {
-		return a.createdAt - b.createdAt;
-	});
-}
-
-function findById(list, id) {
-	if (id === null || id === undefined) return null;
-	for (var i = 0; i < (list || []).length; i++) if (list[i].id === id) return list[i];
-	return null;
-}
-
-// The current request if still present, else the hub's showing if present, else the oldest.
-function selectRequest(requests, currentId, hubShowing) {
-	var sorted = byCreated(requests);
-	return findById(sorted, currentId) || findById(sorted, hubShowing) || sorted[0] || null;
-}
-
-function newest(sessions, live) {
-	var best = null;
-	for (var i = 0; i < sessions.length; i++) {
-		var s = sessions[i];
-		if (!!s.live !== live) continue;
-		if (!best || s.updatedAt > best.updatedAt) best = s;
-	}
-	return best;
-}
-
-// The last session if listed, else the most recently updated live one, else the most recently updated closed one.
-function selectSession(sessions, lastSessionId) {
-	sessions = sessions || [];
-	return findById(sessions, lastSessionId) || newest(sessions, true) || newest(sessions, false);
-}
-
-function stateOf(session) {
-	if (!session) return "idle";
-	return session.live === false ? "closed" : str(session.state) || "idle";
-}
-
-var ELLIPSIS = "\u2026";
-var OPTION_MIN = 12; // options are clipped no shorter than this before the request text gives way entirely
-var REQ_TEXT_MIN = 40;
+var ELLIPSIS = "…";
+var OPTION_MIN = 12; // options are clipped no shorter than this before the text gives way entirely
+var TEXT_MIN = 40;
 
 // At most n UTF-16 units, never ending inside a surrogate pair.
 function cut(s, n) {
 	s = s.slice(0, Math.max(0, n));
 	var c = s.charCodeAt(s.length - 1);
 	return c >= 0xd800 && c <= 0xdbff ? s.slice(0, -1) : s;
+}
+
+function clipTo(s, n) {
+	s = str(s);
+	return s.length > n ? cut(s, n) : s;
+}
+
+// A label for display: at most n units, ending in an ellipsis when it was cut.
+function clipLabel(s, n) {
+	return s.length > n ? cut(s, n - 1) + ELLIPSIS : s;
 }
 
 // The longest option loses one character (keeping a trailing ellipsis); false when none is longer than min.
@@ -150,15 +102,15 @@ function clipLongest(shown, min) {
 	return true;
 }
 
-// Fits dict[key] (a "\n"-joined list of shown) and, when textKey is given, dict[textKey]
-// into MSG_BYTES: the text trims to REQ_TEXT_MIN, then options clip to OPTION_MIN, then the
-// text trims away, then trailing options drop. Returns the shown options (index i is option i).
-function fitOptions(dict, key, shown, textKey) {
-	var text = textKey ? dict[textKey] : "";
+// Fits dict[key] (a FIELD_SEP-joined list of shown) and dict.TEXT into MSG_BYTES: the text trims
+// to TEXT_MIN, then options clip to OPTION_MIN, then the text trims away, then trailing options
+// drop. Returns the shown options (index i is option i).
+function fitQuery(dict, shown) {
+	var text = dict.TEXT;
 	var trimmed = false;
 	function fits() {
-		dict[key] = shown.join("\n");
-		if (textKey) dict[textKey] = trimmed ? text + ELLIPSIS : text;
+		dict.OPTIONS = shown.join(FIELD_SEP);
+		dict.TEXT = trimmed ? text + ELLIPSIS : text;
 		return dictBytes(dict) <= MSG_BYTES;
 	}
 	function trimText(min) {
@@ -167,55 +119,34 @@ function fitOptions(dict, key, shown, textKey) {
 			trimmed = true;
 		}
 	}
-	if (textKey) trimText(REQ_TEXT_MIN);
+	trimText(TEXT_MIN);
 	while (!fits() && clipLongest(shown, OPTION_MIN)) {}
-	if (textKey) trimText(0);
+	trimText(0);
 	while (!fits() && shown.length > 0) shown.pop();
 	return shown;
 }
 
-// The home dict and the options it shows. With a request, TEXT is empty (Home shows
-// the request, not the last reply), so the dict always fits the watch's inbox.
-function fitHome(req, index, count, session, lastText) {
-	var dict = {
-		MSG: "home",
-		REQ_ID: req ? str(req.id) : "",
-		REQ_KIND: req ? str(req.kind) : "",
-		REQ_TOOL: req ? clipTo(req.tool, NAME_MAX) : "",
-		REQ_TEXT: req ? clip(req.message) : "",
-		REQ_OPTIONS: "",
-		REQ_INDEX: index,
-		REQ_COUNT: count,
-		SESSION_ID: req ? str(req.sessionId) : session ? str(session.id) : "",
-		SESSION_TITLE: clipTo(req ? req.sessionTitle : session ? session.title : "", TITLE_MAX),
-		STATE: session ? stateOf(session) : req && req.kind === "dialog" ? "needs_you" : "idle",
-		TEXT: req ? "" : clip(lastText),
-	};
-	var shown = req ? fitOptions(dict, "REQ_OPTIONS", (req.options || []).map(clean), "REQ_TEXT") : [];
-	return { dict: dict, shown: shown };
+// Drops rows from the end until dict[key] (rows joined by ROW_SEP) fits MSG_BYTES.
+function fitRows(dict, key, rows) {
+	rows = rows.slice();
+	dict[key] = rows.join(ROW_SEP);
+	while (dictBytes(dict) > MSG_BYTES && rows.length > 0) {
+		rows.pop();
+		dict[key] = rows.join(ROW_SEP);
+	}
+	return rows;
 }
 
-function packHome(req, index, count, session, lastText) {
-	return fitHome(req, index, count, session, lastText).dict;
+function byCreated(queries) {
+	return (queries || []).slice().sort(function (a, b) {
+		return a.createdAt - b.createdAt;
+	});
 }
 
-function packStats(session) {
-	return {
-		MSG: "stats",
-		SESSION_ID: str(session.id),
-		STATE: stateOf(session),
-		MODEL: clipTo(session.model, NAME_MAX),
-		CTX_PERCENT: num(session.contextPercent),
-		CTX_TOKENS: num(session.contextTokens),
-		CTX_WINDOW: num(session.contextWindow),
-		TPS: num(session.tps),
-	};
-}
-
-function sessionRow(s, now) {
-	var ctx = typeof s.contextPercent === "number" ? String(Math.round(s.contextPercent)) : "-";
-	var age = s.live === false ? ageLabel(now - s.updatedAt) : "-";
-	return [clean(s.id), clipTo(clean(s.title), TITLE_MAX), stateOf(s), s.live === false ? "0" : "1", clipTo(clean(s.model), NAME_MAX), ctx, age].join("\t");
+function findBy(list, key, id) {
+	if (id === null || id === undefined) return null;
+	for (var i = 0; i < (list || []).length; i++) if (list[i][key] === id) return list[i];
+	return null;
 }
 
 function darkValue(d) {
@@ -226,28 +157,21 @@ function createBridge(deps) {
 	var hub = deps.hub;
 	var storage = deps.storage;
 	var log = deps.log || function () {};
-	var frame = { requests: [], sessions: [], showing: null };
-	var currentReq = null;
-	var currentSession = null;
-	var pin = null; // a session the watch chose with nothing selected, and the requests it saw then
-	// The last reply per session. It is dropped when a session becomes current again,
-	// unless a final text frame for it arrived while it was not current (fresh).
-	var lastText = {};
-	var fresh = {};
-	var textFetching = {};
-	var fetchFailed = {};
+	var frame = { queries: [], sessions: [], showing: null };
 	var net = "connecting";
-	// Per request id, the options last shown on the watch and the hub's options they stand for.
-	var shownOptions = {};
 	var dark = storage.getItem(DARK_KEY) !== "0";
+	var resync = false; // the stream came back: the next pending frame is sent in full
+	var sentQuery = null; // the id of the query the watch was last told about
+	var launchQuery = null; // a query the watch was launched for, current while it exists
+	var fullOptions = {}; // query id -> the hub's option strings, index for index
+	var answering = {}; // query ids with an answer or skip on its way to the hub
+	var runStart = {}; // session id -> when the phone first saw it running
+	var openSession = null; // the session whose reply the watch is looking at
+	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
 
 	var queue = [];
 	var inFlight = null;
 	var lastQueued = {};
-	var statsAt = null;
-	var statsSession = null;
-	var statsHeld = null;
-	var statsTimer = null;
 
 	// Outbox ---------------------------------------------------------------
 
@@ -275,8 +199,7 @@ function createBridge(deps) {
 
 	function pump() {
 		if (inFlight || queue.length === 0) return;
-		var dict = queue.shift();
-		transmit({ dict: dict, tries: 0 });
+		transmit({ dict: queue.shift(), tries: 0 });
 	}
 
 	function transmit(item) {
@@ -309,318 +232,266 @@ function createBridge(deps) {
 		);
 	}
 
-	// Options ----------------------------------------------------------------
-
-	function remember(reqId, shown, full) {
-		shownOptions[reqId] = { shown: shown.slice(), full: (full || []).slice() };
+	function notice(text) {
+		enqueue({ MSG: "notice", NOTICE: clipLabel(clean(text), NOTICE_MAX) });
 	}
 
-	// The watch sends the option text it shows; the hub wants its own option string.
-	function hubOption(reqId, option) {
-		var m = shownOptions[reqId];
-		if (m) {
-			var i = m.shown.indexOf(option);
-			if (i >= 0 && i < m.full.length) return str(m.full[i]);
-		}
-		var req = findById(frame.requests, reqId);
-		var opts = (req && req.options) || [];
-		for (var k = 0; k < opts.length; k++) if (clean(opts[k]) === option) return str(opts[k]);
-		return option;
-	}
-
-	// Model ----------------------------------------------------------------
+	// Home ------------------------------------------------------------------
 
 	function sessionById(id) {
-		return findById(frame.sessions, id);
+		return findBy(frame.sessions, "id", id);
 	}
 
-	function sendStats(force) {
-		var s = sessionById(currentSession);
-		if (!s) return;
-		var dict = packStats(s);
-		if (!force && lastQueued.stats === JSON.stringify(dict)) {
-			statsHeld = null;
-			return;
-		}
-		var now = deps.now();
-		// The limit is for speed ticks within one session; a session switch goes at once.
-		if (force || statsAt === null || now - statsAt >= STATS_MS || s.id !== statsSession) {
-			if (statsTimer !== null) {
-				deps.clearTimeout(statsTimer);
-				statsTimer = null;
-			}
-			statsHeld = null;
-			statsAt = now;
-			statsSession = s.id;
-			enqueue(dict, force);
-			return;
-		}
-		statsHeld = dict;
-		if (statsTimer === null) {
-			statsTimer = deps.setTimeout(function () {
-				statsTimer = null;
-				var held = statsHeld;
-				statsHeld = null;
-				if (!held || held.SESSION_ID !== currentSession) return;
-				statsAt = deps.now();
-				statsSession = held.SESSION_ID;
-				enqueue(held);
-			}, statsAt + STATS_MS - now);
-		}
+	function letterOf(s) {
+		return STATUS_LETTER[s.status] || "d";
+	}
+
+	function subOf(s, now) {
+		if (s.status === "running") return runStart[s.id] === undefined ? "" : elapsed(now - runStart[s.id]);
+		if (s.status === "done") return clock(s.updatedAt);
+		return "";
+	}
+
+	// Waiting sessions first, otherwise the hub's order.
+	function ordered() {
+		var waiting = [];
+		var rest = [];
+		for (var i = 0; i < frame.sessions.length; i++) (frame.sessions[i].status === "waiting" ? waiting : rest).push(frame.sessions[i]);
+		return waiting.concat(rest);
 	}
 
 	function sendHome(force) {
-		var sorted = byCreated(frame.requests);
-		var req = findById(sorted, currentReq);
-		var index = 0;
-		for (var i = 0; i < sorted.length; i++) if (req && sorted[i].id === req.id) index = i + 1;
-		var session = sessionById(currentSession);
-		if (!session && !req && currentSession) session = { id: currentSession, title: "", live: true, state: "idle" };
-		var home = fitHome(req, index, sorted.length, session, lastText[currentSession] || "");
-		if (req) remember(req.id, home.shown, req.options);
-		enqueue(home.dict, force);
+		var now = deps.now();
+		var rows = ordered()
+			.slice(0, HOME_ROWS)
+			.map(function (s) {
+				return [clean(s.id), clipTo(clean(s.title), TITLE_MAX), letterOf(s), subOf(s, now)].join(FIELD_SEP);
+			});
+		var dict = { MSG: "home" };
+		fitRows(dict, "ROWS", rows);
+		enqueue(dict, force);
 	}
 
-	function ensureText(sid) {
-		if (!sid || lastText[sid] !== undefined || textFetching[sid] || fetchFailed[sid]) return;
-		textFetching[sid] = true;
-		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=4", function (err, json) {
-			textFetching[sid] = false;
-			if (err || !json) {
-				// Not cached: the next switch to this session tries again.
-				fetchFailed[sid] = true;
-				log("pi-web: history for " + sid + " failed: " + (err && err.message));
-				return;
-			}
-			if (lastText[sid] !== undefined) return;
-			var text = "";
-			var turns = json.turns || [];
-			for (var i = turns.length - 1; i >= 0; i--) {
-				if (turns[i].role === "agent") {
-					text = str(turns[i].text);
-					break;
-				}
-			}
-			lastText[sid] = text;
-			if (sid === currentSession) sendHome();
-		});
+	function trackRuns() {
+		var now = deps.now();
+		var seen = {};
+		for (var i = 0; i < frame.sessions.length; i++) {
+			var s = frame.sessions[i];
+			if (s.status !== "running") continue;
+			seen[s.id] = true;
+			if (runStart[s.id] === undefined) runStart[s.id] = now;
+		}
+		for (var id in runStart) if (!seen[id]) delete runStart[id];
+	}
+
+	// Queries ---------------------------------------------------------------
+
+	// The query the watch should be showing: the one it was launched for, else the oldest.
+	function target() {
+		var sorted = byCreated(frame.queries);
+		return findBy(sorted, "id", launchQuery) || sorted[0] || null;
+	}
+
+	function queryDict(q) {
+		var full = (q.options || []).map(str);
+		var dict = {
+			MSG: "query",
+			ID: str(q.id),
+			SOURCE: q.source === "ring-profile" ? "ring" : "pi",
+			LABEL: clipTo(clean(q.label), LABEL_MAX),
+			TEXT: clipTo(clean(q.text), TEXT_MAX),
+			OPTIONS: "",
+			AT: clock(q.createdAt),
+		};
+		fitQuery(dict, full.map(function (o) { return clipLabel(clean(o), OPTION_MAX); }));
+		fullOptions[q.id] = full;
+		return dict;
+	}
+
+	function sendQuery(q) {
+		enqueue(queryDict(q));
+		sentQuery = q.id;
+	}
+
+	// query_gone for a query that left, then the next one; force re-sends the current one.
+	function syncQuery(force) {
+		var q = target();
+		if (sentQuery !== null && (!q || q.id !== sentQuery)) {
+			enqueue({ MSG: "query_gone", ID: sentQuery });
+			sentQuery = null;
+		}
+		if (q && (sentQuery !== q.id || force)) sendQuery(q);
+		for (var id in fullOptions) if (!findBy(frame.queries, "id", id)) delete fullOptions[id];
+		for (var a in answering) if (!findBy(frame.queries, "id", a)) delete answering[a];
+		if (launchQuery !== null && !findBy(frame.queries, "id", launchQuery)) launchQuery = null;
 	}
 
 	function update(force) {
-		var sorted = byCreated(frame.requests);
-		var req = null;
-		if (pin) {
-			for (var i = 0; i < sorted.length; i++) {
-				if (!pin.seen[sorted[i].id]) {
-					pin = null;
-					break;
-				}
-			}
-		}
-		if (!pin) req = selectRequest(sorted, currentReq, frame.showing);
-		var sid;
-		if (req) sid = req.sessionId;
-		else if (pin) sid = pin.sessionId;
-		else {
-			var s = selectSession(frame.sessions, storage.getItem(LAST_SESSION));
-			sid = s ? s.id : null;
-		}
-		var reqId = req ? req.id : null;
-		if (reqId !== currentReq || sid !== currentSession) {
-			currentReq = reqId;
-			if (sid !== currentSession && sid) {
-				if (fresh[sid]) delete fresh[sid];
-				else delete lastText[sid];
-				delete fetchFailed[sid];
-			}
-			currentSession = sid;
-			if (sid) storage.setItem(LAST_SESSION, sid);
-			if (sid || reqId) hub.showing(reqId, sid);
-		}
-		ensureText(currentSession);
+		trackRuns();
 		sendHome(force);
-		sendStats(force);
+		syncQuery(force);
 	}
 
-	function removeRequest(id) {
-		frame.requests = (frame.requests || []).filter(function (r) {
-			return r.id !== id;
+	function removeQuery(id) {
+		frame.queries = frame.queries.filter(function (q) {
+			return q.id !== id;
 		});
-		if (frame.showing === id) frame.showing = null;
-		delete shownOptions[id];
+		if (frame.showing && frame.showing.queryId === id) frame.showing = null;
+	}
+
+	// Replies ---------------------------------------------------------------
+
+	function replyDict(sid, text) {
+		var s = sessionById(sid);
+		return {
+			MSG: "reply",
+			SESSION_ID: str(sid),
+			LABEL: s ? clipTo(clean(s.title), LABEL_MAX) : "",
+			TEXT: clipTo(clean(text), TEXT_MAX),
+			AT: s ? clock(s.updatedAt) : "",
+			STATUS: s ? letterOf(s) : "d",
+		};
+	}
+
+	function open(sid) {
+		openSession = sid;
+		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=1", function (err, json) {
+			if (err || !json) {
+				log("pi-web: history for " + sid + " failed: " + (err && err.message));
+				notice("Couldn't load the reply");
+				return;
+			}
+			var turns = json.turns || [];
+			var text = turns.length ? str(turns[turns.length - 1].text) : "";
+			enqueue(replyDict(sid, text), true);
+		});
+	}
+
+	// Commands -------------------------------------------------------------
+
+	function post(path, body, done) {
+		hub.post(path, body, function (err, json) {
+			if (err) {
+				log("pi-web: " + path + " failed: " + err.message);
+				notice(NOTICE_FAIL);
+			}
+			if (done) done(err, json);
+		});
+	}
+
+	function answer(p) {
+		var id = str(p.ID);
+		var full = fullOptions[id];
+		var option = full && typeof p.OK === "number" ? full[p.OK] : undefined;
+		if (option === undefined) {
+			log("pi-web: answer for " + id + " has no such option");
+			return;
+		}
+		if (answering[id]) return;
+		answering[id] = true;
+		post("/api/watch/answer", { queryId: id, option: option }, function (err, json) {
+			if (err) {
+				delete answering[id];
+				return;
+			}
+			if (json && (json.ok || json.reason === "gone")) {
+				removeQuery(id);
+				update();
+				return;
+			}
+			delete answering[id];
+			notice("Answer not accepted");
+		});
+	}
+
+	function skip(p) {
+		var id = str(p.ID);
+		if (answering[id]) return;
+		answering[id] = true;
+		post("/api/watch/skip", { queryId: id }, function (err) {
+			if (err) {
+				delete answering[id];
+				return;
+			}
+			removeQuery(id);
+			update();
+		});
+	}
+
+	function archive(sid) {
+		post("/api/watch/archive", { sessionId: sid }, function (err) {
+			if (err) return;
+			frame.sessions = frame.sessions.filter(function (s) {
+				return s.id !== sid;
+			});
+			update();
+		});
+	}
+
+	function models(sid) {
+		hub.get("/api/watch/models?session=" + encodeURIComponent(sid), function (err, json) {
+			if (err || !json) {
+				log("pi-web: models for " + sid + " failed: " + (err && err.message));
+				notice("Couldn't load models");
+				return;
+			}
+			var rows = (json.models || []).map(function (m) {
+				return [clean(m.provider), clean(m.id), clipTo(clean(m.name), LABEL_MAX)].join(FIELD_SEP);
+			});
+			var dict = { MSG: "models", SESSION_ID: sid };
+			fitRows(dict, "LIST", rows);
+			enqueue(dict);
+		});
+	}
+
+	function launched(p) {
+		var code = typeof p.CODE === "number" ? p.CODE : -1;
+		// The code is a 32-bit pattern; the AppMessage int may arrive signed.
+		if (code < 0) code = code >>> 0;
+		hub.get("/api/watch/launch-target?code=" + code, function (err, json) {
+			if (err || !json) {
+				log("pi-web: launch target " + code + " unknown: " + (err && err.message));
+				return;
+			}
+			if (json.queryId) {
+				if (!findBy(frame.queries, "id", json.queryId)) return;
+				launchQuery = json.queryId;
+				syncQuery(true);
+			} else if (json.sessionId) {
+				open(str(json.sessionId));
+			}
+		});
+	}
+
+	function onShowing(p) {
+		var id = p.ID ? str(p.ID) : null;
+		var sid = p.SESSION_ID ? str(p.SESSION_ID) : null;
+		showing = { id: id, sessionId: sid };
+		openSession = id === null && sid !== null ? sid : null;
+		hub.showing(id, sid);
+	}
+
+	function onAppMessage(p) {
+		p = p || {};
+		var cmd = str(p.CMD);
+		var sid = p.SESSION_ID ? str(p.SESSION_ID) : "";
+		if (cmd === "showing") onShowing(p);
+		else if (cmd === "answer") answer(p);
+		else if (cmd === "skip") skip(p);
+		else if (cmd === "open" && sid) open(sid);
+		else if (cmd === "continue" && sid) post("/api/watch/prompt", { sessionId: sid, text: "continue" });
+		else if (cmd === "stop" && sid) post("/api/watch/abort", { sessionId: sid });
+		else if (cmd === "archive" && sid) archive(sid);
+		else if (cmd === "models" && sid) models(sid);
+		else if (cmd === "model" && sid) post("/api/watch/model", { sessionId: sid, provider: str(p.PROVIDER), modelId: str(p.MODEL_ID) });
+		else if (cmd === "launched") launched(p);
+		else log("pi-web: unknown command " + cmd);
 	}
 
 	function sendAll() {
 		enqueue({ MSG: "cfg", DARK: dark ? 1 : 0 }, true);
 		enqueue({ MSG: "net", NET: net }, true);
 		update(true);
-	}
-
-	// Commands -------------------------------------------------------------
-
-	function result(cmdId, err, json, requestId) {
-		var dict = { MSG: "result", CMD_ID: num(cmdId) };
-		if (err) {
-			dict.OK = 0;
-			dict.REASON = "error";
-			dict.OPTIONS = "";
-		} else if (json && json.ok) {
-			dict.OK = 1;
-		} else {
-			dict.OK = 0;
-			dict.REASON = json && (json.reason === "gone" || json.reason === "no_match") ? json.reason : "error";
-			var full = (json && json.options) || [];
-			var shown = fitOptions(dict, "OPTIONS", full.map(clean), null);
-			if (requestId && shown.length) remember(requestId, shown, full);
-		}
-		enqueue(dict);
-	}
-
-	// Posts a command; a request that is answered (ok) or gone leaves locally at once.
-	function postCommand(path, body, cmdId, requestId) {
-		hub.post(path, body, function (err, json) {
-			result(cmdId, err, json, requestId);
-			if (err) log("pi-web: " + path + " failed: " + err.message);
-			if (!err && requestId && json && (json.ok || json.reason === "gone")) {
-				removeRequest(requestId);
-				update();
-			}
-		});
-	}
-
-	function sendList(list, sid, rows, firstOffset, offsetOf, total) {
-		var base = { MSG: "list", LIST: list };
-		if (sid !== null) base.SESSION_ID = sid;
-		// The rows get what the other tuples of this message leave of MSG_BYTES.
-		var chunks = packRows(rows, MSG_BYTES - dictBytes(dict("", 0, 0)));
-		function dict(rowsStr, offset, more) {
-			var d = {};
-			for (var k in base) d[k] = base[k];
-			d.ROWS = rowsStr;
-			d.OFFSET = offset;
-			d.TOTAL = total;
-			d.MORE = more;
-			return d;
-		}
-		if (chunks.length === 0) {
-			enqueue(dict("", firstOffset, 0));
-			return;
-		}
-		var at = 0;
-		for (var i = 0; i < chunks.length; i++) {
-			enqueue(dict(chunks[i], offsetOf(at), i < chunks.length - 1 ? 1 : 0));
-			at += chunks[i].split("\n").length;
-		}
-	}
-
-	function page(p) {
-		var list = str(p.LIST);
-		var sid = p.SESSION_ID ? str(p.SESSION_ID) : currentSession;
-		if (list === "sessions") {
-			var now = deps.now();
-			var rows = (frame.sessions || []).map(function (s) {
-				return sessionRow(s, now);
-			});
-			sendList("sessions", null, rows, 0, function (at) {
-				return at;
-			}, rows.length);
-			return;
-		}
-		if (!sid) {
-			sendList(list, "", [], 0, null, -1);
-			return;
-		}
-		var q = "?session=" + encodeURIComponent(sid);
-		if (list === "history") {
-			var before = typeof p.OFFSET === "number" && p.OFFSET >= 0 ? "&before=" + p.OFFSET : "";
-			hub.get("/api/watch/history" + q + before + "&limit=" + HISTORY_PAGE, function (err, json) {
-				if (err || !json) {
-					log("pi-web: history page failed: " + (err && err.message));
-					sendList(list, sid, [], 0, null, -1);
-					return;
-				}
-				var turns = json.turns || [];
-				var rows = turns.map(function (t) {
-					return [num(t.i), clean(t.role), clip(clean(t.text))].join("\t");
-				});
-				sendList(list, sid, rows, 0, function (at) {
-					return num(turns[at].i);
-				}, num(json.total));
-			});
-			return;
-		}
-		if (list === "models") {
-			hub.get("/api/watch/models" + q, function (err, json) {
-				if (err || !json) {
-					log("pi-web: models page failed: " + (err && err.message));
-					sendList(list, sid, [], 0, null, -1);
-					return;
-				}
-				var cur = json.current;
-				var models = json.models || [];
-				var rows = models.map(function (m) {
-					var isCur = cur && cur.provider === m.provider && cur.id === m.id ? "1" : "0";
-					return [clean(m.provider), clean(m.id), clipTo(clean(m.name), NAME_MAX), isCur].join("\t");
-				});
-				sendList(list, sid, rows, 0, function (at) {
-					return at;
-				}, rows.length);
-			});
-			return;
-		}
-		log("pi-web: unknown list " + list);
-	}
-
-	function show(p) {
-		if (p.REQ_ID && findById(frame.requests, p.REQ_ID)) {
-			pin = null;
-			currentReq = str(p.REQ_ID);
-			update();
-			return;
-		}
-		if (!p.SESSION_ID) return;
-		var sid = str(p.SESSION_ID);
-		var forSession = byCreated(frame.requests).filter(function (r) {
-			return r.sessionId === sid;
-		})[0];
-		if (forSession) {
-			pin = null;
-			currentReq = forSession.id;
-			update();
-			return;
-		}
-		var seen = {};
-		(frame.requests || []).forEach(function (r) {
-			seen[r.id] = true;
-		});
-		pin = { sessionId: sid, seen: seen };
-		update();
-	}
-
-	function onAppMessage(p) {
-		p = p || {};
-		var cmd = str(p.CMD);
-		var sid = p.SESSION_ID ? str(p.SESSION_ID) : currentSession;
-		if (cmd === "hello") {
-			sendAll();
-		} else if (cmd === "answer") {
-			var body = { requestId: str(p.REQ_ID) };
-			if (p.OPTION !== undefined && p.OPTION !== null && p.OPTION !== "") body.option = hubOption(body.requestId, str(p.OPTION));
-			else body.text = str(p.TEXT);
-			postCommand("/api/watch/answer", body, p.CMD_ID, body.requestId);
-		} else if (cmd === "dismiss") {
-			postCommand("/api/watch/dismiss", { requestId: str(p.REQ_ID) }, p.CMD_ID, str(p.REQ_ID));
-		} else if (cmd === "prompt") {
-			postCommand("/api/watch/prompt", { sessionId: sid, text: str(p.TEXT) }, p.CMD_ID, null);
-		} else if (cmd === "model") {
-			postCommand("/api/watch/model", { sessionId: sid, provider: str(p.PROVIDER), modelId: str(p.MODEL_ID) }, p.CMD_ID, null);
-		} else if (cmd === "show") {
-			show(p);
-		} else if (cmd === "page") {
-			page(p);
-		} else {
-			log("pi-web: unknown command " + cmd);
-		}
 	}
 
 	return {
@@ -632,29 +503,26 @@ function createBridge(deps) {
 		},
 		onPending: function (f) {
 			if (!f) return;
-			frame = { requests: f.requests || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
-			for (var id in shownOptions) if (!findById(frame.requests, id)) delete shownOptions[id];
-			update();
+			var force = resync;
+			resync = false;
+			frame = { queries: f.queries || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
+			update(force);
 		},
 		onText: function (f) {
-			if (!f || !f.sessionId) return;
-			var streaming = f.streaming ? 1 : 0;
-			if (f.sessionId !== currentSession) {
-				// Never shown (Review Focus 5); a final reply is kept for when the session is current again.
-				if (!streaming) {
-					lastText[f.sessionId] = str(f.text);
-					fresh[f.sessionId] = true;
-				}
-				return;
-			}
-			if (!streaming) lastText[f.sessionId] = str(f.text);
-			enqueue({ MSG: "text", SESSION_ID: str(f.sessionId), TEXT: clip(f.text), STREAMING: streaming });
+			if (!f || !f.sessionId || f.sessionId !== openSession) return;
+			enqueue(replyDict(f.sessionId, f.text));
+		},
+		onNotice: function (f) {
+			if (f && f.text) notice(f.text);
 		},
 		onStatus: function (s) {
 			if (!NETS[s]) return;
 			net = s;
 			enqueue({ MSG: "net", NET: s });
-			if (s === "online" && (currentReq || currentSession)) hub.showing(currentReq, currentSession);
+			if (s === "online") {
+				resync = true;
+				if (showing.id !== null || showing.sessionId !== null) hub.showing(showing.id, showing.sessionId);
+			}
 		},
 		onAppMessage: onAppMessage,
 		onSettings: function (s) {
@@ -662,20 +530,13 @@ function createBridge(deps) {
 			if (s.DARK !== undefined && s.DARK !== null) dark = darkValue(s.DARK);
 			enqueue({ MSG: "cfg", DARK: dark ? 1 : 0 });
 		},
-		current: function () {
-			return { requestId: currentReq, sessionId: currentSession };
-		},
 	};
 }
 
 module.exports = {
 	createBridge: createBridge,
-	selectRequest: selectRequest,
-	selectSession: selectSession,
-	packRows: packRows,
-	packHome: packHome,
-	packStats: packStats,
 	clean: clean,
-	ageLabel: ageLabel,
+	clock: clock,
+	elapsed: elapsed,
 	dictBytes: dictBytes,
 };

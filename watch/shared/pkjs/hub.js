@@ -139,6 +139,8 @@ function createHubClient(opts) {
 				deliver(opts.onPending, frame, "pending");
 			} else if (frame.type === "text") {
 				deliver(opts.onText, { sessionId: frame.sessionId, text: frame.text, streaming: frame.streaming }, "text");
+			} else if (frame.type === "notice") {
+				deliver(opts.onNotice, { text: frame.text }, "notice");
 			}
 		};
 		s.onerror = function () {};
@@ -196,8 +198,8 @@ function createHubClient(opts) {
 			socketOpen = false;
 			status("offline");
 		},
-		showing: function (requestId, sessionId) {
-			var body = JSON.stringify({ type: "showing", requestId: requestId, sessionId: sessionId });
+		showing: function (queryId, sessionId) {
+			var body = JSON.stringify({ type: "showing", queryId: queryId, sessionId: sessionId });
 			if (socket && socketOpen) {
 				socket.send(body);
 			} else {

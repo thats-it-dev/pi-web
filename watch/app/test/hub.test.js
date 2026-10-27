@@ -10,6 +10,7 @@ function setup(opts) {
 	const timers = new FakeTimers();
 	const pending = [];
 	const texts = [];
+	const notices = [];
 	const statuses = [];
 	const logs = [];
 	const hub = createHubClient({
@@ -23,10 +24,11 @@ function setup(opts) {
 			if (opts.throwPending) throw new Error("boom");
 		},
 		onText: (f) => texts.push(f),
+		onNotice: (f) => notices.push(f),
 		onStatus: (s) => statuses.push(s),
 		log: (m) => logs.push(m),
 	});
-	return { hub, timers, pending, texts, statuses, logs };
+	return { hub, timers, pending, texts, notices, statuses, logs };
 }
 const sock = () => FakeSocket.instances[FakeSocket.instances.length - 1];
 const xhr = () => FakeXhr.instances[FakeXhr.instances.length - 1];
@@ -43,12 +45,29 @@ test("with a WebSocket: connecting, open → online, pending and text frames are
 	assert.equal(sock().url, "wss://h:7878/api/watch/stream");
 	sock().onopen();
 	assert.deepEqual(t.statuses, ["connecting", "online"]);
-	sock().onmessage({ data: JSON.stringify({ type: "pending", cursor: 3, requests: [] }) });
-	assert.deepEqual(t.pending, [{ cursor: 3, requests: [] }]);
+	sock().onmessage({ data: JSON.stringify({ type: "pending", cursor: 3, queries: [] }) });
+	assert.deepEqual(t.pending, [{ cursor: 3, queries: [] }]);
 	sock().onmessage({ data: JSON.stringify({ type: "text", sessionId: "s1", text: "hi", streaming: true }) });
 	assert.deepEqual(t.texts, [{ sessionId: "s1", text: "hi", streaming: true }]);
 	sock().onmessage({ data: "not json" });
 	assert.equal(t.pending.length, 1);
+});
+
+test("a notice frame is dispatched to onNotice", () => {
+	const t = setup();
+	t.hub.connect();
+	sock().onopen();
+	sock().onmessage({ data: JSON.stringify({ type: "notice", text: "Session closed" }) });
+	assert.deepEqual(t.notices, [{ text: "Session closed" }]);
+	assert.equal(t.pending.length, 0);
+});
+
+test("showing with a null query sends nulls", () => {
+	const t = setup();
+	t.hub.connect();
+	sock().onopen();
+	t.hub.showing(null, "s1");
+	assert.equal(sock().sent[0], '{"type":"showing","queryId":null,"sessionId":"s1"}');
 });
 
 test("connect is idempotent and transport is null before connect", () => {
@@ -62,14 +81,14 @@ test("connect is idempotent and transport is null before connect", () => {
 test("showing goes over the open socket as a frame, and over POST when the socket is not open", () => {
 	const t = setup();
 	t.hub.connect();
-	t.hub.showing("r1", "s1");
+	t.hub.showing("q1", "s1");
 	assert.equal(sock().sent.length, 0);
 	assert.equal(xhr().method, "POST");
 	assert.equal(xhr().url, "https://h:7878/api/watch/showing");
-	assert.equal(xhr().body, '{"type":"showing","requestId":"r1","sessionId":"s1"}');
+	assert.equal(xhr().body, '{"type":"showing","queryId":"q1","sessionId":"s1"}');
 	sock().onopen();
-	t.hub.showing("r1", "s1");
-	assert.equal(sock().sent[0], '{"type":"showing","requestId":"r1","sessionId":"s1"}');
+	t.hub.showing("q1", "s1");
+	assert.equal(sock().sent[0], '{"type":"showing","queryId":"q1","sessionId":"s1"}');
 });
 
 test("close → offline and a reconnect after 1 s, then 2, 4 … capped at 30 s; an open resets to 1 s", () => {
@@ -95,7 +114,7 @@ test("without a WebSocket it long-polls: GET pending?since=0&wait=1 with timeout
 	assert.equal(xhr().method, "GET");
 	assert.equal(xhr().url, "https://h:7878/api/watch/pending?since=0&wait=1");
 	assert.equal(xhr().timeout, 35000);
-	xhr().respond(200, '{"cursor":7,"requests":[],"showing":null,"sessions":[]}');
+	xhr().respond(200, '{"cursor":7,"queries":[],"showing":null,"sessions":[]}');
 	assert.equal(t.pending.length, 1);
 	assert.equal(t.pending[0].cursor, 7);
 	assert.equal(t.statuses[t.statuses.length - 1], "online");

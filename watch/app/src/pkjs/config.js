@@ -5,7 +5,7 @@ module.exports = [
 		type: "section",
 		items: [
 			{ type: "input", messageKey: "HUB_URL", label: "Hub URL", attributes: { placeholder: "https://host:7878", type: "url" } },
-			{ type: "toggle", messageKey: "DARK", label: "Dark", defaultValue: true },
+			{ type: "toggle", messageKey: "DARK", label: "Dark theme", defaultValue: true },
 		],
 	},
 	{ type: "submit", defaultValue: "Save" },

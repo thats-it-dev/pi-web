@@ -1,16 +1,18 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createBridge, selectRequest, selectSession, packRows, packHome, packStats, clean, ageLabel, dictBytes } = require("../src/pkjs/bridge.js");
+const { createBridge, dictBytes, clock, elapsed } = require("../src/pkjs/bridge.js");
 const { FakeTimers } = require("./support/fakes.js");
 
-const HOUR = 3600 * 1000;
-const NOW = 100 * HOUR;
+const MIN = 60 * 1000;
+const NOW = new Date(2026, 9, 27, 13, 40, 0).getTime(); // local time, so the clock strings are TZ-proof
+const RS = "\x1e";
+const US = "\x1f";
 
 function FakeHub() {
 	this.calls = [];
 }
-FakeHub.prototype.showing = function (requestId, sessionId) {
-	this.calls.push({ kind: "showing", requestId: requestId, sessionId: sessionId });
+FakeHub.prototype.showing = function (queryId, sessionId) {
+	this.calls.push({ kind: "showing", queryId: queryId, sessionId: sessionId });
 };
 FakeHub.prototype.get = function (path, cb) {
 	this.calls.push({ kind: "get", path: path, cb: cb });
@@ -30,8 +32,8 @@ FakeHub.prototype.reply = function (err, json, prefix) {
 	}
 	throw new Error("no call to reply to");
 };
-FakeHub.prototype.of = function (kind) {
-	return this.calls.filter((c) => c.kind === kind);
+FakeHub.prototype.of = function (kind, prefix) {
+	return this.calls.filter((c) => c.kind === kind && (!prefix || c.path.indexOf(prefix) === 0));
 };
 
 function setup(opts) {
@@ -42,7 +44,7 @@ function setup(opts) {
 	const dicts = [];
 	const logs = [];
 	let inFlight = null;
-	const clock = { t: NOW };
+	const clockState = { t: NOW };
 	const bridge = createBridge({
 		hub: hub,
 		send: (dict, onAck, onFail) => {
@@ -53,7 +55,7 @@ function setup(opts) {
 		storage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => (store[k] = String(v)) },
 		setTimeout: timers.setTimeout,
 		clearTimeout: timers.clearTimeout,
-		now: () => clock.t,
+		now: () => clockState.t,
 		log: (m) => logs.push(m),
 	});
 	const t = {
@@ -63,8 +65,7 @@ function setup(opts) {
 		dicts,
 		logs,
 		store,
-		clock,
-		inFlight: () => inFlight,
+		clock: clockState,
 		ack() {
 			const f = inFlight;
 			assert.ok(f, "nothing in flight to ack");
@@ -83,721 +84,319 @@ function setup(opts) {
 			while (inFlight) t.ack();
 			return dicts.slice(start);
 		},
-		last(msg) {
-			for (let i = dicts.length - 1; i >= 0; i--) if (dicts[i].MSG === msg) return dicts[i];
-			return null;
-		},
 		all(msg) {
 			return dicts.filter((d) => d.MSG === msg);
+		},
+		last(msg) {
+			const l = t.all(msg);
+			return l.length ? l[l.length - 1] : null;
+		},
+		// Pushes a pending frame and returns what it sent.
+		pend(queries, sessions, showing) {
+			bridge.onPending({ cursor: 1, queries: queries || [], sessions: sessions || [], showing: showing || null });
+			return t.drain();
 		},
 	};
 	return t;
 }
 
-function req(id, kind, sessionId, createdAt, options) {
-	return {
-		id: id,
-		kind: kind,
-		sessionId: sessionId,
-		sessionTitle: "title " + sessionId,
-		tool: kind === "dialog" ? "bash" : "question",
-		message: "message for " + id,
-		options: options || [],
-		method: kind === "dialog" ? "select" : null,
-		createdAt: createdAt,
-	};
+function query(id, createdAt, over) {
+	return Object.assign({ id, source: "pi", sessionId: "s1", label: "title s1", text: "Allow git push?", options: ["allow", "deny"], createdAt }, over || {});
 }
-const r0 = req("r0", "dialog", "s1", 0, ["yes", "no"]);
-const r1 = req("r1", "dialog", "s1", 1, ["allow", "deny"]);
-const r2 = req("r2", "finished", "s2", 2);
-
-function session(id, over) {
-	return Object.assign(
-		{ id: id, title: "title " + id, state: "idle", live: true, model: "qwen3", contextPercent: null, contextTokens: null, contextWindow: null, tps: null, updatedAt: NOW },
-		over || {},
-	);
+function sess(id, status, over) {
+	return Object.assign({ id, title: "title " + id, state: "idle", status, live: true, model: "qwen3", contextPercent: null, contextTokens: null, contextWindow: null, tps: null, updatedAt: NOW - 5 * MIN }, over || {});
 }
-const s1 = session("s1", { state: "running", contextPercent: 41, contextTokens: 41000, contextWindow: 100000, tps: 62, updatedAt: NOW - 1000 });
-const s2 = session("s2", { updatedAt: NOW - 5000 });
-const s3 = session("s3", { live: false, updatedAt: NOW - 2 * HOUR });
-const SESSIONS = [s1, s2, s3];
+const rowsOf = (home) => home.ROWS.split(RS).map((r) => r.split(US));
 
-function pending(requests, sessions, showing) {
-	return { cursor: 1, requests: requests, showing: showing === undefined ? null : showing, sessions: sessions || SESSIONS };
-}
-
-test("hello → cfg, net, home in that order, one at a time until acked", () => {
+test("pending frame -> home dict under 1000 B with waiting rows first and status/sub per row", () => {
 	const t = setup();
-	t.bridge.onAppMessage({ CMD: "hello", CMD_ID: 1 });
-	assert.equal(t.dicts.length, 1);
-	assert.equal(t.dicts[0].MSG, "cfg");
-	assert.equal(t.dicts[0].DARK, 1);
-	t.ack();
-	assert.equal(t.dicts.length, 2);
-	assert.equal(t.dicts[1].MSG, "net");
-	assert.equal(t.dicts[1].NET, "connecting");
-	t.ack();
-	assert.equal(t.dicts.length, 3);
-	assert.equal(t.dicts[2].MSG, "home");
-	assert.equal(t.dicts[2].REQ_ID, "");
-	t.ack();
-	assert.equal(t.inFlight(), null);
+	const out = t.pend([], [sess("a", "done"), sess("b", "running"), sess("c", "waiting"), sess("d", "error")]);
+	const home = out.filter((d) => d.MSG === "home").pop();
+	assert.ok(dictBytes(home) <= 1000);
+	const rows = rowsOf(home);
+	assert.deepEqual(rows.map((r) => r[0]), ["c", "a", "b", "d"]);
+	assert.deepEqual(rows.map((r) => r[2]), ["w", "d", "r", "e"]);
+	assert.equal(rows[0][3], "");
+	assert.equal(rows[1][3], clock(NOW - 5 * MIN)); // done: HH:MM
+	assert.match(rows[1][3], /^\d\d:\d\d$/);
+	assert.equal(rows[2][3], "0:00"); // running: elapsed since first seen
+	assert.equal(rows[3][3], "");
 });
 
-test("a pending frame selects the oldest request, reports showing, and sends home + stats", () => {
+test("a running row shows elapsed time since the phone first saw it running", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r2, r1]));
-	t.drain();
-	const home = t.last("home");
-	assert.equal(home.REQ_ID, "r1");
-	assert.equal(home.REQ_KIND, "dialog");
-	assert.equal(home.REQ_TOOL, "bash");
-	assert.equal(home.REQ_TEXT, "message for r1");
-	assert.equal(home.REQ_INDEX, 1);
-	assert.equal(home.REQ_COUNT, 2);
-	assert.equal(home.REQ_OPTIONS, "allow\ndeny");
-	assert.equal(home.SESSION_ID, "s1");
-	assert.equal(home.SESSION_TITLE, "title s1");
-	assert.deepEqual(t.hub.of("showing"), [{ kind: "showing", requestId: "r1", sessionId: "s1" }]);
-	const stats = t.last("stats");
-	assert.equal(stats.SESSION_ID, "s1");
-	assert.equal(stats.CTX_PERCENT, 41);
-	assert.equal(stats.CTX_TOKENS, 41000);
-	assert.equal(stats.CTX_WINDOW, 100000);
-	assert.equal(stats.TPS, 62);
-	assert.equal(stats.MODEL, "qwen3");
-	assert.equal(stats.STATE, "running");
-	assert.deepEqual(t.bridge.current(), { requestId: "r1", sessionId: "s1" });
+	t.pend([], [sess("b", "running")]);
+	t.clock.t += 4 * MIN + 12 * 1000;
+	const out = t.pend([], [sess("b", "running", { title: "t2" })]);
+	assert.equal(rowsOf(out.filter((d) => d.MSG === "home").pop())[0][3], "4:12");
+	assert.equal(elapsed(65 * MIN), "1:05");
 });
 
-test("the current request stays current when an older one appears; index and count follow", () => {
+test("13 sessions -> 12 rows max and the dict fits, even with long titles", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	t.bridge.onPending(pending([r0, r1, r2], SESSIONS, "r1"));
-	t.drain();
-	const home = t.last("home");
-	assert.equal(home.REQ_ID, "r1");
-	assert.equal(home.REQ_INDEX, 2);
-	assert.equal(home.REQ_COUNT, 3);
-	assert.equal(t.hub.of("showing").length, 1, "showing is not re-reported when nothing changed");
+	const many = [];
+	for (let i = 0; i < 13; i++) many.push(sess("s" + i, "done"));
+	const home = t.pend([], many).filter((d) => d.MSG === "home").pop();
+	assert.equal(rowsOf(home).length, 12);
+	assert.ok(dictBytes(home) <= 1000);
+	const long = [];
+	for (let i = 0; i < 13; i++) long.push(sess("0123456789abcdef0123456789abcdef0123-" + i, "done", { title: "\u00e9".repeat(80) }));
+	const h2 = setup().pend([], long).filter((d) => d.MSG === "home").pop();
+	const rows = rowsOf(h2);
+	assert.ok(rows.length < 12 && rows.length > 0);
+	assert.ok(dictBytes(h2) <= 1000);
+	assert.equal(rows[0][1].length, 40); // title clipped to 40
 });
 
-test("with nothing current the hub's showing wins over the oldest", () => {
+test("titles cannot smuggle separators into a row", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2], SESSIONS, "r2"));
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "r2");
-	assert.equal(t.last("home").SESSION_ID, "s2");
-	assert.equal(selectRequest([r1, r2], "gone", "r2").id, "r2");
-	assert.equal(selectRequest([r2, r1], null, "missing").id, "r1");
-	assert.equal(selectRequest([r1, r2], "r2", "r1").id, "r2");
-	assert.equal(selectRequest([], null, null), null);
+	const home = t.pend([], [sess("a", "done", { title: "a\x1fb\x1ec\nd" })]).filter((d) => d.MSG === "home").pop();
+	assert.deepEqual(rowsOf(home)[0].slice(0, 2), ["a", "a b c d"]);
 });
 
-test("answer ok: POST body, result OK 1, the next request becomes home without waiting for the hub", () => {
+test("oldest visible query -> query dict; resolved -> query_gone then the next query", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 5, REQ_ID: "r1", OPTION: "allow" });
-	const post = t.hub.of("post")[0];
-	assert.equal(post.path, "/api/watch/answer");
-	assert.deepEqual(post.body, { requestId: "r1", option: "allow" });
-	const before = t.dicts.length;
-	t.hub.reply(null, { ok: true }, "/api/watch/answer");
-	const sent = t.drain();
-	assert.equal(t.dicts.length > before, true);
-	assert.equal(sent[0].MSG, "result");
-	assert.equal(sent[0].CMD_ID, 5);
-	assert.equal(sent[0].OK, 1);
-	const home = sent.filter((d) => d.MSG === "home").pop();
-	assert.equal(home.REQ_ID, "r2");
-	assert.equal(home.REQ_INDEX, 1);
-	assert.equal(home.REQ_COUNT, 1);
-	assert.deepEqual(t.hub.of("showing").pop(), { kind: "showing", requestId: "r2", sessionId: "s2" });
+	const q1 = query("q1", 1, { label: "L".repeat(60), text: "T".repeat(700), source: "ring-profile", options: ["one", "two"] });
+	const q2 = query("q2", 2, { text: "second" });
+	let out = t.pend([q2, q1], [sess("s1", "waiting")]);
+	const first = out.filter((d) => d.MSG === "query");
+	assert.equal(first.length, 1);
+	assert.equal(first[0].ID, "q1");
+	assert.equal(first[0].SOURCE, "ring");
+	assert.equal(first[0].LABEL.length, 40);
+	assert.ok(first[0].TEXT.length <= 600);
+	assert.equal(first[0].OPTIONS, "one" + US + "two");
+	assert.equal(first[0].AT, clock(1));
+	assert.ok(dictBytes(first[0]) <= 1000);
+	// A frame that changes nothing about the query sends nothing for it.
+	out = t.pend([q2, q1], [sess("s1", "waiting")]);
+	assert.equal(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").length, 0);
+	// q1 is answered in the web app: the next frame has only q2.
+	out = t.pend([q2], [sess("s1", "waiting")]);
+	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q1"], ["query", "q2"]]);
+	assert.equal(out.filter((d) => d.MSG === "query")[0].SOURCE, "pi");
+	// And when nothing is left, just query_gone.
+	out = t.pend([], []);
+	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"]]);
 });
 
-test("answer by TEXT posts text; no_match and gone carry REASON and OPTIONS; a network error is REASON error", () => {
+test("a late-arriving older query becomes the one shown", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 6, REQ_ID: "r1", TEXT: "maybe" });
-	assert.deepEqual(t.hub.of("post")[0].body, { requestId: "r1", text: "maybe" });
-	t.hub.reply(null, { ok: false, reason: "no_match", options: ["allow", "deny"] });
-	t.drain();
-	let res = t.last("result");
-	assert.equal(res.CMD_ID, 6);
-	assert.equal(res.OK, 0);
-	assert.equal(res.REASON, "no_match");
-	assert.equal(res.OPTIONS, "allow\ndeny");
-	assert.equal(t.bridge.current().requestId, "r1", "no_match keeps the request current");
+	t.pend([query("q2", 2)], []);
+	const out = t.pend([query("q2", 2), query("q1", 1)], []);
+	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"], ["query", "q1"]]);
+});
 
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 7, REQ_ID: "r1", OPTION: "allow" });
+test("long option is clipped for display but answer sends the full option", () => {
+	const t = setup();
+	const longOpt = "Allow this command to run in the sandbox for the rest of the session";
+	t.pend([query("q1", 1, { options: [longOpt, "deny"] })], []);
+	const q = t.last("query");
+	const shown = q.OPTIONS.split(US);
+	assert.ok(shown[0].length <= 24);
+	assert.ok(shown[0].length < longOpt.length);
+	assert.equal(shown[1], "deny");
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	const p = t.hub.of("post")[0];
+	assert.equal(p.path, "/api/watch/answer");
+	assert.deepEqual(p.body, { queryId: "q1", option: longOpt });
+});
+
+test("a query with many long options and long text still fits one dict and keeps option order", () => {
+	const t = setup();
+	const opts = [];
+	for (let i = 0; i < 12; i++) opts.push("option number " + i + " " + "x".repeat(60));
+	t.pend([query("q1", 1, { text: "T".repeat(600), options: opts })], []);
+	const q = t.last("query");
+	assert.ok(dictBytes(q) <= 1000);
+	const shown = q.OPTIONS.split(US);
+	assert.ok(shown.length >= 1);
+	shown.forEach((s, i) => assert.ok(s.indexOf("option number " + i) === 0 || s === "" || s.charAt(0) === "o"));
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 1 });
+	assert.equal(t.hub.of("post")[0].body.option, opts[1]);
+});
+
+test("answer sends {queryId, option}; success removes the query and shows the next", () => {
+	const t = setup();
+	t.pend([query("q1", 1), query("q2", 2)], []);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 1 });
+	assert.deepEqual(t.hub.of("post")[0].body, { queryId: "q1", option: "deny" });
+	t.hub.reply(null, { ok: true });
+	const out = t.drain();
+	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q1"], ["query", "q2"]]);
+});
+
+test("an answer for an index the query does not have is ignored", () => {
+	const t = setup();
+	t.pend([query("q1", 1)], []);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 5 });
+	t.bridge.onAppMessage({ CMD: "answer", ID: "nope", OK: 0 });
+	assert.equal(t.hub.of("post").length, 0);
+});
+
+test("a failed answer posts a notice and may be retried; gone removes the query", () => {
+	const t = setup();
+	t.pend([query("q1", 1)], []);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
 	t.hub.reply(new Error("network error"));
-	t.drain();
-	res = t.last("result");
-	assert.equal(res.CMD_ID, 7);
-	assert.equal(res.OK, 0);
-	assert.equal(res.REASON, "error");
-	assert.equal(t.bridge.current().requestId, "r1");
-
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 8, REQ_ID: "r1", OPTION: "allow" });
+	assert.equal(t.drain().filter((d) => d.MSG === "notice").length, 1);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	assert.equal(t.hub.of("post").length, 2);
 	t.hub.reply(null, { ok: false, reason: "gone" });
-	const sent = t.drain();
-	res = t.last("result");
-	assert.equal(res.CMD_ID, 8);
-	assert.equal(res.REASON, "gone");
-	assert.equal(res.OPTIONS, "");
-	assert.equal(sent.filter((d) => d.MSG === "home").pop().REQ_ID, "r2", "gone moves on");
+	assert.ok(t.drain().some((d) => d.MSG === "query_gone" && d.ID === "q1"));
 });
 
-test("dismiss and prompt post their bodies and answer with a result", () => {
+test("skip sends {queryId} and moves to the next query", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "dismiss", CMD_ID: 9, REQ_ID: "r1" });
-	assert.equal(t.hub.of("post")[0].path, "/api/watch/dismiss");
-	assert.deepEqual(t.hub.of("post")[0].body, { requestId: "r1" });
+	t.pend([query("q1", 1), query("q2", 2)], []);
+	t.bridge.onAppMessage({ CMD: "skip", ID: "q1" });
+	const p = t.hub.of("post")[0];
+	assert.equal(p.path, "/api/watch/skip");
+	assert.deepEqual(p.body, { queryId: "q1" });
 	t.hub.reply(null, { ok: true });
-	t.drain();
-	assert.equal(t.last("result").CMD_ID, 9);
-	assert.equal(t.last("home").REQ_ID, "r2");
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q1"], ["query", "q2"]]);
+});
 
-	t.bridge.onAppMessage({ CMD: "prompt", CMD_ID: 10, SESSION_ID: "s2", TEXT: "go on" });
-	assert.equal(t.hub.of("post")[1].path, "/api/watch/prompt");
-	assert.deepEqual(t.hub.of("post")[1].body, { sessionId: "s2", text: "go on" });
+test("reconnect after WebSocket drop re-sends home and the current query, and a queued answer is not sent twice", () => {
+	const t = setup();
+	t.bridge.onStatus("online");
+	t.pend([query("q1", 1)], [sess("s1", "waiting")]);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	assert.equal(t.hub.of("post").length, 1);
+	// The socket drops with the answer still in flight; the watch taps again meanwhile.
+	t.bridge.onStatus("offline");
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	t.bridge.onStatus("online");
+	const out = t.pend([query("q1", 1)], [sess("s1", "waiting")]);
+	assert.equal(out.filter((d) => d.MSG === "home").length, 1);
+	assert.equal(out.filter((d) => d.MSG === "query").length, 1);
+	assert.equal(out.filter((d) => d.MSG === "query_gone").length, 0);
+	t.bridge.onAppMessage({ CMD: "answer", ID: "q1", OK: 0 });
+	assert.equal(t.hub.of("post").length, 1, "the answer was posted once");
+	// Once the hub applied it, the next frame drops the query.
 	t.hub.reply(null, { ok: true });
-	t.drain();
-	assert.equal(t.last("result").CMD_ID, 10);
-	assert.equal(t.last("result").OK, 1);
+	assert.ok(t.drain().some((d) => d.MSG === "query_gone" && d.ID === "q1"));
 });
 
-test("model posts provider and id; a 409 is REASON error", () => {
+test("reconnect re-announces what the watch is showing", () => {
 	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "model", CMD_ID: 11, SESSION_ID: "s1", PROVIDER: "local", MODEL_ID: "qwen3-30b" });
-	const post = t.hub.of("post")[0];
-	assert.equal(post.path, "/api/watch/model");
-	assert.deepEqual(post.body, { sessionId: "s1", provider: "local", modelId: "qwen3-30b" });
-	const e = new Error("hub answered 409");
-	e.status = 409;
-	t.hub.reply(e);
-	t.drain();
-	assert.equal(t.last("result").OK, 0);
-	assert.equal(t.last("result").REASON, "error");
+	t.bridge.onAppMessage({ CMD: "showing", ID: "q1", SESSION_ID: "s1" });
+	assert.deepEqual(t.hub.of("showing")[0], { kind: "showing", queryId: "q1", sessionId: "s1" });
+	t.bridge.onAppMessage({ CMD: "showing" });
+	assert.deepEqual(t.hub.of("showing")[1], { kind: "showing", queryId: null, sessionId: null });
+	t.bridge.onAppMessage({ CMD: "showing", SESSION_ID: "s2" });
+	t.bridge.onStatus("online");
+	assert.deepEqual(t.hub.of("showing")[3], { kind: "showing", queryId: null, sessionId: "s2" });
 });
 
-test("a request answered elsewhere disappears from the next frame: home moves on (Review Focus 1)", () => {
+test("notice frame -> notice dict", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "r1");
-	t.bridge.onPending(pending([r2], SESSIONS, null));
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "r2");
-	assert.equal(t.last("home").REQ_COUNT, 1);
-	t.bridge.onPending(pending([], SESSIONS, null));
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "");
-	assert.equal(t.last("home").REQ_COUNT, 0);
+	t.bridge.onNotice({ text: "Session closed" });
+	assert.deepEqual(t.drain().filter((d) => d.MSG === "notice"), [{ MSG: "notice", NOTICE: "Session closed" }]);
 });
 
-test("nothing pending: home carries the current session by the lastSession rule and TEXT from history", () => {
-	const t = setup({ store: { "pi-web.lastSession": "s2" } });
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	let home = t.last("home");
-	assert.equal(home.REQ_ID, "");
-	assert.equal(home.SESSION_ID, "s2");
-	assert.equal(home.STATE, "idle");
-	assert.equal(home.TEXT, "");
-	assert.deepEqual(t.hub.of("showing").pop(), { kind: "showing", requestId: null, sessionId: "s2" });
-	const get = t.hub.of("get")[0];
-	assert.equal(get.path, "/api/watch/history?session=s2&limit=4");
-	t.hub.reply(null, {
-		turns: [
-			{ i: 6, role: "agent", text: "an older reply" },
-			{ i: 7, role: "you", text: "and then?" },
-			{ i: 8, role: "agent", text: "the last reply" },
-			{ i: 9, role: "tool", text: "bash ls" },
-		],
-		total: 10,
-	});
-	t.drain();
-	home = t.last("home");
-	assert.equal(home.SESSION_ID, "s2");
-	assert.equal(home.TEXT, "the last reply");
-	// The next frame does not fetch again.
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	assert.equal(t.hub.of("get").length, 1);
-});
-
-test("home STATE is closed for a closed session and TEXT is clipped to 240", () => {
-	const t = setup({ store: { "pi-web.lastSession": "s3" } });
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	assert.equal(t.last("home").STATE, "closed");
-	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "x".repeat(300) }], total: 1 });
-	t.drain();
-	assert.equal(t.last("home").TEXT.length, 240);
-});
-
-test("text frames for the current session → text dicts; for another session → dropped (Review Focus 5)", () => {
+test("open fetches the last turn and sends a reply; live text for that session is relayed", () => {
 	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
+	t.pend([], [sess("s1", "done", { title: "Fix tests", updatedAt: new Date(2026, 9, 27, 9, 5).getTime() })]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	const g = t.hub.of("get")[0];
+	assert.equal(g.path, "/api/watch/history?session=s1&limit=1");
+	t.hub.reply(null, { turns: [{ i: 3, role: "agent", text: "All green." }], total: 4 });
 	t.drain();
-	assert.equal(t.bridge.current().sessionId, "s1");
-	t.bridge.onText({ sessionId: "s2", text: "not for us", streaming: true });
-	assert.equal(t.drain().length, 0);
-	t.bridge.onText({ sessionId: "s1", text: "half a rep", streaming: true });
-	let sent = t.drain();
-	assert.equal(sent.length, 1);
-	assert.deepEqual(sent[0], { MSG: "text", SESSION_ID: "s1", TEXT: "half a rep", STREAMING: 1 });
-	t.bridge.onText({ sessionId: "s1", text: "half a reply.", streaming: false });
-	sent = t.drain();
-	assert.deepEqual(sent[0], { MSG: "text", SESSION_ID: "s1", TEXT: "half a reply.", STREAMING: 0 });
-	// The finished reply is the cached last reply: home carries it and no history fetch is needed for s1 later.
-	t.bridge.onAppMessage({ CMD: "hello", CMD_ID: 1 });
+	assert.deepEqual(t.last("reply"), { MSG: "reply", SESSION_ID: "s1", LABEL: "Fix tests", TEXT: "All green.", AT: "09:05", STATUS: "d" });
+	t.bridge.onText({ sessionId: "s1", text: "typing", streaming: true });
+	t.bridge.onText({ sessionId: "other", text: "ignored", streaming: true });
 	t.drain();
-	assert.equal(t.last("home").TEXT, "half a reply.");
+	assert.equal(t.all("reply").length, 2);
+	assert.equal(t.last("reply").TEXT, "typing");
+	// Leaving the reply screen stops the relay.
+	t.bridge.onAppMessage({ CMD: "showing" });
+	t.bridge.onText({ sessionId: "s1", text: "more", streaming: true });
+	assert.equal(t.drain().filter((d) => d.MSG === "reply").length, 0);
 });
 
-test("coalescing: three text frames before an ack leave one queued text dict, the latest", () => {
+test("continue, stop, model post to the hub; archive drops the row", () => {
 	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
-	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
-	t.bridge.onText({ sessionId: "s1", text: "abc", streaming: true });
-	const sent = t.drain();
-	assert.deepEqual(
-		sent.map((d) => d.TEXT),
-		["a", "abc"],
-	);
+	t.pend([], [sess("s1", "done"), sess("s2", "done")]);
+	t.bridge.onAppMessage({ CMD: "continue", SESSION_ID: "s1" });
+	t.bridge.onAppMessage({ CMD: "stop", SESSION_ID: "s1" });
+	t.bridge.onAppMessage({ CMD: "model", SESSION_ID: "s1", PROVIDER: "ollama", MODEL_ID: "qwen3" });
+	assert.deepEqual(t.hub.of("post").map((c) => [c.path, c.body]), [
+		["/api/watch/prompt", { sessionId: "s1", text: "continue" }],
+		["/api/watch/abort", { sessionId: "s1" }],
+		["/api/watch/model", { sessionId: "s1", provider: "ollama", modelId: "qwen3" }],
+	]);
+	t.bridge.onAppMessage({ CMD: "archive", SESSION_ID: "s1" });
+	assert.deepEqual(t.hub.of("post")[3].body, { sessionId: "s1" });
+	assert.equal(t.hub.of("post")[3].path, "/api/watch/archive");
+	t.hub.reply(null, { ok: true }, "/api/watch/archive");
+	const home = t.drain().filter((d) => d.MSG === "home").pop();
+	assert.deepEqual(rowsOf(home).map((r) => r[0]), ["s2"]);
 });
 
-test("results and lists are FIFO, never coalesced", () => {
+test("models fetches the catalogue and sends provider/id/name rows", () => {
 	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
+	t.bridge.onAppMessage({ CMD: "models", SESSION_ID: "s1" });
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/models?session=s1");
+	t.hub.reply(null, { current: null, models: [{ provider: "ollama", id: "qwen3", name: "Qwen 3" }, { provider: "anthropic", id: "m1", name: "M" }] });
 	t.drain();
-	t.bridge.onAppMessage({ CMD: "prompt", CMD_ID: 20, SESSION_ID: "s1", TEXT: "a" });
-	t.bridge.onAppMessage({ CMD: "prompt", CMD_ID: 21, SESSION_ID: "s1", TEXT: "b" });
-	t.bridge.onText({ sessionId: "s1", text: "x", streaming: true }); // goes in flight first
-	t.hub.reply(null, { ok: true }, "/api/watch/prompt");
-	t.hub.reply(null, { ok: true }, "/api/watch/prompt");
-	const sent = t.drain();
-	assert.deepEqual(
-		sent.filter((d) => d.MSG === "result").map((d) => d.CMD_ID).sort(),
-		[20, 21],
-	);
+	assert.deepEqual(t.last("models"), { MSG: "models", SESSION_ID: "s1", LIST: ["ollama", "qwen3", "Qwen 3"].join(US) + RS + ["anthropic", "m1", "M"].join(US) });
 });
 
-test("a failed send is retried once after 500 ms, then dropped and logged", () => {
+test("launched with a query code fetches launch-target and sends that query", () => {
 	const t = setup();
-	t.bridge.onAppMessage({ CMD: "hello", CMD_ID: 1 });
-	assert.equal(t.dicts.length, 1);
-	t.fail();
-	assert.deepEqual(t.timers.pending(), [500]);
-	assert.equal(t.dicts.length, 1, "nothing sent while waiting to retry");
-	t.timers.fire();
-	assert.equal(t.dicts.length, 2);
-	assert.equal(t.dicts[1].MSG, "cfg");
-	t.fail();
-	assert.equal(t.dicts.length, 3);
-	assert.equal(t.dicts[2].MSG, "net", "dropped after the retry; the next dict goes");
-	assert.ok(t.logs.some((l) => /drop/.test(l) && /cfg/.test(l)));
-	t.ack();
-	assert.equal(t.dicts[3].MSG, "home");
+	t.pend([query("q1", 1), query("q2", 2)], []);
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 7 });
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/launch-target?code=7");
+	t.hub.reply(null, { queryId: "q2" });
+	const out = t.drain();
+	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q1"], ["query", "q2"]]);
 });
 
-test("stats go at most once a second", () => {
+test("launched with a session code (signed 32-bit) fetches launch-target and sends the reply", () => {
 	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
+	t.pend([], [sess("s9", "done", { title: "Nine" })]);
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 0x80000003 | 0 });
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/launch-target?code=" + 0x80000003);
+	t.hub.reply(null, { sessionId: "s9" });
+	assert.equal(t.hub.of("get")[1].path, "/api/watch/history?session=s9&limit=1");
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "done it" }], total: 1 });
 	t.drain();
-	assert.equal(t.all("stats").length, 1);
-	assert.equal(t.last("stats").TPS, 62);
-	t.clock.t += 300;
-	t.bridge.onPending(pending([], [session("s1", Object.assign({}, s1, { tps: 70 })), s2, s3]));
-	t.clock.t += 300;
-	t.bridge.onPending(pending([], [session("s1", Object.assign({}, s1, { tps: 75 })), s2, s3]));
-	t.drain();
-	assert.equal(t.all("stats").length, 1, "held back inside the second");
-	assert.deepEqual(t.timers.pending(), [700], "one trailing send, due a second after the last");
-	t.clock.t += 400;
-	t.timers.fire();
-	t.drain();
-	assert.equal(t.all("stats").length, 2);
-	assert.equal(t.last("stats").TPS, 75);
-	// Unchanged stats are not resent.
-	t.clock.t += 2000;
-	t.bridge.onPending(pending([], [session("s1", Object.assign({}, s1, { tps: 75 })), s2, s3]));
-	t.drain();
-	assert.equal(t.all("stats").length, 2);
+	assert.equal(t.last("reply").SESSION_ID, "s9");
+	assert.equal(t.last("reply").TEXT, "done it");
 });
 
-test("packRows: chunks under 1000 bytes, rows never split, oversize row alone, MORE on all but the last", () => {
-	const rows = [];
-	for (let i = 0; i < 12; i++) rows.push(i + "\tagent\t" + "é".repeat(120)); // 240 bytes of text each
-	const chunks = packRows(rows, 1000);
-	assert.ok(chunks.length > 1);
-	for (const c of chunks) assert.ok(Buffer.byteLength(c, "utf8") <= 1000);
-	assert.deepEqual(chunks.join("\n").split("\n"), rows, "no row split or lost");
-	const big = "x".repeat(1500);
-	const mixed = packRows(["a", big, "b"], 1000);
-	assert.deepEqual(mixed, ["a", big, "b"]);
-	assert.deepEqual(packRows([], 1000), []);
-	assert.deepEqual(packRows(["a", "b"], 1000), ["a\nb"]);
-
-	// Through the bridge: a history page of 12 turns of 240 chars is chunked with MORE and OFFSET.
+test("launched with an unknown code (404) sends nothing", () => {
 	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 2, LIST: "history", SESSION_ID: "s1", OFFSET: -1 });
-	const turns = [];
-	for (let i = 28; i < 40; i++) turns.push({ i: i, role: i % 2 ? "agent" : "you", text: "y".repeat(240) });
-	t.hub.reply(null, { turns: turns, total: 40 }, "/api/watch/history?session=s1&limit=12");
-	const lists = t.drain().filter((d) => d.MSG === "list");
-	assert.ok(lists.length > 1);
-	lists.forEach((d, n) => {
-		assert.equal(d.MORE, n === lists.length - 1 ? 0 : 1);
-		assert.ok(Buffer.byteLength(d.ROWS, "utf8") < 1000);
-		assert.equal(d.OFFSET, Number(d.ROWS.split("\n")[0].split("\t")[0]));
-	});
-});
-
-test("page history → GET history?session=&before=&limit=12, list dicts with OFFSET = first row's i", () => {
-	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 2, LIST: "history", SESSION_ID: "s1", OFFSET: -1 });
-	assert.equal(t.hub.of("get").pop().path, "/api/watch/history?session=s1&limit=12");
-	t.hub.reply(null, { turns: [{ i: 30, role: "you", text: "line\none\tx" }, { i: 31, role: "agent", text: "ok" }], total: 32 });
-	let list = t.drain().filter((d) => d.MSG === "list");
-	assert.deepEqual(list, [{ MSG: "list", LIST: "history", SESSION_ID: "s1", ROWS: "30\tyou\tline one x\n31\tagent\tok", OFFSET: 30, TOTAL: 32, MORE: 0 }]);
-
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "history", SESSION_ID: "s1", OFFSET: 30 });
-	assert.equal(t.hub.of("get").pop().path, "/api/watch/history?session=s1&before=30&limit=12");
-	t.hub.reply(null, { turns: [], total: 32 });
-	list = t.drain().filter((d) => d.MSG === "list");
-	assert.deepEqual(list, [{ MSG: "list", LIST: "history", SESSION_ID: "s1", ROWS: "", OFFSET: 0, TOTAL: 32, MORE: 0 }]);
-});
-
-test("page models → GET models?session=, rows provider\\tid\\tname\\tcurrent", () => {
-	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: "s1" });
-	assert.equal(t.hub.of("get").pop().path, "/api/watch/models?session=s1");
-	t.hub.reply(null, {
-		current: { provider: "local", id: "b", name: "B" },
-		models: [
-			{ provider: "local", id: "a", name: "A" },
-			{ provider: "local", id: "b", name: "B" },
-		],
-	});
-	const list = t.drain().filter((d) => d.MSG === "list");
-	assert.equal(list.length, 1);
-	assert.equal(list[0].LIST, "models");
-	assert.equal(list[0].ROWS, "local\ta\tA\t0\nlocal\tb\tB\t1");
-	assert.equal(list[0].TOTAL, 2);
-	assert.equal(list[0].OFFSET, 0);
-});
-
-test("a failed page fetch sends an empty list with TOTAL -1", () => {
-	const t = setup();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: "s3" });
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 8 });
 	const e = new Error("hub answered 404");
 	e.status = 404;
 	t.hub.reply(e);
-	const list = t.drain().filter((d) => d.MSG === "list");
-	assert.deepEqual(list, [{ MSG: "list", LIST: "models", SESSION_ID: "s3", ROWS: "", OFFSET: 0, TOTAL: -1, MORE: 0 }]);
+	assert.equal(t.drain().length, 0);
 });
 
-test("page sessions comes from the stored frame with no fetch; rows are id\\ttitle\\tstate\\tlive\\tmodel\\tctx\\tage", () => {
-	const t = setup();
-	t.bridge.onPending(pending([], [s1, s2, session("s3", { live: false, updatedAt: NOW - 2 * HOUR, title: "two\nlines" })]));
-	t.drain();
-	const gets = t.hub.of("get").length;
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "sessions" });
-	assert.equal(t.hub.of("get").length, gets);
-	const list = t.drain().filter((d) => d.MSG === "list");
-	assert.equal(list.length, 1);
-	assert.equal(list[0].LIST, "sessions");
-	assert.equal(list[0].TOTAL, 3);
-	assert.equal(list[0].OFFSET, 0);
-	assert.equal(list[0].MORE, 0);
-	assert.deepEqual(list[0].ROWS.split("\n"), ["s1\ttitle s1\trunning\t1\tqwen3\t41\t-", "s2\ttitle s2\tidle\t1\tqwen3\t-\t-", "s3\ttwo lines\tclosed\t0\tqwen3\t-\t2h"]);
-});
-
-test("show by SESSION_ID switches current, reports showing(null, s), sends home + stats; show by REQ_ID selects that request", () => {
-	const t = setup();
-	t.bridge.onPending(pending([r1, r2]));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "show", CMD_ID: 3, SESSION_ID: "s3" });
-	const sent = t.drain();
-	assert.deepEqual(t.hub.of("showing").pop(), { kind: "showing", requestId: null, sessionId: "s3" });
-	const home = sent.filter((d) => d.MSG === "home").pop();
-	assert.equal(home.REQ_ID, "");
-	assert.equal(home.SESSION_ID, "s3");
-	assert.equal(home.STATE, "closed");
-	assert.equal(sent.filter((d) => d.MSG === "stats").pop().SESSION_ID, "s3");
-	assert.equal(t.store["pi-web.lastSession"], "s3");
-	// The next frame with the same requests keeps the chosen session.
-	t.bridge.onPending(pending([r1, r2], SESSIONS, null));
-	t.drain();
-	assert.equal(t.last("home").SESSION_ID, "s3");
-	assert.equal(t.last("home").REQ_ID, "");
-	// A new request takes over again.
-	const r3 = req("r3", "error", "s2", 3);
-	t.bridge.onPending(pending([r1, r2, r3], SESSIONS, null));
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "r1");
-
-	t.bridge.onAppMessage({ CMD: "show", CMD_ID: 4, REQ_ID: "r2" });
-	t.drain();
-	assert.equal(t.last("home").REQ_ID, "r2");
-	assert.equal(t.last("home").REQ_INDEX, 2);
-	assert.deepEqual(t.hub.of("showing").pop(), { kind: "showing", requestId: "r2", sessionId: "s2" });
-});
-
-test("status → net dict; going online after offline re-reports showing (Review Focus 2)", () => {
-	const t = setup();
-	t.bridge.onStatus("connecting");
-	t.drain();
-	assert.equal(t.last("net").NET, "connecting");
-	t.bridge.onStatus("online");
-	t.bridge.onPending(pending([r1]));
-	t.drain();
-	assert.equal(t.last("net").NET, "online");
-	const n = t.hub.of("showing").length;
-	t.bridge.onStatus("offline");
-	t.drain();
-	assert.equal(t.last("net").NET, "offline");
-	t.bridge.onStatus("online");
-	t.drain();
-	assert.equal(t.last("net").NET, "online");
-	assert.equal(t.hub.of("showing").length, n + 1);
-	assert.deepEqual(t.hub.of("showing").pop(), { kind: "showing", requestId: "r1", sessionId: "s1" });
-	t.bridge.onStatus("unconfigured");
-	t.drain();
-	assert.equal(t.last("net").NET, "unconfigured");
-});
-
-test("settings → cfg dict with DARK; setHub replaces the hub", () => {
-	const t = setup();
-	t.bridge.onSettings({ HUB_URL: "https://h:7878", DARK: false });
-	t.drain();
-	assert.deepEqual(t.last("cfg"), { MSG: "cfg", DARK: 0 });
-	t.bridge.onSettings({ DARK: 1 });
-	t.drain();
-	assert.deepEqual(t.last("cfg"), { MSG: "cfg", DARK: 1 });
-	const other = new FakeHub();
-	t.bridge.setHub(other);
-	t.bridge.onPending(pending([r1]));
-	t.drain();
-	assert.equal(other.of("showing").length, 1);
-});
-
-test("start sends cfg, net and home so a watch that is already open gets state", () => {
+test("start sends cfg, net and an empty home; settings update cfg; net statuses are filtered", () => {
 	const t = setup({ store: { "pi-web.dark": "0" } });
 	t.bridge.start();
-	const sent = t.drain();
-	assert.deepEqual(
-		sent.map((d) => d.MSG),
-		["cfg", "net", "home"],
-	);
-	assert.equal(sent[0].DARK, 0);
+	const out = t.drain();
+	assert.deepEqual(out.map((d) => d.MSG), ["cfg", "net", "home"]);
+	assert.equal(out[0].DARK, 0);
+	assert.equal(out[1].NET, "connecting");
+	assert.equal(out[2].ROWS, "");
+	t.bridge.onSettings({ DARK: true });
+	t.bridge.onStatus("bogus");
+	t.bridge.onStatus("unconfigured");
+	const o2 = t.drain();
+	assert.deepEqual(o2.map((d) => [d.MSG, d.DARK === undefined ? d.NET : d.DARK]), [["cfg", 1], ["net", "unconfigured"]]);
 });
 
-test("selectSession: last if listed, else newest live, else newest closed; clean() strips tabs and newlines", () => {
-	assert.equal(selectSession(SESSIONS, "s3").id, "s3");
-	assert.equal(selectSession(SESSIONS, "nope").id, "s1");
-	assert.equal(selectSession([s2, s1], null).id, "s1");
-	const c1 = session("c1", { live: false, updatedAt: 5 });
-	const c2 = session("c2", { live: false, updatedAt: 9 });
-	assert.equal(selectSession([c1, c2], null).id, "c2");
-	assert.equal(selectSession([], "s1"), null);
-	assert.equal(clean("  a\tb\nc\r\nd  "), "a b c  d");
-	assert.equal(clean(null), "");
-	assert.equal(ageLabel(5 * 60 * 1000), "5m");
-	assert.equal(ageLabel(2 * HOUR + 1000), "2h");
-	assert.equal(ageLabel(3 * 24 * HOUR), "3d");
-	assert.equal(ageLabel(-5), "0m");
-});
-
-test("packHome and packStats with nothing known use empty strings and -1", () => {
-	const home = packHome(null, 0, 0, null, "");
-	assert.equal(home.MSG, "home");
-	assert.equal(home.REQ_ID, "");
-	assert.equal(home.SESSION_ID, "");
-	assert.equal(home.REQ_COUNT, 0);
-	const stats = packStats(session("x", { model: null }));
-	assert.deepEqual(stats, { MSG: "stats", SESSION_ID: "x", STATE: "idle", MODEL: "", CTX_PERCENT: -1, CTX_TOKENS: -1, CTX_WINDOW: -1, TPS: -1 });
-	const h2 = packHome(Object.assign({}, r1, { message: "a\nb" + "z".repeat(300), options: ["x\ty", "z"] }), 1, 1, s1, "t");
-	assert.equal(h2.REQ_TEXT.length, 240);
-	assert.equal(h2.REQ_TEXT.slice(0, 3), "a\nb", "request text keeps its newlines");
-	assert.equal(h2.REQ_OPTIONS, "x y\nz");
-	assert.equal(h2.TEXT, "", "with a request the last reply is not sent");
-	assert.equal(packHome(null, 0, 0, s1, "t").TEXT, "t");
-});
-
-test("the last reply is refetched when the session becomes current again; a failed fetch is not cached", () => {
+test("a dropped dict is retried once after 500 ms, then given up on", () => {
 	const t = setup();
-	const historyGets = () => t.hub.of("get").filter((c) => c.path.indexOf("/api/watch/history?session=s1&limit=4") === 0);
-	const show = (sid) => t.bridge.onAppMessage({ CMD: "show", CMD_ID: 1, SESSION_ID: sid });
-	t.bridge.onPending(pending([], SESSIONS)); // s1 current
-	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "reply A" }], total: 1 });
-	t.drain();
-	assert.equal(t.last("home").TEXT, "reply A");
-	show("s2");
-	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
-	t.drain();
-	assert.equal(t.bridge.current().sessionId, "s2");
-	show("s1");
-	assert.equal(historyGets().length, 2, "switching back fetches again");
-	t.drain();
-	assert.equal(t.last("home").TEXT, "", "the stale reply A is not shown");
-	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "reply B" }], total: 2 });
-	t.drain();
-	assert.equal(t.last("home").TEXT, "reply B");
-
-	// A failed fetch, then a re-switch: fetch again.
-	show("s2");
-	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
-	show("s1");
-	assert.equal(historyGets().length, 3);
-	t.hub.reply(new Error("network error"));
-	t.drain();
-	t.bridge.onPending(pending([], SESSIONS));
-	t.drain();
-	assert.equal(historyGets().length, 3, "no retry on every frame while current");
-	show("s2");
-	t.hub.reply(null, { turns: [], total: 0 }, "/api/watch/history?session=s2");
-	show("s1");
-	assert.equal(historyGets().length, 4, "a failed fetch is retried on the next switch");
-});
-
-test("a final text frame for a non-current session is cached (no dict) and saves the fetch on switching", () => {
-	const t = setup();
-	t.bridge.onPending(pending([r2], SESSIONS)); // s2 current
-	t.drain();
-	const before = t.dicts.length;
-	t.bridge.onText({ sessionId: "s1", text: "finished elsewhere", streaming: false });
-	t.bridge.onText({ sessionId: "s1", text: "streaming elsewhere", streaming: true });
-	assert.equal(t.dicts.length, before, "no text dict for a non-current session");
-	const gets = t.hub.of("get").length;
-	t.bridge.onAppMessage({ CMD: "show", CMD_ID: 1, SESSION_ID: "s1" });
-	t.drain();
-	assert.equal(t.hub.of("get").length, gets, "no fetch: a final frame arrived while away");
-	assert.equal(t.last("home").SESSION_ID, "s1");
-	assert.equal(t.last("home").TEXT, "finished elsewhere");
-});
-
-test("dictBytes follows the Pebble cost model; every list dict fits 1000 bytes, even with a 36-char session id", () => {
-	assert.equal(dictBytes({ A: 1 }), 1 + 7 + 4);
-	assert.equal(dictBytes({ A: "ab" }), 1 + 7 + 3);
-	assert.equal(dictBytes({ A: "é" }), 1 + 7 + 3);
-	const longId = "0123456789abcdef0123456789abcdef0123"; // 36
-	const t = setup();
-	const longSessions = [session(longId, { title: "t".repeat(200), model: "m".repeat(100) })];
-	for (let i = 0; i < 26; i++) longSessions.push(session("c" + i + "-" + longId.slice(0, 30), { live: false, updatedAt: NOW - i * HOUR, title: "é".repeat(80) }));
-	t.bridge.onPending(pending([], longSessions));
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 2, LIST: "history", SESSION_ID: longId, OFFSET: -1 });
-	const turns = [];
-	for (let i = 28; i < 40; i++) turns.push({ i: i, role: "agent", text: "é".repeat(240) });
-	t.hub.reply(null, { turns: turns, total: 40 }, "/api/watch/history?session=" + longId + "&limit=12");
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "sessions" });
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: longId });
-	const models = [];
-	for (let i = 0; i < 30; i++) models.push({ provider: "provider" + i, id: "model-id-" + i + "-" + "x".repeat(40), name: "N".repeat(90) });
-	t.hub.reply(null, { current: null, models: models }, "/api/watch/models");
-	const lists = t.drain().filter((d) => d.MSG === "list");
-	assert.ok(lists.filter((d) => d.LIST === "history").length > 1);
-	assert.ok(lists.filter((d) => d.LIST === "sessions").length > 1);
-	assert.ok(lists.filter((d) => d.LIST === "models").length > 1);
-	for (const d of lists) assert.ok(dictBytes(d) <= 1000, d.LIST + " dict is " + dictBytes(d) + " bytes");
-	// Rows survive whole across chunks.
-	const hist = lists.filter((d) => d.LIST === "history");
-	assert.equal(hist.map((d) => d.ROWS).join("\n").split("\n").length, 12);
-});
-
-test("titles clip to 60 and model names to 40 in rows, home and stats", () => {
-	const t = setup();
-	const longS = session("s1", { title: "T".repeat(100), model: "M".repeat(100) });
-	t.bridge.onPending(pending([], [longS]));
-	t.drain();
-	assert.equal(t.last("home").SESSION_TITLE.length, 60);
-	assert.equal(t.last("stats").MODEL.length, 40);
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 3, LIST: "sessions" });
-	const row = t.drain().filter((d) => d.MSG === "list")[0].ROWS.split("\t");
-	assert.equal(row[1].length, 60);
-	assert.equal(row[4].length, 40);
-	t.bridge.onAppMessage({ CMD: "page", CMD_ID: 4, LIST: "models", SESSION_ID: "s1" });
-	t.hub.reply(null, { current: null, models: [{ provider: "p", id: "i", name: "N".repeat(100) }] }, "/api/watch/models");
-	const mrow = t.drain().filter((d) => d.MSG === "list")[0].ROWS.split("\t");
-	assert.equal(mrow[2].length, 40);
-	const h = packHome(Object.assign({}, r1, { sessionTitle: "x".repeat(100), tool: "y".repeat(100) }), 1, 1, null, "");
-	assert.equal(h.SESSION_TITLE.length, 60);
-	assert.equal(h.REQ_TOOL.length, 40);
-});
-
-test("home fits 1000 bytes with worst-case fields; the request text trims first, keeping an ellipsis", () => {
-	const sid = "0123456789abcdef0123456789abcdef0123"; // 36 chars
-	const big = {
-		id: "dialog:" + sid + ":0123456789abcdef0123456789abcdef0123",
-		kind: "dialog",
-		sessionId: sid,
-		sessionTitle: "\u00e9".repeat(100),
-		tool: "\u4e2d".repeat(100),
-		message: "\u4e2d".repeat(300),
-		options: ["a".repeat(60), "b".repeat(60), "c".repeat(60), "d".repeat(60)],
-		method: "select",
-		createdAt: 0,
-	};
-	const home = packHome(big, 1, 1, session(sid), "\u4e2d".repeat(240));
-	assert.ok(dictBytes(home) <= 1000, "home is " + dictBytes(home) + " bytes");
-	assert.equal(home.TEXT, "");
-	assert.equal(home.REQ_OPTIONS, big.options.join("\n"), "ASCII options fit unclipped");
-	assert.ok(home.REQ_TEXT.length < 240 && home.REQ_TEXT.length >= 40);
-	assert.equal(home.REQ_TEXT.slice(-1), "\u2026");
-
-	// Four 60-char 3-byte options cannot all fit with the rest: they clip, still four, still under 1000.
-	const wide = Object.assign({}, big, { options: ["\u4e2d", "\u6587", "\u5b57", "\u7b26"].map((c) => c.repeat(60)) });
-	const h2 = packHome(wide, 1, 1, session(sid), "");
-	assert.ok(dictBytes(h2) <= 1000, "home is " + dictBytes(h2) + " bytes");
-	const shown = h2.REQ_OPTIONS.split("\n");
-	assert.equal(shown.length, 4);
-	shown.forEach((o) => assert.ok(o.length >= 12));
-	assert.ok(shown.some((o) => o.slice(-1) === "\u2026"));
-});
-
-test("a shown (cleaned or clipped) option maps back to the hub's exact option string by index", () => {
-	const t = setup();
-	const long = "x".repeat(55) + "\u4e2d".repeat(300);
-	const r = Object.assign(req("r9", "dialog", "s1", 0, ["  run\nthis", long, "deny"]), { message: "\u4e2d".repeat(240) });
-	t.bridge.onPending(pending([r]));
-	t.drain();
-	const shown = t.last("home").REQ_OPTIONS.split("\n");
-	assert.equal(shown[0], "run this");
-	assert.notEqual(shown[1], long);
-	assert.ok(dictBytes(t.last("home")) <= 1000);
-
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 1, REQ_ID: "r9", OPTION: shown[0] });
-	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: "  run\nthis" });
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 2, REQ_ID: "r9", OPTION: shown[1] });
-	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: long });
-
-	// Options that come back with no_match map back the same way.
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 3, REQ_ID: "r9", TEXT: "hm" });
-	t.hub.reply(null, { ok: false, reason: "no_match", options: r.options });
-	t.drain();
-	const back = t.last("result").OPTIONS.split("\n");
-	assert.equal(back[0], "run this");
-	t.bridge.onAppMessage({ CMD: "answer", CMD_ID: 4, REQ_ID: "r9", OPTION: back[0] });
-	assert.deepEqual(t.hub.of("post").pop().body, { requestId: "r9", option: "  run\nthis" });
+	t.bridge.onNotice({ text: "x" });
+	t.fail();
+	assert.deepEqual(t.timers.pending(), [500]);
+	t.timers.fire(0);
+	t.fail();
+	assert.equal(t.timers.pending().length, 0);
+	assert.ok(t.logs.some((m) => /drop notice/.test(m)));
 });
