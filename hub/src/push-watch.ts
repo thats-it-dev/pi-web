@@ -51,7 +51,7 @@ export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p
 		const p: PushPayload = { sessionId: o.sessionId, title: sessionTitle(snap), kind: o.kind };
 		// needs_you: what the dialog asks; finished: the start of the reply; error: the error text.
 		const detail = o.kind === "needs_you" ? (snap.dialogs[0] ? dialogMessage(snap.dialogs[0]) : "") : o.text;
-		const body = clipTo(detail, BODY_MAX);
+		const body = clipText(detail, BODY_MAX);
 		if (body) p.body = body;
 		send(p);
 	});
@@ -59,10 +59,10 @@ export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p
 
 // A pi dialog as one block of text: its title, then its message.
 export function dialogMessage(d: Dialog): string {
-	return clipTo(d.message ? `${d.title}\n${d.message}` : d.title, MESSAGE_MAX);
+	return clipText(d.message ? `${d.title}\n${d.message}` : d.title, MESSAGE_MAX);
 }
 
-function clipTo(s: string, max: number): string {
+export function clipText(s: string, max: number): string {
 	const t = s.trim();
 	return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

@@ -33,12 +33,12 @@ function setup(o: { mode?: "auto" | "notification" | "push" | "off"; phone?: str
 
 const piQuery: WatchQuery = { id: "dialog:s-1:d1", source: "pi", sessionId: "s-1", label: "pi · fix", text: "Run tests?", options: ["yes", "no"], createdAt: 1 };
 const ringQuery: WatchQuery = { id: "rp:1", source: "ring-profile", sessionId: null, label: "ring · follow-up", text: "Secret question text", options: [], createdAt: 1 };
-const alert = { sessionId: "s-1", kind: "finished" as const, title: "fix", text: "All done" };
+const alert: PushPayload = { sessionId: "s-1", kind: "finished", title: "fix", body: "All done" };
 
 test("app open → no alert, query is delivered by showing only", async () => {
 	const t = setup({ appOpen: true });
 	await t.n.query(piQuery);
-	await t.n.turn(alert);
+	await t.n.turnPush(alert);
 	assert.equal(t.sent.length, 0);
 	assert.equal(t.pushed.length, 0);
 	assert.deepEqual(t.delivered, []);
@@ -90,7 +90,7 @@ test("auto, phone unreachable and push fails → no throw, not delivered, no ret
 test("a throwing send or push never throws out", async () => {
 	const t = setup({ sendThrows: true, pushThrows: true });
 	await t.n.query(piQuery);
-	await t.n.turn(alert);
+	await t.n.turnPush(alert);
 	assert.ok(t.logs.length > 0);
 	const p = setup({ mode: "push", pushThrows: true });
 	await p.n.query(ringQuery);
@@ -104,18 +104,53 @@ test("mode push → push only, no frame", async () => {
 	assert.deepEqual(t.delivered, [piQuery.id]);
 });
 
-test("turn alert with phone unreachable → no push (watchPush already sent one)", async () => {
+test("finished turn, phone reachable → one frame, zero pushes", async () => {
+	const t = setup();
+	await t.n.turnPush(alert);
+	assert.equal(t.sent.length, 1);
+	assert.equal(t.pushed.length, 0);
+});
+
+test("finished turn, phone unreachable → one push with the reply excerpt body", async () => {
 	for (const o of [{ phone: null }, { sendOk: false }, { mode: "push" as const }]) {
 		const t = setup(o);
-		await t.n.turn(alert);
-		assert.equal(t.pushed.length, 0);
+		await t.n.turnPush(alert);
+		assert.deepEqual(t.pushed, [alert]);
 	}
+	const n = setup({ mode: "notification", phone: null });
+	await n.n.turnPush(alert);
+	assert.equal(n.pushed.length, 0);
+});
+
+test("turn with the watch app open → nothing; needs_you is the query path's job", async () => {
+	const t = setup({ appOpen: true });
+	await t.n.turnPush(alert);
+	const u = setup();
+	await u.n.turnPush({ sessionId: "s-1", title: "fix", kind: "needs_you", body: "Allow?" });
+	for (const x of [t, u]) assert.equal(x.sent.length + x.pushed.length, 0);
+});
+
+test("pi dialog, app closed: phone unreachable → exactly one push; reachable → one frame, no push", async () => {
+	const a = setup({ phone: null });
+	await a.n.query(piQuery);
+	assert.equal(a.pushed.length, 1);
+	const b = setup();
+	await b.n.query(piQuery);
+	assert.equal(b.sent.length, 1);
+	assert.equal(b.pushed.length, 0);
+});
+
+test("the frame title is clipped to 64 characters", async () => {
+	const t = setup();
+	await t.n.query({ ...piQuery, label: "L".repeat(100) });
+	assert.ok(!Buffer.from(t.sent[0][1]).includes("L".repeat(65)));
+	assert.ok(Buffer.from(t.sent[0][1]).includes(`${"L".repeat(63)}…`));
 });
 
 test("mode off → nothing sent", async () => {
 	const t = setup({ mode: "off" });
 	await t.n.query(piQuery);
-	await t.n.turn(alert);
+	await t.n.turnPush(alert);
 	assert.equal(t.sent.length, 0);
 	assert.equal(t.pushed.length, 0);
 });
@@ -123,7 +158,7 @@ test("mode off → nothing sent", async () => {
 test("turn alert uses a session launch code (high bit set); queries do not", async () => {
 	const t = setup();
 	await t.n.query(piQuery);
-	await t.n.turn(alert);
+	await t.n.turnPush(alert);
 	assert.equal(t.sent.length, 2);
 	const codes = [...t.n.launchCodes()];
 	const q = codes.find(([, v]) => "queryId" in v)!;

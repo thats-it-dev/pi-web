@@ -4,12 +4,14 @@
 //     action that launches the watchapp on that question or session. It works only while the
 //     Pebble phone app is in the foreground, so
 //   auto: falls back to a Web Push (mirrored to the watch by the phone, but without Open).
-// Turn alerts go through the notification only: watchPush already pushes finished/error turns.
+// The Notifier is the one alert path: watchPush's turn pushes come here too (turnPush), so each
+// event alerts once: a frame if the phone answers, else (auto) one Web Push.
 // Every entry point catches and logs: callers are synchronous listeners and must not see a throw.
 
 import { randomInt, randomUUID } from "node:crypto";
 import type { PushPayload, WatchQuery } from "../../shared/src/protocol.ts";
 import { notificationFrame } from "./notification-frame.ts";
+import { clipText as clip } from "./push-watch.ts";
 
 export type AlertMode = "auto" | "notification" | "push" | "off";
 
@@ -32,6 +34,7 @@ const CODE_MASK = 0x7fffffff;
 const TABLE_MAX = 32;
 const PUSH_BODY_MAX = 160;
 const FRAME_BODY_MAX = 240;
+const FRAME_TITLE_MAX = 64; // TimelineAttribute Title
 const RING_BODY = "Question waiting";
 
 export class Notifier {
@@ -57,7 +60,7 @@ export class Notifier {
 			const { mode } = this.deps;
 			if (mode === "off" || this.deps.appOpen()) return;
 			let delivered = false;
-			if (mode !== "push") delivered = await this.frame(q.label, q.text, this.code({ queryId: q.id }, false), FRAME_BODY_MAX);
+			if (mode !== "push") delivered = await this.frame(q.label, q.text, this.code({ queryId: q.id }, false));
 			if (!delivered && mode !== "notification") {
 				// A ring question never leaves the machine in a push, whoever can read the lock screen.
 				const body = q.source === "ring-profile" ? RING_BODY : clip(q.text, PUSH_BODY_MAX);
@@ -69,19 +72,22 @@ export class Notifier {
 		}
 	}
 
-	// Notification only; in push mode, or when the phone is unreachable, watchPush's push stands.
-	async turn(a: { sessionId: string; kind: "finished" | "error"; title: string; text: string }): Promise<void> {
+	// A finished or error turn from watchPush (already body-filled and clipped). needs_you is the
+	// pi query path's job, so it is ignored here.
+	async turnPush(p: PushPayload): Promise<void> {
 		try {
 			const { mode } = this.deps;
-			if (mode === "off" || mode === "push" || this.deps.appOpen()) return;
-			await this.frame(a.title, a.text, this.code({ sessionId: a.sessionId }, true), FRAME_BODY_MAX);
+			if ((p.kind !== "finished" && p.kind !== "error") || mode === "off" || this.deps.appOpen()) return;
+			let sent = false;
+			if (mode !== "push") sent = await this.frame(p.title, p.body ?? "", this.code({ sessionId: p.sessionId }, true));
+			if (!sent && mode !== "notification") await this.deps.push(p);
 		} catch (err) {
-			this.log(`notifier: turn ${a.sessionId}: ${(err as Error).message}`);
+			this.log(`notifier: turn ${p.sessionId}: ${(err as Error).message}`);
 		}
 	}
 
 	// True when the frame went out. False when there is no phone, no sender or the socket failed.
-	private async frame(title: string, body: string, launchCode: number, max: number): Promise<boolean> {
+	private async frame(title: string, body: string, launchCode: number): Promise<boolean> {
 		const host = this.deps.phone();
 		if (host === null || !this.deps.send) return false;
 		try {
@@ -90,8 +96,8 @@ export class Notifier {
 				itemId: randomUUID(),
 				token: randomInt(0, 0x10000),
 				time: Math.floor((this.deps.now ?? Date.now)() / 1000),
-				title,
-				body: clip(body, max),
+				title: clip(title, FRAME_TITLE_MAX),
+				body: clip(body, FRAME_BODY_MAX),
 				launchCode,
 			});
 			return await this.deps.send(host, f);
@@ -116,9 +122,4 @@ export class Notifier {
 			(this.deps.log ?? ((x) => console.log(x)))(m);
 		} catch {}
 	}
-}
-
-export function clip(s: string, max: number): string {
-	const t = s.trim();
-	return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

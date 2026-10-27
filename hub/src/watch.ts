@@ -357,9 +357,9 @@ export class WatchService {
 	}
 
 	// What the watch is offered: pi dialogs are held while an app is open or after a skip; external ones are not.
-	private visible(): WatchQuery[] {
+	private visible(present: WatchQuery[] = this.refresh()): WatchQuery[] {
 		const watching = this.deps.viewers.watching();
-		return this.refresh()
+		return present
 			.filter((q) => q.source !== "pi" || (!watching && !this.dismissed.has(q.id)))
 			.sort((a, b) => a.createdAt - b.createdAt)
 			.map(({ id, source, sessionId, label, text, options, createdAt }) => ({ id, source, sessionId, label, text, options, createdAt }));
@@ -481,9 +481,10 @@ export class WatchService {
 
 	private announceQueries(): void {
 		if (this.queryFns.size === 0) return;
-		const present = new Set(this.refresh().map((q) => q.id));
+		const all = this.refresh();
+		const present = new Set(all.map((q) => q.id));
 		for (const id of this.announced) if (!present.has(id)) this.announced.delete(id);
-		for (const q of this.visible()) {
+		for (const q of this.visible(all)) {
 			if (this.announced.has(q.id)) continue;
 			this.announced.add(q.id);
 			for (const fn of [...this.queryFns]) {
