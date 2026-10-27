@@ -68,7 +68,7 @@ test("readIndexHeaders reads lowercase names and takes the first array element",
 
 const root = mkdtempSync(join(tmpdir(), "pi-web-index-"));
 mkdirSync(join(root, "sessions"));
-const cfg: HubConfig = { port: 0, hostname: "hub.test:7878", allowedLogin: "me@github", allowedOrigins: ["https://pi.thatsit.app"], idleMinutes: 20, maxHeadless: 6, piBin: "pi", dev: false, approvalMode: "manual", dataDir: root };
+const cfg: HubConfig = { port: 0, internalPort: 0, hostname: "hub.test:7878", allowedLogin: "me@github", allowedOrigins: ["https://pi.thatsit.app"], idleMinutes: 20, maxHeadless: 6, piBin: "pi", dev: false, approvalMode: "manual", dataDir: root };
 const RING = { host: "hub.test:7878", "tailscale-user-login": "me@github" };
 const logs: string[] = [];
 let n = 0;

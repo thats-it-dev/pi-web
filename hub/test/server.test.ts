@@ -31,6 +31,7 @@ writeFileSync(
 
 const cfg: HubConfig = {
 	port: 0,
+	internalPort: 0,
 	hostname: "hub.test:7878",
 	allowedLogin: "me@github",
 	allowedOrigins: ["https://pi.thatsit.app"],

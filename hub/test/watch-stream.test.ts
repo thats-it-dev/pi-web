@@ -20,6 +20,7 @@ const root = mkdtempSync(join(tmpdir(), "pi-web-watch-stream-"));
 mkdirSync(join(root, "sessions"));
 const cfg: HubConfig = {
 	port: 0,
+	internalPort: 0,
 	hostname: "hub.test:7878",
 	allowedLogin: "me@github",
 	allowedOrigins: ["https://pi.thatsit.app"],
