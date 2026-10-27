@@ -83,11 +83,11 @@ Anti-goals
   in error red. Under it is a 1 px bottom border in the theme's text colour,
   not coloured. On Dark, pi blue text uses `#55AAFF`, because `#0055AA` is
   too dim on black (Claude's call).
-- **Action menu:** a black drawer that slides over the current screen,
-  leaving about 12 px of it visible on the left. It has a **left border** (2 px,
-  neutral `#AAAAAA` so it reads on both themes; the border is Michael's call,
-  the colour Claude's) and **no coloured strip**, keeping the small white
-  indicator dot; the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
+- **Action menu:** a black drawer starting about 12 px from the left edge.
+  The space to its left is plain **theme background** (white in Light, black
+  in Dark); the screen underneath does not show through. A 2 px **left
+  border** in the theme's text colour: **black in Light, white in Dark**. No
+  coloured strip; keep the small white indicator dot (all Michael's calls); the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
