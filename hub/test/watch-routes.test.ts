@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -277,6 +277,45 @@ test("launch-target resolves a code through launchTarget, 404 for an unknown one
 		assert.equal((await call(p, "GET", "/api/watch/launch-target?code=8", WATCH)).status, 404);
 		for (const q of ["", "?code=abc", "?code=-1", "?code=99999999999"]) assert.equal((await call(p, "GET", `/api/watch/launch-target${q}`, WATCH)).status, 400);
 		assert.equal((await call(p, "GET", "/api/watch/launch-target?code=7", { ...WATCH, "tailscale-user-login": undefined })).status, 403);
+	} finally {
+		w.close();
+		s.close();
+	}
+});
+
+test("abort sends the abort command; a missing session is gone, a missing sessionId 400", async () => {
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	assert.deepEqual((await call(port, "POST", "/api/watch/abort", WATCH, { sessionId: h.sessionId })).body, { ok: true });
+	assert.ok(h.received.some((c) => c.type === "abort"));
+	assert.equal((await call(port, "POST", "/api/watch/abort", WATCH, { sessionId: "nope-1" })).body.reason, "gone");
+	assert.equal((await call(port, "POST", "/api/watch/abort", WATCH, {})).status, 400);
+});
+
+test("archive hides a session until it is active again, and persists across restarts", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pi-web-archive-"));
+	let t = 5_000;
+	const mk = () => new WatchService({ registry, index, viewers: new Viewers(), home: root, dataDir: dir, now: () => t });
+	const w = mk();
+	const s = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch: w });
+	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+	const p = (s.address() as AddressInfo).port;
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	h.lastActive = 4_000;
+	const listed = async (svc: WatchService) => (await svc.sessions()).some((x) => x.id === h.sessionId);
+	try {
+		assert.equal(await listed(w), true);
+		assert.deepEqual((await call(p, "POST", "/api/watch/archive", WATCH, { sessionId: h.sessionId })).body, { ok: true });
+		assert.equal(await listed(w), false);
+		assert.equal(JSON.parse(readFileSync(join(dir, "watch-archive.json"), "utf8"))[h.sessionId], 5_000);
+		const again = mk();
+		try {
+			assert.equal(await listed(again), false);
+			h.lastActive = 6_000; // active after the archive: back in the list
+			assert.equal(await listed(again), true);
+		} finally {
+			again.close();
+		}
+		assert.equal((await call(p, "POST", "/api/watch/archive", WATCH, {})).status, 400);
 	} finally {
 		w.close();
 		s.close();

@@ -5,7 +5,7 @@
 // reports as on screen, and wakes long-pollers.
 
 import type { IncomingHttpHeaders } from "node:http";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
@@ -36,6 +36,7 @@ export interface WatchDeps {
 	index: SessionIndex;
 	viewers: Viewers;
 	home: string;
+	dataDir?: string; // where watch-archive.json lives (archiving is in memory only without it)
 	catalog?: Pick<ModelCatalog, "get">; // with lastModel, picks the model a new session starts on (pi's own default if absent)
 	lastModel?: LastModelStore;
 	now?: () => number;
@@ -106,8 +107,11 @@ export class WatchService {
 		if (addr) this.phone = addr;
 	}
 
+	private archived: Record<string, number> = {};
+
 	constructor(deps: WatchDeps) {
 		this.deps = deps;
+		this.archived = this.loadArchive();
 		this.now = deps.now ?? Date.now;
 		const { registry, viewers } = deps;
 		this.queries = new QueryStore({ now: this.now, onChange: () => this.changed() });
@@ -272,6 +276,44 @@ export class WatchService {
 		return { ok: true };
 	}
 
+	async abort(sessionId: string): Promise<WatchAnswerResult> {
+		const h = this.deps.registry.get(sessionId);
+		if (!h) return { ok: false, reason: "gone" };
+		await this.send(h, { type: "abort" });
+		return { ok: true };
+	}
+
+	// Hides a session from the watch's list until it is active again.
+	archive(sessionId: string): void {
+		this.archived[sessionId] = this.now();
+		const file = this.archiveFile();
+		if (file) {
+			try {
+				writeFileSync(file, JSON.stringify(this.archived));
+			} catch (e) {
+				this.deps.log?.(`watch: archive: ${e instanceof Error ? e.message : String(e)}`);
+			}
+		}
+		this.changed();
+	}
+
+	private archiveFile(): string | null {
+		return this.deps.dataDir ? join(this.deps.dataDir, "watch-archive.json") : null;
+	}
+
+	private loadArchive(): Record<string, number> {
+		const file = this.archiveFile();
+		if (!file) return {};
+		try {
+			const j = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+			const out: Record<string, number> = {};
+			for (const [k, v] of Object.entries(j)) if (typeof v === "number") out[k] = v;
+			return out;
+		} catch {
+			return {};
+		}
+	}
+
 	async setModel(sessionId: string, provider: string, modelId: string): Promise<void> {
 		await this.send(await this.deps.registry.ensure(sessionId), { type: "set_model", provider, modelId });
 	}
@@ -378,6 +420,9 @@ export class WatchService {
 		const closed = this.closedFiles.filter((s) => !liveIds.has(s.id)).slice(0, CLOSED_MAX);
 		const asking = new Set(queries.map((q) => q.sessionId));
 		const all = [...handles.map((h) => liveSession(h, this.tracked.get(h)?.live)), ...closed.map(closedSession)];
+		const shown = all.filter((s) => this.archived[s.id] === undefined || s.updatedAt > this.archived[s.id]!);
+		all.length = 0;
+		all.push(...shown);
 		for (const s of all) s.status = this.statusOf(s, asking.has(s.id));
 		const rank = (s: WatchSession) => (s.status === "waiting" ? 0 : 1);
 		return all.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);

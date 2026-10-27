@@ -82,7 +82,7 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 	}
 
 	if (m === "POST") {
-		const known = ["showing", "answer", "skip", "prompt", "model", "launch"].map((a) => `/api/watch/${a}`);
+		const known = ["showing", "answer", "skip", "prompt", "model", "launch", "abort", "archive"].map((a) => `/api/watch/${a}`);
 		if (!known.includes(p)) return false;
 		const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
 		if (p === "/api/watch/showing") {
@@ -118,6 +118,15 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 		if (p === "/api/watch/prompt") {
 			if (!str(body.sessionId) || typeof body.text !== "string") throw new HttpError(400, "A sessionId and text are required");
 			return reply(await watch.prompt(body.sessionId, body.text)), true;
+		}
+		if (p === "/api/watch/abort") {
+			if (!str(body.sessionId)) throw new HttpError(400, "A sessionId is required");
+			return reply(await watch.abort(body.sessionId)), true;
+		}
+		if (p === "/api/watch/archive") {
+			if (!str(body.sessionId)) throw new HttpError(400, "A sessionId is required");
+			watch.archive(body.sessionId);
+			return reply({ ok: true }), true;
 		}
 		if (!str(body.sessionId) || !str(body.provider) || !str(body.modelId)) throw new HttpError(400, "A sessionId, provider and modelId are required");
 		await watch.setModel(body.sessionId, body.provider, body.modelId);

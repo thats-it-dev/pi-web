@@ -49,7 +49,7 @@ const registry = new Registry({
 setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
-const watch = new WatchService({ registry, index, viewers, home: homedir(), catalog, lastModel });
+const watch = new WatchService({ registry, index, viewers, home: homedir(), dataDir: cfg.dataDir, catalog, lastModel });
 // Alerts for a closed watch app: a notification through the phone, else a Web Push.
 const WATCH_APP_UUID = "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b";
 const notifier = new Notifier({
