@@ -2,12 +2,12 @@
 // session: the title, a status line and, for running and waiting sessions, a status dot; the selected row is
 // amber with black text and a black outline round its dot. With no rows, or
 // no hub, one full-screen line instead.
-import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR, textLayerStyle } from "pebble-ui/sdk";
+import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR } from "pebble-ui/sdk";
 import View from "pebble-ui/View";
 import Menu, { TITLE_INSET } from "pebble-ui/Menu";
 import WindowStack from "pebble-ui/WindowStack";
 import StatusBar from "pebble-ui/StatusBar";
-import { palette, AMBER, BLACK } from "theme";
+import { palette, style, AMBER, BLACK } from "theme";
 import { showNotice, hideNotice } from "notice";
 import { ellipsize } from "model";
 
@@ -103,6 +103,11 @@ class HomeBehavior extends View.Behavior {
 		this.displayed = false;
 		hideNotice(this, screen);
 		this.remember();
+		// Home is rebuilt when it comes back, so its view keeps only the selection
+		// in history: the menu would hold the rows it was built from, a second
+		// copy once the next home dict arrives (a running session sends one a
+		// second), and that tipped a slide back from the drawer into memory full.
+		this.view.menu = null;
 		super.onUndisplaying(screen);
 	}
 	// The selected session, kept across rebuilds and while another window is up.
@@ -135,10 +140,15 @@ class HomeBehavior extends View.Behavior {
 		this.menu = view.menu = null;
 		screen.empty();
 		screen.skin = new Skin({ fill: p.bg });
-		screen.add(new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg }));
+		// Kept across rebuilds: each new StatusBar's Style stays in the chunk heap (theme.js style).
+		if (this.dark !== m.dark) {
+			this.dark = m.dark;
+			this.bar = new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg });
+		}
+		screen.add(this.bar);
 		const string = message(m);
 		if (string !== null)
-			screen.add(new Message({ string, style: textLayerStyle(FONT_KEY.GOTHIC_24_BOLD, p.fg) }));
+			screen.add(new Message({ string, style: style(FONT_KEY.GOTHIC_24_BOLD, p.fg) }));
 		else
 			this.addMenu(screen, view, m, p);
 		// A notice showing stays on top through the rebuild.
@@ -151,7 +161,7 @@ class HomeBehavior extends View.Behavior {
 			items: m.home, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? 0 : index,
 			normal: [p.bg, p.fg], highlight: [AMBER, BLACK], onSelect: open,
 		});
-		menu.styles = [textLayerStyle(FONT_KEY.GOTHIC_24_BOLD, [p.fg, BLACK]), textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, [p.sub, BLACK])];
+		menu.styles = [style(FONT_KEY.GOTHIC_24_BOLD, [p.fg, BLACK]), style(FONT_KEY.GOTHIC_18_BOLD, [p.sub, BLACK])];
 		menu.dots = { w: AMBER, r: RUNNING };
 		this.menu = new menu.Template(menu, { left: 0, right: 0, top: BAR, bottom: 0 });
 		screen.add(this.menu);

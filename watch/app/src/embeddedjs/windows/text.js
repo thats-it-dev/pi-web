@@ -4,11 +4,11 @@
 // colour over a 1 px rule in the text colour), then the text, scrolled 40 px
 // at a time by Up/Down. Select opens the action menu: the query's options and
 // Skip, or Continue / Stop / Model / Archive. Notices: notice.js.
-import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR, textLayerStyle } from "pebble-ui/sdk";
+import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR } from "pebble-ui/sdk";
 import View from "pebble-ui/View";
 import WindowStack from "pebble-ui/WindowStack";
 import StatusBar from "pebble-ui/StatusBar";
-import { palette, AMBER, BLACK } from "theme";
+import { palette, style, AMBER, BLACK } from "theme";
 import { scrollClamp, drawerItems, ellipsize } from "model";
 import { showNotice, hideNotice } from "notice";
 
@@ -47,7 +47,7 @@ class TextBehavior extends View.Behavior {
 	onDisplayed(screen) {
 		this.displayed = true;
 		if (this.stale)
-			this.build(screen);
+			this.update(screen);
 		super.onDisplayed(screen);
 		this.scroll(0);
 		showNotice(this, screen);
@@ -57,26 +57,47 @@ class TextBehavior extends View.Behavior {
 		hideNotice(this, screen);
 		super.onUndisplaying(screen);
 	}
+	// The screen, made once per theme. A reply streaming in (4 a second) only
+	// changes the strings and the header's style (fill): new Styles, a
+	// StatusBar's among them, stay in the chunk heap until the next window
+	// change (theme.js style), and rebuilding per reply ran it out in 3 s.
 	build(screen) {
-		const { mode, id } = this.view.data, m = stack().model, p = palette(m.dark);
-		const c = this.shown = shown(mode, id, m, p) ?? { label: "", text: "", color: p.pi };
-		this.key = m.dark + c.label + c.text + c.color;
+		const m = stack().model, p = palette(m.dark);
+		this.dark = m.dark;
 		this.stale = false;
 		screen.empty();
 		screen.skin = new Skin({ fill: p.bg });
 		screen.add(new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg }));
-		const head = textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, c.color);
-		screen.add(new Label(null, { left: INSET, width: WIDTH, top: BAR, height: HEAD, style: head, string: ellipsize(c.label, WIDTH, s => head.measure(s).width) }));
+		this.head = new Label(null, { left: INSET, width: WIDTH, top: BAR, height: HEAD });
+		screen.add(this.head);
 		screen.add(new Content(null, { left: 0, right: 0, top: BAR + HEAD - 1, height: 1, skin: new Skin({ fill: p.fg }) }));
-		const font = mode === "query" ? FONT_KEY.GOTHIC_24_BOLD : FONT_KEY.GOTHIC_18_BOLD;
+		const font = this.view.data.mode === "query" ? FONT_KEY.GOTHIC_24_BOLD : FONT_KEY.GOTHIC_18_BOLD;
 		this.body = new Container(null, {
 			left: 0, right: 0, top: TOP, bottom: 0, clip: true,
-			contents: [new Text(null, { left: INSET, width: WIDTH, top: -this.view.offset, style: textLayerStyle(font, p.fg), string: c.text })],
+			contents: [new Text(null, { left: INSET, width: WIDTH, top: -this.view.offset, style: style(font, p.fg) })],
 		});
 		screen.add(this.body);
 		// A notice showing stays on top through the rebuild.
 		if (this.box)
 			screen.add(this.box);
+		this.fill();
+	}
+	fill() {
+		const { mode, id } = this.view.data, m = stack().model, p = palette(m.dark);
+		const c = this.shown = shown(mode, id, m, p) ?? { label: "", text: "", color: p.pi };
+		// Not chained (head = this.head.style = …): on a bound Label, head.measure then threw.
+		const head = style(FONT_KEY.GOTHIC_18_BOLD, c.color);
+		this.head.style = head;
+		this.head.string = ellipsize(c.label, WIDTH, s => head.measure(s).width);
+		this.body.first.string = c.text;
+	}
+	update(screen) {
+		if (this.dark !== stack().model.dark)
+			this.build(screen);
+		else {
+			this.stale = false;
+			this.fill();
+		}
 	}
 	// Moves the text by delta, its end kept at the bottom with an inset's room.
 	// Only once laid out: on display, a press, a rebuild.
@@ -130,11 +151,15 @@ class TextBehavior extends View.Behavior {
 			const p = palette(m.dark), c = shown(mode, id, m, p);
 			// A query that left is popped by main.js; keep its last text until then.
 			// Not while sliding (see home.js): one sliding in rebuilds when it lands.
-			if (c && m.dark + c.label + c.text + c.color !== this.key) {
+			// Compared field by field: a key string (the text plus the rest) would keep
+			// a second copy of the text and make another per dict, and a dict landing
+			// during a slide, with both screens up, ran the chunk heap out.
+			const was = this.shown;
+			if (c && (m.dark !== this.dark || c.label !== was.label || c.text !== was.text || c.color !== was.color)) {
 				if (!this.displayed)
 					this.stale = true;
 				else {
-					this.build(screen);
+					this.update(screen);
 					this.scroll(0);
 				}
 			}

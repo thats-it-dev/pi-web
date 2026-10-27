@@ -77,6 +77,7 @@ node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring|many
 | `all` | the same plus a session in error |
 | `empty` | no sessions, no queries |
 | `ring` | the default plus a ring-profile query |
+| `many` | twelve sessions (the phone's row limit) with long titles and ~600-character replies |
 
 Live controls while it runs:
 
@@ -84,7 +85,10 @@ Live controls while it runs:
 curl -s -XPOST localhost:5173/stub/notice -d '{"text":"Didn'"'"'t catch that"}'      # a notice frame
 curl -s -XPOST localhost:5173/stub/query  -d '{"text":"Ship it?","options":["Yes","No"],"source":"ring-profile"}'
 curl -s -XPOST localhost:5173/stub/dark   -d '{"dark":1}'                          # what /dev/settings reports (read at start)
+curl -s -XPOST localhost:5173/stub/stream -d '{"count":240}'                        # stream a reply into the open session
 ```
+
+`/stub/stream` (`{sessionId?, ms?, count?}`, defaults: the session on screen, 250, 200) streams a reply the way the real hub does while pi runs (`hub/src/watch.ts`): the session goes to running, a `text` frame with the last 240 characters of a growing reply goes out every `ms`, a pending frame about once a second (the session's `updatedAt` moves), then a final frame and the session is done. Open a session on the watch first. The watch must keep up with it indefinitely: a window that rebuilds per reply runs the chunk heap out in seconds (see Memory below).
 
 Dev loop (the emulator uses `http://127.0.0.1:5173` when no Hub URL is stored):
 
@@ -104,7 +108,9 @@ pebble kill
 
 **Settings (Clay).** Hub URL and Dark theme. With no URL set the emulator uses `http://127.0.0.1:5173`; a real phone reports unconfigured until one is saved.
 
-**Memory.** The VM runs with `stack 6144, slot 45056, chunk 21504` (`src/c/mdbl.c`, mirrored in `manifest.json`). The stack was raised from 5120 because Home's menu is built during the slide transition. The mod archive `build/mods/emery/mc.xsa` is 37,883 B.
+**Memory.** The VM runs with `stack 6144, slot 45056, chunk 21504` (`src/c/mdbl.c`, mirrored in `manifest.json`). The stack was raised from 5120 because Home's menu is built during the slide transition. The mod archive `build/mods/emery/mc.xsa` is 38,248 B.
+
+**Styles stay in the chunk heap.** Piu keeps a style link and a computed Style for every Style instance a content has used, and frees them only in `application.purge()`, which pebble-ui's WindowStack calls after each slide. A screen rebuilt in place (a reply streaming in, Home on each home dict) must not make new Styles or StatusBars each time: take styles from `theme.js` `style(font, color)` (one per font and colour) and change strings in place. Rebuilding the session window per streamed reply aborted with `Chunk allocation: 532 bytes failed` / `fxAbort memory full` after about eight replies (`.superpowers/sdd/2026-10-27-watch-ui-rewrite/stream-report.md`). During a slide both windows' screens are up and the heap is nearly full, so a dict that lands then must not allocate much: windows in history keep no screen data (Home drops its menu on leaving) and the text window compares fields instead of building a key string. Check with `/stub/stream`, with the drawer opened and Home visited mid-stream.
 
 **Code size is memory (emulator).** The emulator copies the mod archive into RAM and at launch mallocs a table the size of the archive's `MAPS` atom. Too big and launch stops at `fxMapArchive failed` or `fxAbort memory full`. With the bigger stack the ceiling is about 42,000 B (it was about 42.8 KB with stack 5120; every KB of stack comes out of it). Measure after any change with `bash ../pebble-ui/tools/sizes.sh .` (in `watch/app`). On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 run. The pebble-ui skill (`using-pebble-ui`) lists the other memory errors ("Slot allocation", "stack overflow").
 

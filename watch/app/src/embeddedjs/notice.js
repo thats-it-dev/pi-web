@@ -4,7 +4,8 @@
 // ({ string, at }); a window shows it once it has landed, since changing a
 // window while it slides leaves the screen unpainted. A notice older than
 // 10 s (a drawer was up) is dropped.
-import { FONT_KEY, textLayerStyle } from "pebble-ui/sdk";
+import { FONT_KEY } from "pebble-ui/sdk";
+import { style } from "theme";
 import Timer from "timer";
 import WindowStack from "pebble-ui/WindowStack";
 
@@ -22,7 +23,7 @@ export function showNotice(behavior, screen) {
 	if (Date.now() - n.at > STALE_MS)
 		return;
 	hideNotice(behavior, screen);
-	const text = new Text(null, { left: INSET, width: WIDTH, top: 3, style: textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, "#FFFFFF"), string: n.string });
+	const text = new Text(null, { left: INSET, width: WIDTH, top: 3, style: style(FONT_KEY.GOTHIC_18_BOLD, "#FFFFFF"), string: n.string });
 	const box = behavior.box = new Container(null, {
 		left: INSET, right: INSET, bottom: INSET, height: 30,
 		contents: [
