@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startBridgeServer } from "./bridge-server.ts";
 import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
+import { createInternalServer } from "./internal-server.ts";
 import { LastModelStore } from "./last-model.ts";
 import { ModelCatalog } from "./model-catalog.ts";
 import { PushStore } from "./push.ts";
@@ -64,7 +65,11 @@ server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
 });
 
+const internal = createInternalServer({ store: watch.queries, log: (m) => console.log(m) });
+internal.listen(cfg.internalPort, "127.0.0.1", () => console.log(`internal API on http://127.0.0.1:${cfg.internalPort}`));
+
 const shutdown = () => {
+	internal.close();
 	stream.close();
 	watch.close();
 	registry.closeAll();

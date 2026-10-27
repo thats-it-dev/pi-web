@@ -5,6 +5,7 @@ import { APPROVAL_MODES, type ApprovalMode } from "../../shared/src/protocol.ts"
 
 export interface HubConfig {
 	port: number;
+	internalPort: number; // loopback-only API for local services (internal-server.ts)
 	hostname: string; // tailnet host:port the browser uses, e.g. spark-713a.tail9274fa.ts.net:7878
 	allowedLogin: string; // Tailscale-User-Login value allowed in, e.g. michaelthatsit@github
 	allowedOrigins: string[];
@@ -18,6 +19,7 @@ export interface HubConfig {
 
 export const DEFAULTS = {
 	port: 7878,
+	internalPort: 7879,
 	hostname: "",
 	allowedLogin: "",
 	allowedOrigins: ["https://pi.thatsit.app"],
