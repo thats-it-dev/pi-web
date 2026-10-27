@@ -73,16 +73,18 @@ Anti-goals
   | error | `--accent #E4002B` | `#FF0055` |
   | done | — | light `#AAAAAA` / dark `#555555` |
 
-- **Header bar** on query and session screens: coloured by source or state,
-  with a white label on the left and a LECO time on the right. The bar turns
-  orange (black text) while the screen is waiting on Michael.
+- **No header bars** (Michael's call). Every screen has only a **clock status
+  bar** at the top: the time in LECO, on the **theme's own background and
+  text colours** (white with black in Light, black with white in Dark). The
+  source of a query (pi or ring-profile) shows in its action menu's strip
+  colour.
 - **Action menu:** black, with a strip down the left edge in the screen's
   colour; the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
-  background, white text). Header colours, status dots, the selected row and
-  the action menu are the same in both. The theme is chosen on the phone (§4.4).
+  background, white text). Status dots, the selected row and the action menu
+  are the same in both. The theme is chosen on the phone (§4.4).
 - Mockups: `pi-web/.superpowers/brainstorm/280854-1793118289/content/`
   (`query-flow-v2.html`, `sessions.html`, `thatsit-palette.html` option A,
   `dark-mode.html`). The fonts there are browser stand-ins.
@@ -93,7 +95,7 @@ Buttons follow Pebble convention: Back goes back (or out of the app from
 Home), Select opens the action menu, and Up/Down scroll or move.
 
 ### 4.1 Home: session list
-- A status bar with the time in LECO.
+- The clock status bar.
 - One row per pi session: name (Gothic Bold), a status line ("Waiting ·
   approval", "Running · 4:12", "Done · 13:40", "Error"), and a status dot
   (orange waiting, blue running, grey done, red error).
@@ -103,8 +105,8 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   query instead.
 
 ### 4.2 Session
-- A blue header bar with the session name and the time of the last reply.
-- The agent's **last reply**, full-screen; Up/Down scroll it.
+- The clock status bar, then the agent's **last reply**, full-screen; Up/Down
+  scroll it.
 - Select opens the action menu: **Continue**, **Stop**, **Model**,
   **Archive**. Model opens a second action menu listing the available models,
   as `/api/watch/models` returns them today.
@@ -113,9 +115,8 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   streaming isn't required.
 
 ### 4.3 Query
-- Full-screen text under a header bar: source label (`pi · <session>` or
-  `ring · follow-up`) and the time it was asked. The bar is orange while the
-  query waits, and blue (pi) or green (ring-profile) in its menu strip.
+- The clock status bar, then the query text full-screen. Its action menu's
+  strip is blue (pi) or green (ring-profile).
 - Up/Down scroll long text.
 - Select opens the action menu with the query's options, then **Skip**
   always last. **Skip on a pi dialog only hides it from the watch** (Michael's
@@ -252,7 +253,7 @@ Decided by Michael:
 - full-screen readable queries answered with the buttons and action menu;
 - a ring answer clears the query, for pi sessions too;
 - the fitsky-style action menu;
-- left-aligned, smaller text with a coloured header bar for the source;
+- left-aligned, smaller text; no header bars, only a theme-coloured clock bar;
 - the thatsit palette;
 - Gothic plus LECO digits (option A);
 - light and dark themes;
