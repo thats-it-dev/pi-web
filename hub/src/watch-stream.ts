@@ -61,10 +61,10 @@ export function attachWatchStream(server: Server, deps: WatchStreamDeps): WatchS
 			} catch {
 				f = null;
 			}
-			const m = f as { type?: unknown; requestId?: unknown; sessionId?: unknown } | null;
+			const m = f as { type?: unknown; queryId?: unknown; sessionId?: unknown } | null;
 			const strOrNull = (v: unknown) => typeof v === "string" || v === null;
-			if (m && m.type === "showing" && strOrNull(m.requestId) && (m.sessionId === undefined || strOrNull(m.sessionId))) {
-				watch.showing(m.requestId as string | null, (m.sessionId as string | null | undefined) ?? null);
+			if (m && m.type === "showing" && strOrNull(m.queryId) && (m.sessionId === undefined || strOrNull(m.sessionId))) {
+				watch.showing({ queryId: m.queryId as string | null, sessionId: (m.sessionId as string | null | undefined) ?? null });
 			} else {
 				log("watch stream: ignored frame");
 			}

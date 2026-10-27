@@ -1,14 +1,15 @@
-// What the Pebble watch shows and answers (spec §4, §5). Requests are derived
-// on demand from the live handles' pending dialogs plus a small record of turns
-// that finished or errored while no app was open. The service also keeps the
-// watch's dismissals and what it reports as on screen, and wakes long-pollers.
+// What the Pebble watch shows and answers (spec §4–§6). Queries are derived on
+// demand from the live handles' pending dialogs plus the external ones in the
+// QueryStore; a small record of turns that finished or errored while no app was
+// open feeds the Notifier. The service also keeps the watch's skips and what it
+// reports as on screen, and wakes long-pollers.
 
 import type { IncomingHttpHeaders } from "node:http";
 import { mkdirSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
-import type { AppCommand, Dialog, WatchAnswerResult, WatchPending, WatchRequest, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
+import type { AppCommand, Dialog, DialogMethod, SessionStatus, Showing, WatchAnswerResult, WatchPending, WatchQuery, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
@@ -16,6 +17,7 @@ import type { SessionHandle } from "./handle.ts";
 import { sessionTitle, type Viewers } from "./push-watch.ts";
 import type { LastModelStore } from "./last-model.ts";
 import { type ModelCatalog, resolveChoice } from "./model-catalog.ts";
+import { QueryStore } from "./queries.ts";
 import type { Registry } from "./registry.ts";
 import { type FileSummary, readHistory, type SessionIndex } from "./sessions.ts";
 import { watchTurns } from "./turns.ts";
@@ -48,10 +50,21 @@ interface Outcome {
 	title: string;
 }
 
-interface Showing {
-	requestId: string | null;
-	sessionId: string | null;
+export interface TurnAlert {
+	sessionId: string;
+	kind: "finished" | "error";
+	title: string;
+	text: string;
+}
+
+interface ShowingState extends Showing {
 	at: number;
+}
+
+// A pi dialog as the service tracks it: the query the watch sees, plus what answering needs.
+interface DialogQuery extends WatchQuery {
+	sessionId: string;
+	method: DialogMethod;
 }
 
 // Live context and speed for one handle, fed by a stream tap that does not count as a viewer.
@@ -75,12 +88,14 @@ export class WatchService {
 	private subscribers = new Set<(f: WatchStreamFrame) => void>();
 	private dismissed = new Set<string>();
 	private outcomes = new Map<string, Outcome>(); // by session id
-	private created = new Map<string, number>(); // request id → first seen
-	private showingState: Showing | null = null;
+	private alertFns = new Set<(a: TurnAlert) => void>();
+	private created = new Map<string, number>(); // query id → first seen
+	private showingState: ShowingState | null = null;
 	private lastShown: string[] = []; // most recent last
 	private offs: (() => void)[];
 	private tracked = new Map<SessionHandle, Tracked>();
 	private closedFiles: FileSummary[] = []; // the index as last read, newest first
+	readonly queries: QueryStore;
 	phone: string | null = null; // the last address a watch request came from (the phone, via the tailnet)
 
 	notePhone(h: IncomingHttpHeaders, remote: string | undefined): void {
@@ -95,6 +110,7 @@ export class WatchService {
 		this.deps = deps;
 		this.now = deps.now ?? Date.now;
 		const { registry, viewers } = deps;
+		this.queries = new QueryStore({ now: this.now, onChange: () => this.changed() });
 		this.offs = [
 			registry.onChange((m) => {
 				if (m.type === "session_state" && m.state === "running") this.outcomes.delete(m.sessionId);
@@ -106,8 +122,9 @@ export class WatchService {
 			watchTurns(registry, (o, snap) => {
 				if (o.kind === "needs_you" || viewers.watching()) return;
 				this.outcomes.set(o.sessionId, { kind: o.kind, messageIndex: o.messageIndex, text: clip(o.text), title: sessionTitle(snap) });
-				this.created.set(`${o.kind}:${o.sessionId}:${o.messageIndex}`, this.now());
 				this.changed();
+				const alert = this.alertOf(o.sessionId);
+				if (alert) for (const fn of [...this.alertFns]) fn(alert);
 			}),
 			viewers.onChange((watching) => {
 				if (watching) this.outcomes.clear();
@@ -118,9 +135,21 @@ export class WatchService {
 	}
 
 	pending(): WatchPending {
-		const present = this.refresh();
-		const requests = this.deps.viewers.watching() ? [] : present.filter((r) => !this.dismissed.has(r.id)).sort((a, b) => a.createdAt - b.createdAt);
-		return { cursor: this.cursor, requests, showing: this.showingState?.requestId ?? null, sessions: this.sessionList() };
+		const queries = this.visible();
+		const showing = this.showingState ? { queryId: this.showingState.queryId, sessionId: this.showingState.sessionId } : null;
+		return { cursor: this.cursor, queries, showing, sessions: this.sessionList(queries) };
+	}
+
+	// Turns that finished or errored while no app was open, for the Notifier.
+	turnAlerts(): TurnAlert[] {
+		return [...this.outcomes.keys()].map((id) => this.alertOf(id)!);
+	}
+
+	onTurnAlert(fn: (a: TurnAlert) => void): () => void {
+		this.alertFns.add(fn);
+		return () => {
+			this.alertFns.delete(fn);
+		};
 	}
 
 	// An aborted signal drops the waiter and leaves the promise pending, so only abort for a caller that has gone.
@@ -144,12 +173,16 @@ export class WatchService {
 		});
 	}
 
-	showing(requestId: string | null, sessionId: string | null = null): void {
-		const sid = sessionId ?? (requestId ? sessionOf(requestId) : null);
+	showing(w: Showing): void {
+		const { queryId } = w;
+		const sid = w.sessionId ?? (queryId ? sessionOf(queryId) : null);
 		const prev = this.showingState;
-		this.showingState = requestId || sid ? { requestId, sessionId: sid, at: this.now() } : null;
-		if (requestId) this.lastShown = [...this.lastShown.filter((id) => id !== requestId), requestId].slice(-LAST_SHOWN_MAX);
-		if (prev?.requestId !== this.showingState?.requestId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
+		this.showingState = queryId || sid ? { queryId, sessionId: sid, at: this.now() } : null;
+		if (queryId) {
+			this.lastShown = [...this.lastShown.filter((id) => id !== queryId), queryId].slice(-LAST_SHOWN_MAX);
+			this.queries.markDelivered(queryId);
+		}
+		if (prev?.queryId !== this.showingState?.queryId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
 		const next = this.showingState?.sessionId ?? null;
 		if (next && next !== (prev?.sessionId ?? null)) {
 			const h = this.deps.registry.get(next);
@@ -175,27 +208,40 @@ export class WatchService {
 		return this.subscribers.size;
 	}
 
-	dismiss(requestId: string): void {
-		if (!this.refresh().some((r) => r.id === requestId) || this.dismissed.has(requestId)) return;
-		this.dismissed.add(requestId);
+	// What the watch last reported on screen, or null.
+	onScreen(): Showing | null {
+		this.refresh();
+		return this.showingState ? { queryId: this.showingState.queryId, sessionId: this.showingState.sessionId } : null;
+	}
+
+	// A pi query is only hidden from the watch (the dialog stays pending in its handle); an external one ends.
+	skip(queryId: string): void {
+		if (this.queries.resolve(queryId, { kind: "skip" })) return;
+		if (!this.refresh().some((r) => r.id === queryId) || this.dismissed.has(queryId)) return;
+		this.dismissed.add(queryId);
 		this.changed();
 	}
 
-	async answer(requestId: string, a: { option?: string; text?: string }): Promise<WatchAnswerResult> {
-		const req = this.refresh().find((r) => r.id === requestId);
-		if (!req) return { ok: false, reason: "gone" };
-		if (req.kind !== "dialog") {
-			if (a.text === undefined) return { ok: false, reason: "no_match", options: req.options };
-			return this.prompt(req.sessionId, a.text);
+	async answer(queryId: string, a: { option?: string; text?: string }): Promise<WatchAnswerResult> {
+		const ext = this.queries.external().find((q) => q.id === queryId);
+		if (ext) {
+			if (a.option !== undefined) {
+				if (!ext.options.includes(a.option)) return { ok: false, reason: "no_match", options: ext.options };
+				return this.queries.resolve(queryId, { kind: "option", option: a.option }) ? { ok: true } : { ok: false, reason: "gone" };
+			}
+			if (a.text === undefined) return { ok: false, reason: "no_match", options: ext.options };
+			return this.queries.resolve(queryId, { kind: "ring-answer", text: a.text }) ? { ok: true } : { ok: false, reason: "gone" };
 		}
+		const req = this.dialogQueries().find((r) => r.id === queryId);
+		if (!req) return { ok: false, reason: "gone" };
 		const answer = dialogAnswer(req, a);
 		if (!answer) return { ok: false, reason: "no_match", options: req.options };
 		const h = this.deps.registry.get(req.sessionId);
 		if (!h) return { ok: false, reason: "gone" };
-		const res = await h.command({ type: "dialog_response", id: requestId.slice(`dialog:${req.sessionId}:`.length), ...answer });
+		const res = await h.command({ type: "dialog_response", id: queryId.slice(`dialog:${req.sessionId}:`.length), ...answer });
 		this.changed();
 		if (!res.ok) {
-			this.deps.log?.(`watch: answer to ${requestId} failed: ${res.error ?? "unknown"}`);
+			this.deps.log?.(`watch: answer to ${queryId} failed: ${res.error ?? "unknown"}`);
 			return { ok: false, reason: "gone" };
 		}
 		return { ok: true };
@@ -250,11 +296,11 @@ export class WatchService {
 
 	// Index 01's routing target (spec §10 step 3).
 	currentTarget(): { requestId: string; sessionId: string } | null {
-		const requests = this.pending().requests;
-		const candidates = [this.showingState?.requestId, ...[...this.lastShown].reverse()];
+		const queries = this.pending().queries;
+		const candidates = [this.showingState?.queryId, ...[...this.lastShown].reverse()];
 		for (const id of candidates) {
-			const r = id ? requests.find((x) => x.id === id) : undefined;
-			if (r) return { requestId: r.id, sessionId: r.sessionId };
+			const r = id ? queries.find((x) => x.id === id) : undefined;
+			if (r?.sessionId) return { requestId: r.id, sessionId: r.sessionId };
 		}
 		return null;
 	}
@@ -271,7 +317,7 @@ export class WatchService {
 
 	health(): { running: number; pending: number } {
 		const running = this.deps.registry.all().filter((h) => h.kind === "rpc" && h.liveState() === "running").length;
-		return { running, pending: this.pending().requests.length };
+		return { running, pending: this.pending().queries.length };
 	}
 
 	waiterCount(): number {
@@ -285,6 +331,8 @@ export class WatchService {
 		for (const t of this.tracked.values()) t.off();
 		this.tracked.clear();
 		this.subscribers.clear();
+		this.alertFns.clear();
+		this.queries.close();
 		const p = this.pending();
 		for (const w of [...this.waiters]) w(p);
 	}
@@ -294,26 +342,50 @@ export class WatchService {
 		if (!res.ok) throw new HttpError(409, res.error ?? `${cmd.type} failed`);
 	}
 
-	// Every request that exists now, before the viewer gate and dismissals, and
-	// forgets state about requests that have ended.
-	private refresh(): WatchRequest[] {
+	// Every query that exists now, before the viewer gate and skips, and
+	// forgets state about queries that have ended.
+	private refresh(): WatchQuery[] {
 		this.track();
-		const present = [...this.dialogRequests(), ...this.outcomeRequests()];
+		const present = [...this.dialogQueries(), ...this.queries.external()];
 		const ids = new Set(present.map((r) => r.id));
 		for (const id of this.dismissed) if (!ids.has(id)) this.dismissed.delete(id);
 		for (const id of this.created.keys()) if (!ids.has(id)) this.created.delete(id);
 		this.lastShown = this.lastShown.filter((id) => ids.has(id));
-		if (this.showingState?.requestId && !ids.has(this.showingState.requestId)) this.showingState = null;
+		if (this.showingState?.queryId && !ids.has(this.showingState.queryId)) this.showingState = null;
 		return present;
 	}
 
-	// Live sessions (most recently active first), then the most recent closed ones.
-	private sessionList(): WatchSession[] {
+	// What the watch is offered: pi dialogs are held while an app is open or after a skip; external ones are not.
+	private visible(): WatchQuery[] {
+		const watching = this.deps.viewers.watching();
+		return this.refresh()
+			.filter((q) => q.source !== "pi" || (!watching && !this.dismissed.has(q.id)))
+			.sort((a, b) => a.createdAt - b.createdAt)
+			.map(({ id, source, sessionId, label, text, options, createdAt }) => ({ id, source, sessionId, label, text, options, createdAt }));
+	}
+
+	private alertOf(sessionId: string): TurnAlert | null {
+		const o = this.outcomes.get(sessionId);
+		return o ? { sessionId, kind: o.kind, title: o.title, text: o.text } : null;
+	}
+
+	// Waiting sessions first, then most recently active; closed ones are capped.
+	private sessionList(queries: WatchQuery[] = this.visible()): WatchSession[] {
 		this.track();
 		const handles = this.deps.registry.all().sort((a, b) => b.lastActive - a.lastActive);
 		const liveIds = new Set(handles.map((h) => h.sessionId));
 		const closed = this.closedFiles.filter((s) => !liveIds.has(s.id)).slice(0, CLOSED_MAX);
-		return [...handles.map((h) => liveSession(h, this.tracked.get(h)?.live)), ...closed.map(closedSession)];
+		const asking = new Set(queries.map((q) => q.sessionId));
+		const all = [...handles.map((h) => liveSession(h, this.tracked.get(h)?.live)), ...closed.map(closedSession)];
+		for (const s of all) s.status = this.statusOf(s, asking.has(s.id));
+		const rank = (s: WatchSession) => (s.status === "waiting" ? 0 : 1);
+		return all.sort((a, b) => rank(a) - rank(b) || b.updatedAt - a.updatedAt);
+	}
+
+	private statusOf(s: WatchSession, asked: boolean): SessionStatus {
+		if (asked || s.state === "needs_you") return "waiting";
+		if (s.state === "error" || this.outcomes.get(s.id)?.kind === "error") return "error";
+		return s.state === "running" ? "running" : "done";
 	}
 
 	// Starts observing rpc handles seen for the first time; forgets ones the registry dropped.
@@ -372,27 +444,19 @@ export class WatchService {
 		if (moved) this.changed();
 	}
 
-	private dialogRequests(): WatchRequest[] {
-		const out: WatchRequest[] = [];
+	private dialogQueries(): DialogQuery[] {
+		const out: DialogQuery[] = [];
 		for (const h of this.deps.registry.all()) {
 			if (h.kind !== "rpc") continue;
 			const snap = h.snapshot();
 			if (snap.dialogs.length === 0) continue;
-			const title = sessionTitle(snap);
-			const tool = h.pendingTool?.()?.name ?? null;
+			const label = `pi · ${sessionTitle(snap)}`;
 			for (const d of snap.dialogs) {
 				const id = `dialog:${h.sessionId}:${d.id}`;
-				out.push({ id, kind: "dialog", sessionId: h.sessionId, sessionTitle: title, tool, message: dialogMessage(d), options: dialogOptions(d), method: d.method, createdAt: this.createdAt(id) });
+				out.push({ id, source: "pi", sessionId: h.sessionId, label, text: dialogMessage(d), options: dialogOptions(d), createdAt: this.createdAt(id), method: d.method });
 			}
 		}
 		return out;
-	}
-
-	private outcomeRequests(): WatchRequest[] {
-		return [...this.outcomes].map(([sessionId, o]) => {
-			const id = `${o.kind}:${sessionId}:${o.messageIndex}`;
-			return { id, kind: o.kind, sessionId, sessionTitle: o.title, tool: "question", message: o.text, options: [], method: null, createdAt: this.createdAt(id) };
-		});
 	}
 
 	private createdAt(id: string): number {
@@ -441,7 +505,7 @@ function dialogOptions(d: Dialog): string[] {
 }
 
 // Spec §5's answer mapping for a dialog; null when the answer fits none of its options.
-function dialogAnswer(req: WatchRequest, a: { option?: string; text?: string }): DialogAnswer | null {
+function dialogAnswer(req: DialogQuery, a: { option?: string; text?: string }): DialogAnswer | null {
 	if (req.method === "input" || req.method === "editor") return a.text === undefined ? null : { value: a.text };
 	let choice: string | null = null;
 	if (a.option !== undefined) choice = req.options.includes(a.option) ? a.option : null;
@@ -453,8 +517,9 @@ function dialogAnswer(req: WatchRequest, a: { option?: string; text?: string }):
 	return req.method === "confirm" ? { confirmed: choice === "yes" } : { value: choice };
 }
 
-function sessionOf(requestId: string): string | null {
-	return requestId.split(":")[1] || null;
+function sessionOf(queryId: string): string | null {
+	const [kind, sid] = queryId.split(":");
+	return kind === "dialog" ? sid || null : null;
 }
 
 function clip(s: string): string {

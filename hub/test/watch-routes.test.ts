@@ -97,10 +97,10 @@ test("pending without wait returns at once; with wait=1 it returns when a dialog
 	const r = await Promise.race([started, sleep(2000).then(() => null)]);
 	assert.ok(r, "long-poll did not return");
 	assert.equal(r.status, 200);
-	assert.equal(r.body.requests.length, 1);
-	assert.equal(r.body.requests[0].id, requestId);
+	assert.equal(r.body.queries.length, 1);
+	assert.equal(r.body.queries[0].id, requestId);
 	assert.ok(r.body.cursor > since);
-	await call(port, "POST", "/api/watch/dismiss", WATCH, { requestId });
+	await call(port, "POST", "/api/watch/skip", WATCH, { queryId: requestId });
 });
 
 test("a pending long-poll whose client disconnects is forgotten", async () => {
@@ -118,28 +118,28 @@ test("a pending long-poll whose client disconnects is forgotten", async () => {
 
 test("answer: option, text no_match with options, both or neither -> 400", async () => {
 	const { h, requestId } = await raise();
-	const bad = await call(port, "POST", "/api/watch/answer", WATCH, { requestId, option: "maybe" });
+	const bad = await call(port, "POST", "/api/watch/answer", WATCH, { queryId: requestId, option: "maybe" });
 	assert.deepEqual([bad.status, bad.body], [200, { ok: false, reason: "no_match", options: ["allow", "deny"] }]);
-	assert.equal((await call(port, "POST", "/api/watch/answer", WATCH, { requestId, option: "allow", text: "x" })).status, 400);
-	assert.equal((await call(port, "POST", "/api/watch/answer", WATCH, { requestId })).status, 400);
+	assert.equal((await call(port, "POST", "/api/watch/answer", WATCH, { queryId: requestId, option: "allow", text: "x" })).status, 400);
+	assert.equal((await call(port, "POST", "/api/watch/answer", WATCH, { queryId: requestId })).status, 400);
 	assert.equal((await call(port, "POST", "/api/watch/answer", WATCH, { option: "allow" })).status, 400);
-	const ok = await call(port, "POST", "/api/watch/answer", WATCH, { requestId, option: "allow" });
+	const ok = await call(port, "POST", "/api/watch/answer", WATCH, { queryId: requestId, option: "allow" });
 	assert.deepEqual([ok.status, ok.body], [200, { ok: true }]);
 	assert.ok(h.received.some((c) => c.type === "dialog_response"));
-	const gone = await call(port, "POST", "/api/watch/answer", WATCH, { requestId, option: "allow" });
+	const gone = await call(port, "POST", "/api/watch/answer", WATCH, { queryId: requestId, option: "allow" });
 	assert.deepEqual(gone.body, { ok: false, reason: "gone" });
 });
 
-test("showing, dismiss, prompt, model, sessions, history, models round-trip", async () => {
+test("showing, skip, prompt, model, sessions, history, models round-trip", async () => {
 	const { h, requestId } = await raise();
 	const sid = h.sessionId;
-	assert.deepEqual((await call(port, "POST", "/api/watch/showing", WATCH, { requestId, sessionId: sid })).body, { ok: true });
-	assert.equal((await call(port, "GET", "/api/watch/pending", WATCH)).body.showing, requestId);
-	assert.deepEqual((await call(port, "POST", "/api/watch/showing", WATCH, { requestId: null })).body, { ok: true });
-	assert.equal((await call(port, "POST", "/api/watch/showing", WATCH, { requestId: 5 })).status, 400);
-	assert.deepEqual((await call(port, "POST", "/api/watch/dismiss", WATCH, { requestId })).body, { ok: true });
-	assert.equal((await call(port, "POST", "/api/watch/dismiss", WATCH, {})).status, 400);
-	assert.ok(!(await call(port, "GET", "/api/watch/pending", WATCH)).body.requests.some((r: { id: string }) => r.id === requestId));
+	assert.deepEqual((await call(port, "POST", "/api/watch/showing", WATCH, { queryId: requestId, sessionId: sid })).body, { ok: true });
+	assert.equal((await call(port, "GET", "/api/watch/pending", WATCH)).body.showing?.queryId, requestId);
+	assert.deepEqual((await call(port, "POST", "/api/watch/showing", WATCH, { queryId: null })).body, { ok: true });
+	assert.equal((await call(port, "POST", "/api/watch/showing", WATCH, { queryId: 5 })).status, 400);
+	assert.deepEqual((await call(port, "POST", "/api/watch/skip", WATCH, { queryId: requestId })).body, { ok: true });
+	assert.equal((await call(port, "POST", "/api/watch/skip", WATCH, {})).status, 400);
+	assert.ok(!(await call(port, "GET", "/api/watch/pending", WATCH)).body.queries.some((r: { id: string }) => r.id === requestId));
 
 	assert.deepEqual((await call(port, "POST", "/api/watch/prompt", WATCH, { sessionId: sid, text: "hello" })).body, { ok: true });
 	assert.ok(h.received.some((c) => c.type === "prompt" && c.text === "hello"));

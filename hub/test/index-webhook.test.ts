@@ -173,7 +173,7 @@ test("a test event is 200 with an empty body and writes nothing", async () => {
 
 test("with a dialog showing, the transcription answers it", async () => {
 	const { h, requestId } = await raise();
-	watch.showing(requestId, h.sessionId);
+	watch.showing({ queryId: requestId, sessionId: h.sessionId });
 	const b = multipart({ transcription: " allow \n", recordedAt: "1700000000000", client: "ios" });
 	const s = signed(b);
 	assert.deepEqual(await post(port, s.headers, b), { status: 200, body: "" });
@@ -185,7 +185,7 @@ test("with a dialog showing, the transcription answers it", async () => {
 	assert.equal(j.client, "ios");
 	assert.equal(j.headers.signature, undefined);
 	assert.equal(j.headers.delivery, s.delivery);
-	watch.showing(null);
+	watch.showing({ queryId: null, sessionId: null });
 });
 
 test("with nothing pending, a session is created in <home>/pebble (folder made) and the transcription is its first prompt", async () => {
@@ -205,7 +205,7 @@ test("with nothing pending, a session is created in <home>/pebble (folder made) 
 
 test("a transcription that matches no option is logged and nothing reaches pi", async () => {
 	const { h, requestId } = await raise();
-	watch.showing(requestId, h.sessionId);
+	watch.showing({ queryId: requestId, sessionId: h.sessionId });
 	const b = multipart({ transcription: "banana" });
 	const s = signed(b);
 	assert.equal((await post(port, s.headers, b)).status, 200);
@@ -215,7 +215,7 @@ test("a transcription that matches no option is logged and nothing reaches pi", 
 	assert.equal(j.requestId, requestId);
 	assert.equal(typeof j.reason, "string");
 	assert.ok(logs.includes(`index: ${s.delivery} no_match (options: allow, deny)`));
-	watch.showing(null);
+	watch.showing({ queryId: null, sessionId: null });
 	settle(h);
 });
 

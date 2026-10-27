@@ -305,25 +305,27 @@ export interface PushSubscriptionInfo {
 	keys: { p256dh: string; auth: string };
 }
 
-// The Pebble watch (spec §4, §5). A request is anything the watch may show.
-export type WatchRequestKind = "dialog" | "finished" | "error";
+// The Pebble watch (spec §4–§6). A query is anything the watch asks the wearer:
+// a pi dialog (id dialog:<sessionId>:<dialogId>) or an external service's question (id rp:<n>).
+export type QuerySource = "pi" | "ring-profile";
 
-export interface WatchRequest {
-	id: string; // dialog:<sessionId>:<dialogId>, finished:<sessionId>:<messageIndex>, error:<sessionId>:<messageIndex>
-	kind: WatchRequestKind;
-	sessionId: string;
-	sessionTitle: string;
-	tool: string | null;
-	message: string;
+export interface WatchQuery {
+	id: string;
+	source: QuerySource;
+	sessionId: string | null;
+	label: string;
+	text: string;
 	options: string[];
-	method: DialogMethod | null;
 	createdAt: number;
 }
+
+export type SessionStatus = "waiting" | "running" | "done" | "error";
 
 export interface WatchSession {
 	id: string;
 	title: string;
 	state: LiveState;
+	status: SessionStatus;
 	live: boolean;
 	model: string | null;
 	contextPercent: number | null;
@@ -333,12 +335,27 @@ export interface WatchSession {
 	updatedAt: number;
 }
 
+// What the watch reports it has on screen.
+export interface Showing {
+	queryId: string | null;
+	sessionId: string | null;
+}
+
 export interface WatchPending {
 	cursor: number;
-	requests: WatchRequest[];
-	showing: string | null;
+	queries: WatchQuery[];
+	showing: Showing | null;
 	sessions: WatchSession[];
 }
+
+// How an external query ended, as its raiser hears it.
+export type QueryOutcome =
+	| { kind: "option"; option: string }
+	| { kind: "skip" }
+	| { kind: "ring-answer"; text: string }
+	| { kind: "cleared-by-ring"; text: string }
+	| { kind: "expired-delivered" }
+	| { kind: "expired-undelivered" };
 
 export type WatchAnswerResult = { ok: true } | { ok: false; reason: "gone" | "no_match"; options?: string[] };
 
@@ -348,5 +365,5 @@ export interface WatchTurn {
 	text: string;
 }
 
-export type WatchStreamFrame = ({ type: "pending" } & WatchPending) | { type: "text"; sessionId: string; text: string; streaming: boolean };
-export type WatchClientFrame = { type: "showing"; requestId: string | null; sessionId?: string | null };
+export type WatchStreamFrame = ({ type: "pending" } & WatchPending) | { type: "text"; sessionId: string; text: string; streaming: boolean } | { type: "notice"; text: string };
+export type WatchClientFrame = { type: "showing"; queryId: string | null; sessionId: string | null };

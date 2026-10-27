@@ -73,26 +73,26 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 	}
 
 	if (m === "POST") {
-		const known = ["showing", "answer", "dismiss", "prompt", "model", "launch"].map((a) => `/api/watch/${a}`);
+		const known = ["showing", "answer", "skip", "prompt", "model", "launch"].map((a) => `/api/watch/${a}`);
 		if (!known.includes(p)) return false;
 		const body = ((await readJson(req)) ?? {}) as Record<string, unknown>;
 		if (p === "/api/watch/showing") {
-			const { requestId, sessionId } = body;
-			if (requestId !== null && !str(requestId)) throw new HttpError(400, "requestId must be a string or null");
+			const { queryId, sessionId } = body;
+			if (queryId !== null && !str(queryId)) throw new HttpError(400, "queryId must be a string or null");
 			if (sessionId !== undefined && sessionId !== null && !str(sessionId)) throw new HttpError(400, "sessionId must be a string or null");
-			watch.showing(requestId, sessionId ?? null);
+			watch.showing({ queryId, sessionId: sessionId ?? null });
 			return reply({ ok: true }), true;
 		}
 		if (p === "/api/watch/answer") {
-			const { requestId, option, text } = body;
-			if (!str(requestId)) throw new HttpError(400, "A requestId is required");
+			const { queryId, option, text } = body;
+			if (!str(queryId)) throw new HttpError(400, "A queryId is required");
 			if ((option === undefined) === (text === undefined)) throw new HttpError(400, "Send exactly one of option or text");
 			if ((option !== undefined && typeof option !== "string") || (text !== undefined && typeof text !== "string")) throw new HttpError(400, "option and text must be strings");
-			return reply(await watch.answer(requestId, { option, text })), true;
+			return reply(await watch.answer(queryId, { option, text })), true;
 		}
-		if (p === "/api/watch/dismiss") {
-			if (!str(body.requestId)) throw new HttpError(400, "A requestId is required");
-			watch.dismiss(body.requestId);
+		if (p === "/api/watch/skip") {
+			if (!str(body.queryId)) throw new HttpError(400, "A queryId is required");
+			watch.skip(body.queryId);
 			return reply({ ok: true }), true;
 		}
 		if (p === "/api/watch/launch") {

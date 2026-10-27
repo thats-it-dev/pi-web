@@ -105,12 +105,12 @@ test("an upgrade without the tailnet identity is refused with 403, and an unknow
 test("a client gets the current pending frame on connect, then one per change", async () => {
 	const c = await connect(WATCH);
 	const first = await c.next((f) => f.type === "pending");
-	assert.deepEqual(first.requests, []);
+	assert.deepEqual(first.queries, []);
 	assert.equal(stream.clientCount(), 1);
 	assert.equal(watch.subscriberCount(), 1);
 	const { h, requestId } = await raise();
-	const f = await c.next((x) => x.type === "pending" && x.requests.length === 1);
-	assert.equal(f.requests[0].id, requestId);
+	const f = await c.next((x) => x.type === "pending" && x.queries.length === 1);
+	assert.equal(f.queries[0].id, requestId);
 	h.close();
 	c.ws.close();
 });
@@ -118,9 +118,9 @@ test("a client gets the current pending frame on connect, then one per change", 
 test("a showing frame sets the hub's showing and selects the text session", async () => {
 	const c = await connect(WATCH);
 	const { h, requestId } = await raise();
-	c.ws.send(JSON.stringify({ type: "showing", requestId, sessionId: h.sessionId }));
-	await c.next((x) => x.type === "pending" && x.showing === requestId);
-	assert.equal(watch.pending().showing, requestId);
+	c.ws.send(JSON.stringify({ type: "showing", queryId: requestId, sessionId: h.sessionId }));
+	await c.next((x) => x.type === "pending" && x.showing?.queryId === requestId);
+	assert.equal(watch.pending().showing?.queryId, requestId);
 	h.conv.partial = { role: "assistant", content: [{ type: "text", text: "streaming…" }] } as AgentMessage;
 	h.conv.streaming = true;
 	h.push({ type: "event", event: { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } } });
@@ -136,9 +136,9 @@ test("a bad frame is ignored and logged; the socket stays open", async () => {
 	const before = logs.filter((l) => l.includes("watch stream: ignored frame")).length;
 	c.ws.send("not json");
 	c.ws.send(JSON.stringify({ type: "nope" }));
-	c.ws.send(JSON.stringify({ type: "showing", requestId: 5 }));
+	c.ws.send(JSON.stringify({ type: "showing", queryId: 5 }));
 	const { h, requestId } = await raise();
-	const f = await c.next((x) => x.type === "pending" && x.requests.some((r: { id: string }) => r.id === requestId));
+	const f = await c.next((x) => x.type === "pending" && x.queries.some((r: { id: string }) => r.id === requestId));
 	assert.ok(f);
 	const ignored = () => logs.filter((l) => l.includes("watch stream: ignored frame")).length - before;
 	for (let i = 0; i < 50 && ignored() < 3; i++) await new Promise((r) => setTimeout(r, 20));

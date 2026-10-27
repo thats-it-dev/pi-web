@@ -98,21 +98,18 @@ async function session(registry: Registry): Promise<FakeHandle> {
 	return (await registry.create("/work/proj")) as FakeHandle;
 }
 
-test("a pending select dialog becomes a request with tool name, title+message and options", async () => {
+test("pi dialog appears as a query with source pi and label \"pi · <title>\"", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
-	h.pendingToolValue = { name: "bash", args: {} };
 	raise(h, push);
-	assert.deepEqual(svc.pending().requests, [
+	assert.deepEqual(svc.pending().queries, [
 		{
 			id: "dialog:s-1:d1",
-			kind: "dialog",
+			source: "pi",
 			sessionId: "s-1",
-			sessionTitle: "proj",
-			tool: "bash",
-			message: "Allow git push?\norigin feat/x",
+			label: "pi · proj",
+			text: "Allow git push?\norigin feat/x",
 			options: ["allow", "allow always", "deny"],
-			method: "select",
 			createdAt: 1000,
 		},
 	]);
@@ -127,13 +124,13 @@ test("a confirm dialog gets options yes/no; input and editor get none", async ()
 	raise(h, { id: "i1", method: "input", title: "Name?" });
 	clock.t = 3000;
 	raise(h, { id: "e1", method: "editor", title: "Edit" });
-	const reqs = svc.pending().requests;
+	const reqs = svc.pending().queries;
 	assert.deepEqual(
-		reqs.map((r) => [r.id, r.method, r.options, r.message, r.tool, r.createdAt]),
+		reqs.map((r) => [r.id, r.options, r.text, r.createdAt]),
 		[
-			["dialog:s-1:c1", "confirm", ["yes", "no"], "Proceed?", null, 1000],
-			["dialog:s-1:i1", "input", [], "Name?", null, 2000],
-			["dialog:s-1:e1", "editor", [], "Edit", null, 3000],
+			["dialog:s-1:c1", ["yes", "no"], "Proceed?", 1000],
+			["dialog:s-1:i1", [], "Name?", 2000],
+			["dialog:s-1:e1", [], "Edit", 3000],
 		],
 	);
 	svc.close();
@@ -149,7 +146,7 @@ test("requests are sorted oldest first and createdAt is when first seen", async 
 	clock.t = 6000;
 	raise(a, { id: "y", method: "confirm", title: "A?" });
 	assert.deepEqual(
-		svc.pending().requests.map((r) => [r.id, r.createdAt]),
+		svc.pending().queries.map((r) => [r.id, r.createdAt]),
 		[
 			["dialog:s-2:x", 5000],
 			["dialog:s-1:y", 6000],
@@ -169,7 +166,7 @@ test("answering with an option sends dialog_response value; confirm no sends con
 		{ type: "dialog_response", id: "d1", value: "allow" },
 		{ type: "dialog_response", id: "c1", confirmed: false },
 	]);
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.pending().queries, []);
 	svc.close();
 });
 
@@ -207,56 +204,68 @@ test("a dialog answered elsewhere: pending drops it and answer returns gone", as
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	raise(h, push);
-	assert.equal(svc.pending().requests.length, 1);
+	assert.equal(svc.pending().queries.length, 1);
 	settle(h, "d1");
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.pending().queries, []);
 	assert.deepEqual(await svc.answer("dialog:s-1:d1", { option: "allow" }), { ok: false, reason: "gone" });
 	assert.deepEqual(await svc.answer("nonsense", { text: "hi" }), { ok: false, reason: "gone" });
 	assert.deepEqual(h.received, []);
 	svc.close();
 });
 
-test("a finished turn with nobody watching becomes a finished request; a new run clears it", async () => {
+test("a finished turn with nobody watching becomes a turn alert, not a query; a new run clears it", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
+	const heard: unknown[] = [];
+	svc.onTurnAlert((a) => heard.push(a));
 	await run(h);
-	assert.deepEqual(svc.pending().requests, [
-		{ id: "finished:s-1:1", kind: "finished", sessionId: "s-1", sessionTitle: "fix the parser", tool: "question", message: "done", options: [], method: null, createdAt: 1000 },
-	]);
+	assert.deepEqual(svc.turnAlerts(), [{ sessionId: "s-1", kind: "finished", title: "fix the parser", text: "done" }]);
+	assert.deepEqual(heard, svc.turnAlerts());
+	assert.deepEqual(svc.pending().queries, []);
 	to(h, "running");
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.turnAlerts(), []);
 	svc.close();
 });
 
-test("an errored turn becomes an error request; a long reply is clipped", async () => {
+test("an errored turn becomes an error alert; a long reply is clipped", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	await run(h, { role: "assistant", content: [{ type: "text", text: "x".repeat(1000) }], stopReason: "error", errorMessage: "overloaded" });
-	const [r] = svc.pending().requests;
-	assert.equal(r.id, "error:s-1:1");
-	assert.equal(r.kind, "error");
-	assert.equal(r.message, "overloaded");
+	assert.deepEqual(svc.turnAlerts().map((a) => [a.kind, a.text]), [["error", "overloaded"]]);
 	await run(h, { role: "assistant", content: [{ type: "text", text: "y".repeat(1000) }], stopReason: "stop" });
-	const [f] = svc.pending().requests;
-	assert.equal(f.id, "finished:s-1:3");
-	assert.ok(f.message.length <= 240 && f.message.endsWith("…"));
+	const [f] = svc.turnAlerts();
+	assert.equal(f!.kind, "finished");
+	assert.ok(f!.text.length <= 240 && f!.text.endsWith("…"));
 	svc.close();
 });
 
-test("viewer gate: while an app is open, pending is empty; finished is dropped for good; a dialog comes back", async () => {
+test("viewer gate: while an app is open, pi queries are held; a dialog comes back; alerts are dropped for good", async () => {
 	const { registry, svc, viewers } = setup();
 	const a = await session(registry);
 	const b = await session(registry);
 	await run(a);
 	raise(b, push);
-	assert.equal(svc.pending().requests.length, 2);
+	assert.equal(svc.pending().queries.length, 1);
 	const leave = viewers.add();
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.pending().queries, []);
+	assert.deepEqual(svc.turnAlerts(), []);
 	leave();
 	assert.deepEqual(
-		svc.pending().requests.map((r) => r.id),
+		svc.pending().queries.map((r) => r.id),
 		["dialog:s-2:d1"],
 	);
+	svc.close();
+});
+
+test("pi queries are held while the web app is open; ring-profile queries are not", async () => {
+	const { registry, svc, viewers } = setup();
+	const h = await session(registry);
+	raise(h, push);
+	const q = svc.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: () => {} });
+	const leave = viewers.add();
+	assert.deepEqual(svc.pending().queries.map((r) => r.id), [q.id]);
+	leave();
+	assert.deepEqual(svc.pending().queries.map((r) => r.id).sort(), ["dialog:s-1:d1", q.id].sort());
 	svc.close();
 });
 
@@ -266,30 +275,96 @@ test("finished recorded while an app is open never appears", async () => {
 	const leave = viewers.add();
 	await run(h);
 	leave();
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.pending().queries, []);
 	svc.close();
 });
 
-test("dismiss hides a request until it ends; a new dialog with the same id after the old one ended is not dismissed", async () => {
+test("skip on a pi query hides it from the watch but the dialog stays pending in the handle", async () => {
 	const { registry, svc, viewers } = setup();
 	const h = await session(registry);
 	raise(h, push);
-	svc.dismiss("dialog:s-1:d1");
-	assert.deepEqual(svc.pending().requests, []);
-	viewers.add()(); // an app opened and closed: the dismissal survives
-	assert.deepEqual(svc.pending().requests, []);
+	svc.skip("dialog:s-1:d1");
+	assert.deepEqual(svc.pending().queries, []);
+	assert.equal(h.snapshot().dialogs.length, 1);
+	assert.deepEqual(h.received, []);
+	viewers.add()(); // an app opened and closed: the skip survives
+	assert.deepEqual(svc.pending().queries, []);
 	settle(h, "d1");
 	raise(h, push);
 	assert.deepEqual(
-		svc.pending().requests.map((r) => r.id),
+		svc.pending().queries.map((r) => r.id),
 		["dialog:s-1:d1"],
 	);
-	await run(h);
-	svc.dismiss("finished:s-1:1");
-	assert.deepEqual(
-		svc.pending().requests.map((r) => r.id),
-		["dialog:s-1:d1"],
-	);
+	svc.close();
+});
+
+test("answering a dialog in the web app removes the query and the next pending query is first", async () => {
+	const { registry, svc, clock } = setup();
+	const h = await session(registry);
+	raise(h, push);
+	clock.t = 2000;
+	raise(h, { id: "c1", method: "confirm", title: "Proceed?" });
+	assert.deepEqual(svc.pending().queries.map((r) => r.id), ["dialog:s-1:d1", "dialog:s-1:c1"]);
+	svc.showing({ queryId: "dialog:s-1:d1", sessionId: "s-1" });
+	settle(h, "d1"); // answered in the web app
+	const p = svc.pending();
+	assert.deepEqual(p.queries.map((r) => r.id), ["dialog:s-1:c1"]);
+	assert.equal(p.showing, null);
+	svc.close();
+});
+
+test("session status: waiting > error > running > done, waiting sessions listed first", async () => {
+	const { registry, svc, clock } = setup();
+	const done = await session(registry);
+	const running = await session(registry);
+	const err = await session(registry);
+	const asked = await session(registry);
+	const needs = await session(registry);
+	done.lastActive = 50;
+	running.lastActive = 40;
+	err.lastActive = 30;
+	asked.lastActive = 20;
+	needs.lastActive = 10;
+	to(running, "running");
+	to(err, "error");
+	to(needs, "needs_you"); // needs_you without a visible query still waits
+	asked.dialogs = [push];
+	asked.fire({ type: "state_changed" });
+	clock.t = 5000;
+	const status = () => Object.fromEntries(svc.pending().sessions.map((s) => [s.id, s.status]));
+	assert.deepEqual(status(), { "s-1": "done", "s-2": "running", "s-3": "error", "s-4": "waiting", "s-5": "waiting" });
+	assert.deepEqual(svc.pending().sessions.map((s) => s.id), ["s-4", "s-5", "s-1", "s-2", "s-3"]);
+	// A session whose last turn errored while no app was open reads error even when idle.
+	to(done, "running");
+	await run(done, { role: "assistant", content: [{ type: "text", text: "x" }], stopReason: "error", errorMessage: "boom" });
+	assert.equal(status()["s-1"], "error");
+	svc.close();
+});
+
+test("showing marks an external query delivered", async () => {
+	const { svc } = setup();
+	const q = svc.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes"], timeoutMs: 60_000, onOutcome: () => {} });
+	assert.equal(svc.queries.delivered(q.id), false);
+	svc.showing({ queryId: q.id, sessionId: null });
+	assert.equal(svc.queries.delivered(q.id), true);
+	assert.deepEqual(svc.onScreen(), { queryId: q.id, sessionId: null });
+	svc.close();
+});
+
+test("answering or skipping an external query resolves it: option, ring-answer text, skip", async () => {
+	const { svc } = setup();
+	const outcomes: unknown[] = [];
+	const raiseOne = () => svc.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: (o) => outcomes.push(o) });
+	const a = raiseOne();
+	assert.deepEqual(await svc.answer(a.id, { option: "maybe" }), { ok: false, reason: "no_match", options: ["yes", "no"] });
+	assert.deepEqual(await svc.answer(a.id, { option: "yes" }), { ok: true });
+	assert.deepEqual(await svc.answer(a.id, { option: "yes" }), { ok: false, reason: "gone" });
+	const b = raiseOne();
+	assert.deepEqual(await svc.answer(b.id, { text: "hello" }), { ok: true });
+	const c = raiseOne();
+	svc.skip(c.id);
+	assert.deepEqual(outcomes, [{ kind: "option", option: "yes" }, { kind: "ring-answer", text: "hello" }, { kind: "skip" }]);
+	assert.deepEqual(svc.pending().queries, []);
 	svc.close();
 });
 
@@ -307,7 +382,7 @@ test("wait resolves early on change and at maxMs without one; two waiters both w
 	assert.ok(Date.now() - start < 500);
 	assert.ok(pa.cursor > c0);
 	assert.equal(pb.cursor, pa.cursor);
-	assert.equal(pa.requests.length, 1);
+	assert.equal(pa.queries.length, 1);
 	assert.equal(svc.waiterCount(), 0);
 	const t0 = Date.now();
 	const idle = await svc.wait(pa.cursor, 30);
@@ -331,20 +406,20 @@ test("wait returns at once when the cursor is already past since; a burst bumps 
 	svc.close();
 });
 
-test("showing is remembered and cleared when its request ends; currentTarget falls back to the most recently shown pending request", async () => {
+test("showing is remembered and cleared when its query ends; currentTarget falls back to the most recently shown pending request", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	raise(h, push);
 	raise(h, { id: "c1", method: "confirm", title: "Proceed?" });
 	assert.equal(svc.currentTarget(), null);
-	svc.showing("dialog:s-1:c1");
-	svc.showing("dialog:s-1:d1", "s-1");
-	assert.equal(svc.pending().showing, "dialog:s-1:d1");
+	svc.showing({ queryId: "dialog:s-1:c1", sessionId: null });
+	svc.showing({ queryId: "dialog:s-1:d1", sessionId: "s-1" });
+	assert.equal(svc.pending().showing?.queryId, "dialog:s-1:d1");
 	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:d1", sessionId: "s-1" });
-	svc.showing(null);
+	svc.showing({ queryId: null, sessionId: null });
 	assert.equal(svc.pending().showing, null);
 	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:d1", sessionId: "s-1" });
-	svc.showing("dialog:s-1:d1");
+	svc.showing({ queryId: "dialog:s-1:d1", sessionId: null });
 	settle(h, "d1");
 	assert.equal(svc.pending().showing, null);
 	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:c1", sessionId: "s-1" });
@@ -357,25 +432,22 @@ test("a handle exit with a dialog showing ends the request and clears showing", 
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	raise(h, push);
-	svc.showing("dialog:s-1:d1");
+	svc.showing({ queryId: "dialog:s-1:d1", sessionId: null });
 	registry.close("s-1");
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.pending().queries, []);
 	assert.equal(svc.pending().showing, null);
 	assert.equal(svc.currentTarget(), null);
 	svc.close();
 });
 
-test("prompt on a finished request's session sends prompt {text, mode:'send'} and ends the request", async () => {
+test("prompt on a finished session sends prompt {text, mode:'send'} and ends its alert", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	await run(h);
-	assert.deepEqual(await svc.answer("finished:s-1:1", { text: "now the docs" }), { ok: true });
+	assert.deepEqual(await svc.answer("finished:s-1:1", { text: "now the docs" }), { ok: false, reason: "gone" });
+	assert.deepEqual(await svc.prompt("s-1", "now the docs"), { ok: true });
 	assert.deepEqual(h.received, [{ type: "prompt", text: "now the docs", mode: "send" }]);
-	assert.deepEqual(svc.pending().requests, []);
-	await run(h);
-	await svc.prompt("s-1", "and push");
-	assert.deepEqual(h.received.at(-1), { type: "prompt", text: "and push", mode: "send" });
-	assert.deepEqual(svc.pending().requests, []);
+	assert.deepEqual(svc.turnAlerts(), []);
 	svc.close();
 });
 
@@ -441,26 +513,26 @@ test("opening or closing an app wakes waiters", async () => {
 	svc.close();
 });
 
-test("sessions: live rpc sessions first by updatedAt, then closed ones capped at 20, with short model names and context percent", async () => {
+test("sessions: by updatedAt (live ones are newest here), closed ones capped at 20, with short model names and context percent", async () => {
 	const { registry, svc, dir } = setup();
 	for (let i = 0; i < 25; i++) writeSession(dir, `disk-${i}`, { mtime: 1_700_000_000_000 + i * 1000, prompts: [`task ${i}\nmore detail`] });
 	const a = await session(registry);
-	a.lastActive = 10;
+	a.lastActive = 1_800_000_000_010;
 	a.stats = stats(52_000, 128_000, 40.6);
 	a.model = model("ollama", "qwen3:32b");
 	const b = await session(registry);
-	b.lastActive = 20;
+	b.lastActive = 1_800_000_000_020;
 	const list = await svc.sessions();
 	assert.equal(list.length, 22);
 	assert.deepEqual(
 		list.slice(0, 2).map((s) => s.id),
 		["s-2", "s-1"],
 	);
-	assert.deepEqual(list[1], { id: "s-1", title: "proj", state: "idle", live: true, model: "qwen3", contextPercent: 41, contextTokens: 52_000, contextWindow: 128_000, tps: null, updatedAt: 10 });
+	assert.deepEqual(list[1], { id: "s-1", title: "proj", state: "idle", status: "done", live: true, model: "qwen3", contextPercent: 41, contextTokens: 52_000, contextWindow: 128_000, tps: null, updatedAt: 1_800_000_000_010 });
 	assert.equal(list[0]!.contextPercent, null);
 	const closed = list.slice(2);
 	assert.equal(closed.length, 20);
-	assert.deepEqual(closed[0], { id: "disk-24", title: "task 24", state: "idle", live: false, model: "qwen3", contextPercent: null, contextTokens: 52_000, contextWindow: null, tps: null, updatedAt: 1_700_000_024_000 });
+	assert.deepEqual(closed[0], { id: "disk-24", title: "task 24", state: "idle", status: "done", live: false, model: "qwen3", contextPercent: null, contextTokens: 52_000, contextWindow: null, tps: null, updatedAt: 1_700_000_024_000 });
 	assert.equal(closed.at(-1)!.id, "disk-5");
 	assert.ok(closed.every((s) => !s.live && s.contextPercent === null && s.contextTokens === 52_000));
 	svc.close();
@@ -470,7 +542,7 @@ test("sessions: a live session is not listed again as closed; the long-poll carr
 	const { registry, svc, dir } = setup();
 	writeSession(dir, "disk-1", { mtime: 1_700_000_000_000 });
 	writeSession(dir, "disk-2", { mtime: 1_700_000_001_000, name: "release prep" });
-	await registry.ensure("disk-1");
+	(await registry.ensure("disk-1")).lastActive = 1_800_000_000_000;
 	const list = await svc.sessions();
 	assert.deepEqual(
 		list.map((s) => [s.id, s.live, s.title]),
@@ -503,7 +575,7 @@ test("tps is null before any reply, a number while one streams, and keeps the la
 	assert.equal((await svc.sessions()).find((s) => s.id === "s-2")!.tps, null);
 
 	// Streaming wakes pollers only for the session the watch shows, at most once a second.
-	svc.showing(null, "s-1");
+	svc.showing({ queryId: null, sessionId: "s-1" });
 	await tick();
 	const c0 = svc.pending().cursor;
 	other.push(ev({ type: "message_start", message: { role: "assistant", content: [] } }));
@@ -673,16 +745,16 @@ test("prompt keeps an outcome that lands while the prompt is being sent", async 
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	await run(h);
-	assert.deepEqual(svc.pending().requests.map((r) => r.id), ["finished:s-1:1"]);
+	assert.equal(svc.turnAlerts().length, 1);
 	const send = h.command.bind(h);
 	h.command = async (cmd) => {
 		const res = await send(cmd);
 		// A fast reply: the turn runs and finishes before the send resolves.
-		await run(h);
+		await run(h, { role: "assistant", content: [{ type: "text", text: "second" }], stopReason: "stop" });
 		return res;
 	};
 	await svc.prompt("s-1", "again");
-	assert.deepEqual(svc.pending().requests.map((r) => r.id), ["finished:s-1:3"]);
+	assert.deepEqual(svc.turnAlerts().map((a) => a.text), ["second"]);
 	svc.close();
 });
 
@@ -744,7 +816,7 @@ test("dialog title+message text is clipped to 240 chars", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	raise(h, { id: "big", method: "select", title: "T", message: "m".repeat(300), options: ["allow", "deny"] });
-	const msg = svc.pending().requests[0]!.message;
+	const msg = svc.pending().queries[0]!.text;
 	assert.equal(msg.length, 240);
 	assert.ok(msg.endsWith("…"));
 	svc.close();
@@ -770,10 +842,10 @@ test("subscribers get one pending frame per burst and text tails for the shown s
 	const frames: WatchStreamFrame[] = [];
 	const off = svc.subscribe((f) => frames.push(f));
 	assert.equal(svc.subscriberCount(), 1);
-	svc.showing(null, "s-1");
+	svc.showing({ queryId: null, sessionId: "s-1" });
 	await tick();
 	assert.equal(frames.filter((f) => f.type === "pending").length, 1);
-	assert.equal((frames[0] as { showing: string | null }).showing, null);
+	assert.deepEqual((frames[0] as { showing: unknown }).showing, { queryId: null, sessionId: "s-1" });
 	const stream = (fh: FakeHandle, text: string) => {
 		fh.conv.partial = { role: "assistant", content: [{ type: "text", text }] } as AgentMessage;
 		fh.conv.streaming = true;
@@ -814,7 +886,7 @@ test("moving showing onto a session mid-reply sends its tail at once", async () 
 	h.conv.streaming = true;
 	const frames: WatchStreamFrame[] = [];
 	svc.subscribe((f) => frames.push(f));
-	svc.showing(null, "s-1");
+	svc.showing({ queryId: null, sessionId: "s-1" });
 	await tick();
 	assert.deepEqual(frames.filter((f) => f.type === "text"), [{ type: "text", sessionId: "s-1", text: "half a reply", streaming: true }]);
 	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "x" } }));
@@ -829,7 +901,7 @@ test("message_end for a user or toolResult message sends no text frame", async (
 	await tick();
 	const frames: WatchStreamFrame[] = [];
 	svc.subscribe((f) => frames.push(f));
-	svc.showing(null, "s-1");
+	svc.showing({ queryId: null, sessionId: "s-1" });
 	await tick();
 	h.push(ev({ type: "message_end", message: { role: "user", content: "hi" } }));
 	h.push(ev({ type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "out" }] } }));
@@ -847,7 +919,7 @@ test("an empty tail sends no text frame: thinking or tool-call-only partials, a 
 	const frames: WatchStreamFrame[] = [];
 	svc.subscribe((f) => frames.push(f));
 	const texts = () => frames.filter((f) => f.type === "text");
-	svc.showing(null, "s-1");
+	svc.showing({ queryId: null, sessionId: "s-1" });
 	await tick();
 	assert.equal(texts().length, 0, "showing mid-thought sends no empty tail");
 	h.push(ev({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "m" } } as PiEvent));
