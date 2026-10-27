@@ -69,20 +69,23 @@ class PiStack extends WindowStack {
 			this.notice = { string: model.notice, at: Date.now() };
 		this.changed(kind);
 	}
+	// Set after super.display: a slide still running is completed inside it
+	// (run(null) ends it, so onTransitionEnded clears the flag) before the new one starts.
 	display(container, view, backwards) {
-		if (this.view)
-			this.sliding = true;
+		const from = this.view;
 		super.display(container, view, backwards);
+		if (from)
+			this.sliding = true;
 	}
-	// The screen that slid out is gone (SlideTransition onEnd): apply what was held.
+	// The screen that slid out is gone and purged: apply what was held.
 	onTransitionEnded(container) {
 		this.sliding = false;
+		super.onTransitionEnded(container);
 		const held = this.held;
 		this.held = null;
 		if (held)
 			for (const dict of held)
 				this.receive(dict);
-		super.onTransitionEnded(container);
 	}
 	// Queues kind for the one deferred onModelChanged.
 	changed(kind) {

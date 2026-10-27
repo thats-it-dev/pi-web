@@ -54,7 +54,6 @@ function setup(opts) {
 		},
 		storage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => (store[k] = String(v)) },
 		setTimeout: timers.setTimeout,
-		clearTimeout: timers.clearTimeout,
 		now: () => clockState.t,
 		log: (m) => logs.push(m),
 	});
@@ -361,6 +360,24 @@ test("the run's end fetches the last turn and sends it once, with the new status
 	assert.equal(t.all("reply").length, n + 1);
 	assert.equal(t.last("reply").TEXT, "The whole answer.");
 	assert.equal(t.last("reply").STATUS, "d");
+});
+
+test("a status change while the run's history loads sends nothing until it arrives", () => {
+	const t = openedRunning();
+	const n = t.all("reply").length;
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	// The clock rolls over before the history comes back: no old text under the new status.
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 120000 }), sess("s2", "done")]);
+	assert.equal(t.all("reply").length, n);
+	t.hub.reply(null, { turns: [{ i: 3, role: "agent", text: "New answer." }], total: 4 });
+	t.drain();
+	assert.equal(t.all("reply").length, n + 1);
+	assert.equal(t.last("reply").TEXT, "New answer.");
+	assert.equal(t.last("reply").AT, clock(NOW + 120000));
+	// After it, status changes send again.
+	t.pend([], [sess("s1", "running", { updatedAt: NOW + 180000 }), sess("s2", "done")]);
+	assert.equal(t.all("reply").length, n + 2);
+	assert.equal(t.last("reply").STATUS, "r");
 });
 
 test("the run's end without history falls back to the final frame, else the last reply", () => {

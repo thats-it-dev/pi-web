@@ -246,6 +246,7 @@ function createBridge(deps) {
 	var openText = ""; // the text last sent for it
 	var openMeta = ""; // its status and time as last sent (or, while its history loads, as now)
 	var finalText = null; // the last finished message of its run (a text frame with streaming false)
+	var fetching = null; // the session whose reply is being fetched from the history
 	var gotFrame = false; // a real pending frame has arrived
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
 
@@ -422,9 +423,19 @@ function createBridge(deps) {
 			var s = sessionById(openSession);
 			var meta = s ? letterOf(s) + clock(s.updatedAt) : openMeta;
 			if (meta === openMeta) return;
-			// The run is over: its last turn comes from the history, sent once.
+			// A fetch on its way sends with the status as it is then: sending the old
+			// text now would show it under the new status until the fetch lands.
+			if (fetching === openSession) {
+				openMeta = meta;
+				return;
+			}
+			// The run is over: its last turn comes from the history, sent once. Waiting
+			// (a dialog mid-run) counts too, on purpose: the user has to act, so the
+			// dots stop and the turn's latest message shows.
 			if (openMeta.charAt(0) === "r" && meta.charAt(0) !== "r") {
 				openMeta = meta;
+				// Fallback if the history fails: the final frame is only the message's
+				// last 240 characters (the hub's tail), the history gives up to 600 from its start.
 				fetchReply(openSession, finalText !== null ? finalText : openText);
 			} else sendReply(openSession, openText, false);
 		}
@@ -470,7 +481,9 @@ function createBridge(deps) {
 	// Without one (no agent turn, or no history), fallback; with no fallback, no
 	// agent turn is "" and a failed fetch a notice.
 	function fetchReply(sid, fallback) {
+		fetching = sid;
 		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=6", function (err, json) {
+			if (fetching === sid) fetching = null;
 			if (openSession !== sid) return;
 			var text = null;
 			var turns = (json && json.turns) || [];
