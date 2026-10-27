@@ -1,6 +1,6 @@
 // The session and query screens (spec §4.2, §4.3), one View for both:
 //   push("windows/text", { mode: "session" | "query", id })
-// The clock bar, a header line (the label and a LECO time in the source's
+// The clock bar, a header line (the label in the source's
 // colour over a 1 px rule in the text colour), then the text, scrolled 40 px
 // at a time by Up/Down. Select opens the action menu: the query's options and
 // Skip, or Continue / Stop / Model / Archive. Notices: notice.js.
@@ -9,16 +9,14 @@ import View from "pebble-ui/View";
 import WindowStack from "pebble-ui/WindowStack";
 import StatusBar from "pebble-ui/StatusBar";
 import { palette, AMBER, BLACK } from "theme";
-import { scrollClamp, drawerItems } from "model";
+import { scrollClamp, drawerItems, ellipsize } from "model";
 import { showNotice, hideNotice } from "notice";
 
 const HEAD = 22; // the header line, under the clock
 const TOP = 44; // the text
 const INSET = 8;
 const STEP = 40;
-const AT_WIDTH = 52;
 const MODELS_MS = 10000; // a models list later than this opens no menu
-const LECO_20 = "bold 20px Leco";
 const WIDTH = screen.width - 2 * INSET; // given, not left/right: the text is measured before its window is laid out
 
 const stack = () => WindowStack.current;
@@ -27,12 +25,12 @@ const stack = () => WindowStack.current;
 function shown(mode, id, m, p) {
 	if (mode === "query") {
 		const q = m.query;
-		return q && q.id === id ? { label: q.label, at: q.at, text: q.text, color: q.source === "ring" ? p.ring : p.pi, options: q.options } : null;
+		return q && q.id === id ? { label: q.label, text: q.text, color: q.source === "ring" ? p.ring : p.pi, options: q.options } : null;
 	}
 	const r = m.reply && m.reply.sessionId === id ? m.reply : null;
 	const row = m.home.find(row => row.id === id);
 	const status = r ? r.status : row && row.status;
-	return { label: r ? r.label : row ? row.title : "", at: r ? r.at : "", text: r ? r.text : "", color: status === "e" ? p.err : p.pi };
+	return { label: r ? r.label : row ? row.title : "", text: r ? r.text : "", color: status === "e" ? p.err : p.pi };
 }
 
 function drawer(items, onSelect) {
@@ -61,14 +59,14 @@ class TextBehavior extends View.Behavior {
 	}
 	build(screen) {
 		const { mode, id } = this.view.data, m = stack().model, p = palette(m.dark);
-		const c = this.shown = shown(mode, id, m, p) ?? { label: "", at: "", text: "", color: p.pi };
-		this.key = m.dark + c.label + c.at + c.text + c.color;
+		const c = this.shown = shown(mode, id, m, p) ?? { label: "", text: "", color: p.pi };
+		this.key = m.dark + c.label + c.text + c.color;
 		this.stale = false;
 		screen.empty();
 		screen.skin = new Skin({ fill: p.bg });
 		screen.add(new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg }));
-		screen.add(new Label(null, { left: INSET, right: INSET + AT_WIDTH, top: BAR, height: HEAD, style: textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, c.color), string: c.label }));
-		screen.add(new Label(null, { right: INSET, width: AT_WIDTH, top: BAR - 1, height: HEAD, style: textLayerStyle(LECO_20, c.color, "right"), string: c.at }));
+		const head = textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, c.color);
+		screen.add(new Label(null, { left: INSET, width: WIDTH, top: BAR, height: HEAD, style: head, string: ellipsize(c.label, WIDTH, s => head.measure(s).width) }));
 		screen.add(new Content(null, { left: 0, right: 0, top: BAR + HEAD - 1, height: 1, skin: new Skin({ fill: p.fg }) }));
 		const font = mode === "query" ? FONT_KEY.GOTHIC_24_BOLD : FONT_KEY.GOTHIC_18_BOLD;
 		this.body = new Container(null, {
@@ -132,7 +130,7 @@ class TextBehavior extends View.Behavior {
 			const p = palette(m.dark), c = shown(mode, id, m, p);
 			// A query that left is popped by main.js; keep its last text until then.
 			// Not while sliding (see home.js): one sliding in rebuilds when it lands.
-			if (c && m.dark + c.label + c.at + c.text + c.color !== this.key) {
+			if (c && m.dark + c.label + c.text + c.color !== this.key) {
 				if (!this.displayed)
 					this.stale = true;
 				else {

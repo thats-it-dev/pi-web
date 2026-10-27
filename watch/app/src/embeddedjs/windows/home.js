@@ -1,5 +1,5 @@
 // Home: the session list (spec §4.1) under the clock bar. One row per
-// session: the title, a status line and a status dot; the selected row is
+// session: the title, a status line and, for running and waiting sessions, a status dot; the selected row is
 // amber with black text and a black outline round its dot. With no rows, or
 // no hub, one full-screen line instead.
 import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR, textLayerStyle } from "pebble-ui/sdk";
@@ -11,7 +11,7 @@ import { palette, AMBER, BLACK } from "theme";
 import { showNotice, hideNotice } from "notice";
 import { ellipsize } from "model";
 
-const CELL = 44;
+const CELL = 56;
 const DOT = 10;
 const DOT_RIGHT = 12; // from the screen's edge
 const RUNNING = "#0055AA"; // dots are the same in both themes
@@ -43,9 +43,9 @@ function disc(port, color, x, y, r) {
 // A row is one Port (one content per row: the Menu builds them all and Home
 // stays under the windows it opens, so Labels per row run the chunk heap out
 // at about seven rows). It draws what two Labels and a dot Port drew: the
-// title (Gothic 18 Bold) and status line (Gothic 14 Bold) with the Labels'
+// title (Gothic 24 Bold) and status line (Gothic 18 Bold) with the Labels'
 // boxes and styles (textLayerStyle's offsets, [normal, highlighted] colours
-// by the row's state), and the dot in a 12 px box, ringed when highlighted.
+// by the row's state), and the dot (running and waiting rows only) in a 12 px box, ringed when highlighted.
 const TEXT_W = screen.width - TITLE_INSET - (DOT_RIGHT + DOT + 8);
 
 class RowBehavior extends Behavior {
@@ -66,12 +66,14 @@ class RowBehavior extends Behavior {
 	}
 	onDraw(port) {
 		const state = this.state, menu = this.menu, styles = menu.styles, row = this.row;
-		port.drawStyle(row.title, styles[0], TITLE_INSET, 2, TEXT_W, 22, false, state);
-		port.drawStyle(subLine(row), styles[1], TITLE_INSET, 23, TEXT_W, 18, false, state);
+		port.drawStyle(row.title, styles[0], TITLE_INSET, 2, TEXT_W, 28, false, state);
+		port.drawStyle(subLine(row), styles[1], TITLE_INSET, 30, TEXT_W, 22, false, state);
+		if (row.status !== "r" && row.status !== "w")
+			return; // done and error rows have no dot
 		const x = port.width - DOT_RIGHT + 1 - (DOT + 2), y = (CELL - DOT) / 2 - 1;
 		if (state)
 			disc(port, BLACK, x, y, DOT / 2 + 1);
-		disc(port, menu.dots[row.status] ?? menu.dots.d, x + 1, y + 1, DOT / 2);
+		disc(port, menu.dots[row.status], x + 1, y + 1, DOT / 2);
 	}
 }
 
@@ -149,8 +151,8 @@ class HomeBehavior extends View.Behavior {
 			items: m.home, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? 0 : index,
 			normal: [p.bg, p.fg], highlight: [AMBER, BLACK], onSelect: open,
 		});
-		menu.styles = [textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, [p.fg, BLACK]), textLayerStyle(FONT_KEY.GOTHIC_14_BOLD, [p.sub, BLACK])];
-		menu.dots = { w: AMBER, r: RUNNING, d: p.done, e: p.err };
+		menu.styles = [textLayerStyle(FONT_KEY.GOTHIC_24_BOLD, [p.fg, BLACK]), textLayerStyle(FONT_KEY.GOTHIC_18_BOLD, [p.sub, BLACK])];
+		menu.dots = { w: AMBER, r: RUNNING };
 		this.menu = new menu.Template(menu, { left: 0, right: 0, top: BAR, bottom: 0 });
 		screen.add(this.menu);
 	}
