@@ -1,148 +1,104 @@
+// The app: pebble-ui's window stack with Home at the bottom, fed by the phone's
+// dicts through the model. Windows read WindowStack.current.model and send
+// commands with WindowStack.current.link; they hear onModel(kind) after each
+// batch of dicts.
+import WindowStack from "pebble-ui/WindowStack";
+import Vibes from "pebble/vibes";
 import { createModel } from "model";
 import { createLink } from "link";
-import { makeTheme } from "assets";
 
 // Same order as package.json pebble.messageKeys: pebble/message maps index n to key 10000 + n.
 export const KEYS = (
-	"MSG CMD CMD_ID REQ_ID REQ_KIND REQ_TOOL REQ_TEXT REQ_OPTIONS REQ_INDEX REQ_COUNT " +
-	"SESSION_ID SESSION_TITLE STATE MODEL CTX_PERCENT CTX_TOKENS CTX_WINDOW TPS TEXT STREAMING " +
-	"NET OK REASON OPTIONS LIST ROWS OFFSET TOTAL MORE OPTION PROVIDER MODEL_ID DARK HUB_URL"
+	"MSG CMD CMD_ID ID SESSION_ID LABEL SOURCE TEXT OPTIONS ROWS AT STATUS " +
+	"NOTICE NET DARK HUB_URL LIST PROVIDER MODEL_ID CODE OK"
 ).split(" ");
 
 const DARK_KEY = "pi-web.dark";
 
-function storedDark() {
-	try {
-		return localStorage.getItem(DARK_KEY) !== "0";
-	} catch (e) {
-		return true;
-	}
-}
-
-// The screen stack: goTo pushes, goBack/goHome pop; each screen is rebuilt from
-// its view (and the shared model) when shown, and swapped in without a
-// transition (the spec asks for none, and it keeps the mod small: in the
-// emulator the archive is copied into the app heap).
-class PiController extends Behavior {
-	constructor(dark) {
-		super();
-		this.dark = dark;
-		this.theme = makeTheme(dark);
-		this.history = [];
-		this.view = null;
-	}
+class PiStack extends WindowStack {
 	onCreate(application, $) {
-		this.container = application;
-		// $ only names the home view; the model is the views' shared app model.
-		this.screens = $;
-		this.model = createModel();
-		this.model.cfg.dark = this.dark;
-		application.skin = this.theme.skins.paper;
-		watch.addEventListener("minutechange", () => application.distribute("onClockChanged"));
+		super.onCreate(application, $);
+		const model = this.model = createModel();
+		try {
+			model.dark = localStorage.getItem(DARK_KEY) === "1";
+		} catch (e) {
+		}
+		// A dict is applied as it is read (pebble/message holds one unread dict);
+		// the windows update once, after the read, for everything that arrived.
 		this.link = createLink({
 			keys: KEYS,
-			onMessage: (map) => this.onMessage(application, map),
+			onMessage: (dict) => {
+				const dark = model.dark, kind = model.apply(dict);
+				if (!kind)
+					return;
+				if (dark !== model.dark) {
+					try {
+						localStorage.setItem(DARK_KEY, model.dark ? "1" : "0");
+					} catch (e) {
+					}
+				}
+				if (!this.kinds) {
+					this.kinds = [];
+					application.defer("onModelChanged");
+				}
+				if (!this.kinds.includes(kind))
+					this.kinds.push(kind);
+			},
 		});
-		this.link.send("hello");
 	}
-	onDisplaying(container) {
-		const View = importNow(this.screens.home.View).default;
-		const view = new View(this.screens.home);
-		view.id = this.screens.home.View;
-		this.display(container, view);
-	}
-	display(container, view, backwards) {
-		const old = this.view;
-		const content = new view.Template(view, { left:0, right:0, top:0, bottom:0 });
-		if (old) {
-			container.first.distribute("onUndisplaying");
-			if (!backwards) this.history.push(old);
-			container.replace(container.first, content);
-			old.purge();
-			container.purge();
+	onModelChanged(application) {
+		// The first dicts can arrive before Home is up: wait for it.
+		if (!this.view) {
+			application.defer("onModelChanged");
+			return;
 		}
-		else
-			container.add(content);
-		this.view = view;
-		// After Piu has sent onDisplaying (the screens build there).
-		container.defer("onScreenDisplayed");
-	}
-	onScreenDisplayed(container) {
-		container.first.distribute("onDisplayed");
-	}
-	goBack() {
-		if (this.history.length)
-			this.container.defer("display", this.history.pop(), true);
-	}
-	goHome() {
-		if (this.history.length) {
-			const view = this.history[0];
-			this.history.length = 0;
-			this.container.defer("display", view, true);
-		}
-	}
-	goTo(id) {
-		const view = new (importNow(id).default)();
-		view.id = id;
-		this.container.defer("display", view);
-	}
-	// The dict is read and applied at once (pebble/message holds one unread dict,
-	// and the next overwrites it); the screens update after the read callback has
-	// returned, once for all the kinds that arrived meanwhile.
-	onMessage(container, map) {
-		const kind = this.model.apply(map);
-		if (!kind) return;
-		if (!this.kinds) {
-			this.kinds = [];
-			container.defer("onModelChanged");
-		}
-		if (!this.kinds.includes(kind)) this.kinds.push(kind);
-	}
-	onModelChanged(container) {
 		const kinds = this.kinds;
 		this.kinds = null;
-		for (const kind of kinds) {
-			const dark = this.model.cfg.dark;
-			if (kind === "cfg" && dark !== this.dark) {
-				this.dark = dark;
-				try {
-					localStorage.setItem(DARK_KEY, dark ? "1" : "0");
-				} catch (e) {
-				}
-				this.theme = makeTheme(dark);
-				container.skin = this.theme.skins.paper;
-				if (this.view) {
-					// Rebuild the screen on show in the new theme.
-					container.first.distribute("onUndisplaying");
-					container.replace(container.first, new this.view.Template(this.view));
-					container.purge();
-					container.defer("onScreenDisplayed");
-					// The new screen builds from the model; the rest of the batch is in it.
-					break;
-				}
-			}
-			container.distribute("onModel", kind);
+		this.syncQuery(kinds.includes("query"));
+		for (const kind of kinds)
+			application.distribute("onModel", kind);
+	}
+	// The stack from the bottom, the current window last.
+	get windows() {
+		return this.history.concat(this.view);
+	}
+	// The query window leaves when its query does; a new query opens over
+	// whatever is showing, with one buzz.
+	syncQuery(arrived) {
+		const query = this.model.query, id = query ? query.id : null;
+		const windows = this.windows;
+		const at = windows.findIndex(view => view.data.mode === "query");
+		if (at > 0 && windows[at].data.id !== id)
+			this.pop(windows.length - at);
+		if (arrived && id !== null && id !== this.buzzed) {
+			this.buzzed = id;
+			Vibes.shortPulse();
+			this.open("query", id);
 		}
 	}
-	// Leaves the app for the watchface. Returns false when the FFI call is unavailable.
-	exit() {
+	// windows/text arrives with the session and query screens (Task 9); until
+	// then opening one only logs.
+	open(mode, id) {
 		try {
-			Natives.pi_exit();
-			return true;
-		} catch (e) {
-			console.log("pi-web: exit failed: " + e);
-			return false;
+			this.push("windows/text", { mode, id });
 		}
+		catch (e) {
+			console.log("pi-web: no " + mode + " window: " + e);
+		}
+	}
+	// Tells the phone (and the hub) what is on screen: the topmost query or
+	// session window under any action menu, else Home.
+	onScreenDisplayed(container) {
+		super.onScreenDisplayed(container);
+		const shown = this.windows.findLast(view => view.data.mode);
+		const data = shown && shown.data;
+		this.link.send("showing", data && (data.mode === "query" ? { ID: data.id } : { SESSION_ID: data.id }));
 	}
 }
 
-globalThis.controller = new PiController(storedDark());
+const App = Application.template($ => ({ behavior: new PiStack }));
 
-const PiApplication = Application.template($ => ({
-	behavior: globalThis.controller,
-}));
-
-export default new PiApplication(
-	{ home: { View: "Home" } },
-	{ commandListLength: 2048, displayListLength: 2048, touchCount: 1, pixels: screen.width * 4 },
+export default new App(
+	{ View: "windows/home" },
+	{ commandListLength: 1024, displayListLength: 1024, touchCount: 0, pixels: screen.width * 4 },
 );

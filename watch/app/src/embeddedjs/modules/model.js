@@ -1,152 +1,54 @@
-const num = (v) => (typeof v === "number" && v >= 0 ? v : null);
-const MAX_RESULTS = 4;
-const HISTORY_MAX = 24;
-const lines = (s) => (s ? String(s).split("\n") : []);
+// The watch's state, as the phone's dicts build it (pure: tested in node).
+// Rows are split by \x1e, fields by \x1f (watch/app/src/pkjs/bridge.js).
+const ROW = "\x1e";
+const FIELD = "\x1f";
 
-export function parseRows(kind, rows) {
-	return rows.map((line) => {
-		const f = line.split("\t");
-		if (kind === "sessions")
-			return { id: f[0], title: f[1], state: f[2], live: f[3] === "1", model: f[4] || "", ctx: f[5] === "-" || f[5] === undefined || f[5] === "" ? null : Number(f[5]), age: f[6] || "-" };
-		if (kind === "history")
-			return { i: Number(f[0]), role: f[1], text: f.slice(2).join("\t") };
-		return { provider: f[0], id: f[1], name: f[2], current: f[3] === "1" };
+const split = (s, sep) => (s ? String(s).split(sep) : []);
+
+// id, title, status (w|r|d|e), sub
+export function parseRows(s) {
+	return split(s, ROW).map((line) => {
+		const f = line.split(FIELD);
+		return { id: f[0], title: f[1] || "", status: f[2] || "d", sub: f[3] || "" };
 	});
 }
 
-// While a transcript is out (sending, then its sent/gone feedback) the rows are
-// the dimmed status row and `say it again`; otherwise the usual rows (after a
-// no_match the request's options return so one can be picked).
-const SAY_BUSY = { sending: 1, sent: 1, gone: 1 };
-
-export function homeRows(home, sayIt) {
-	if (sayIt && SAY_BUSY[sayIt.status]) return ["sending…", "say it again"];
-	if (!home || !home.kind) return ["say it", "menu"];
-	if (home.kind === "dialog") return [...home.options, "say it"];
-	return ["say it", "dismiss"];
+export function parseOptions(s) {
+	return split(s, FIELD);
 }
 
-function emptyList() {
-	return { rows: [], total: 0, complete: false };
-}
-
+// apply(dict) returns what changed (the dict's MSG), or null for nothing.
 export function createModel() {
-	const results = new Map();
 	const m = {
-		home: null,
-		stats: null,
-		text: null,
+		home: [],
+		query: null,
+		reply: null,
+		dark: false,
 		net: "connecting",
-		cfg: { dark: false },
-		lists: { sessions: emptyList(), history: emptyList(), models: emptyList() },
-		sayIt: { text: "", status: "idle" },
-		// Row i of a list, parsed.
-		rowAt(kind, i) {
-			const line = m.lists[kind].rows[i];
-			return line === undefined ? undefined : parseRows(kind, [line])[0];
-		},
-		resetList(kind) {
-			m.lists[kind] = emptyList();
-		},
-		setSayIt(patch) {
-			m.sayIt = { ...m.sayIt, ...patch };
-		},
-		takeResult(cmdId) {
-			const r = results.get(cmdId);
-			if (!r) return null;
-			results.delete(cmdId);
-			return r;
-		},
-		apply(map) {
-			const g = (k) => map.get(k);
-			const kind = g("MSG");
-			switch (kind) {
-				case "home":
-					m.home = {
-						requestId: g("REQ_ID") || null,
-						kind: g("REQ_KIND") || "",
-						tool: g("REQ_TOOL") || "",
-						text: g("REQ_TEXT") || "",
-						options: lines(g("REQ_OPTIONS")),
-						index: g("REQ_INDEX") || 0,
-						count: g("REQ_COUNT") || 0,
-						sessionId: g("SESSION_ID") || "",
-						sessionTitle: g("SESSION_TITLE") || "",
-						lastText: g("TEXT") || "",
-					};
-					// The live reply stays as the last one until the current session changes
-					// (a request from another session is not a change).
-					if (!m.home.requestId && m.text && m.text.sessionId !== m.home.sessionId) m.text = null;
-					return kind;
-				case "stats":
-					m.stats = {
-						sessionId: g("SESSION_ID") || "",
-						state: g("STATE") || "idle",
-						model: g("MODEL") || "",
-						ctxPercent: num(g("CTX_PERCENT")),
-						ctxTokens: num(g("CTX_TOKENS")),
-						ctxWindow: num(g("CTX_WINDOW")),
-						tps: num(g("TPS")),
-					};
-					return kind;
-				case "text":
-					m.text = { sessionId: g("SESSION_ID") || "", text: g("TEXT") || "", streaming: g("STREAMING") === 1 };
-					return kind;
-				case "net":
-					m.net = g("NET") || "connecting";
-					return kind;
-				case "result": {
-					const r = { ok: g("OK") === 1, reason: g("REASON") || "", options: lines(g("OPTIONS")) };
-					const s = m.sayIt;
-					// The say-it command's result moves the say-it state; any other waits for takeResult.
-					if (s.status === "sending" && s.cmdId !== undefined && g("CMD_ID") === s.cmdId) {
-						if (r.ok) m.setSayIt({ status: "sent" });
-						else if (r.reason === "no_match") m.setSayIt({ status: "no_match", options: r.options });
-						else if (r.reason === "gone") m.setSayIt({ status: "gone" });
-						else m.setSayIt({ status: "failed" });
-					} else {
-						results.set(g("CMD_ID"), r);
-						// Unclaimed results (timed out, superseded, screen left) must not pile up.
-						while (results.size > MAX_RESULTS) results.delete(results.keys().next().value);
-					}
-					return kind;
-				}
-				case "list": {
-					const name = g("LIST");
-					if (!m.lists[name]) return null;
-					const list = m.lists[name];
-					const offset = g("OFFSET") || 0;
-					if (name === "history") {
-						// Raw lines too, kept in order of i; at most HISTORY_MAX, dropping the
-						// newest (an older page is prepended while the user scrolls up).
-						const rows = list.rows;
-						for (const line of lines(g("ROWS"))) {
-							const i = parseInt(line);
-							const k = rows.findIndex((r) => parseInt(r) >= i);
-							if (k < 0) rows.push(line);
-							else rows.splice(k, parseInt(rows[k]) === i ? 1 : 0, line);
-						}
-						if (rows.length > HISTORY_MAX) rows.length = HISTORY_MAX;
-						list.earliest = rows.length ? parseInt(rows[0]) : 0;
-					} else {
-						// Sessions and models keep their raw lines, parsed one at a time when
-						// drawn (rowAt): a string per row costs far fewer XS slots than an object.
-						const rows = list.rows;
-						if (offset <= rows.length) lines(g("ROWS")).forEach((line, k) => { rows[offset + k] = line; });
-						// The last page of a shorter list: drop rows left from a longer one.
-						const total = g("TOTAL");
-						if (g("MORE") !== 1 && total >= 0) rows.length = Math.min(rows.length, total);
-					}
-					list.total = g("TOTAL") || 0;
-					list.complete = g("MORE") !== 1;
-					return kind;
-				}
-				case "cfg":
-					m.cfg = { dark: g("DARK") === 1 };
-					return kind;
-				default:
+		notice: null,
+		apply(d) {
+			const msg = d.get("MSG");
+			const str = (k) => String(d.get(k) ?? "");
+			if (msg === "home")
+				m.home = parseRows(d.get("ROWS"));
+			else if (msg === "query")
+				m.query = { id: str("ID"), source: str("SOURCE"), label: str("LABEL"), text: str("TEXT"), options: parseOptions(d.get("OPTIONS")), at: str("AT") };
+			else if (msg === "query_gone") {
+				if (!m.query || m.query.id !== str("ID"))
 					return null;
+				m.query = null;
 			}
+			else if (msg === "reply")
+				m.reply = { sessionId: str("SESSION_ID"), label: str("LABEL"), text: str("TEXT"), at: str("AT"), status: str("STATUS") };
+			else if (msg === "notice")
+				m.notice = str("NOTICE");
+			else if (msg === "cfg")
+				m.dark = !!d.get("DARK");
+			else if (msg === "net")
+				m.net = str("NET");
+			else
+				return null;
+			return msg;
 		},
 	};
 	return m;

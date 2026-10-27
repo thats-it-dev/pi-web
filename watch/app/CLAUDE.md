@@ -16,7 +16,7 @@ Commands (run in `watch/app`, verified, see `../README.md`; no `--vnc` needed, t
     pebble screenshot --no-open --emulator emery /tmp/emery.png
     pebble kill
 
-Code size is memory in the emulator: the mod archive (`build/mods/emery/mc.xsa`) has a ceiling of about 42.8 KB (keep a working margin under 42.5 KB); past it, launch fails with `fxMapArchive failed`. The final build is 42.5 KB (42455 B); measure after any change, and see `../README.md`, "Code size is memory". `node dev/build-subset.mjs <View…>` builds only some views when the full build is too big. Round 2 layout keys off `ROUND`/`METRICS` in `src/embeddedjs/assets.js`. Watch-side state is applied in `onReadable` and the screens update in one deferred pass (`main.js`).
+Code size is memory in the emulator: the mod archive (`build/mods/emery/mc.xsa`) has a ceiling of about 42.8 KB (keep a working margin under 42.5 KB); past it, launch fails with `fxMapArchive failed`. The final build is 42.5 KB (42455 B); measure after any change, and see `../README.md`, "Code size is memory". Measure with `bash ../pebble-ui/tools/sizes.sh .`. UI is pebble-ui (submodule `watch/pebble-ui`; `git submodule update --init`). Watch-side state is applied in `onReadable` and the windows update in one deferred pass (`main.js`, `onModel`).
 
 PKJS runs in the emulator on this machine with the Python 3.13 pebble-tool and the prebuilt aarch64 STPyV8 wheel (see `../README.md`, Toolchain); its logs are the `pkjs>` lines of `pebble install --emulator emery --logs`. Phone-side code is also covered by unit tests. A stand-in hub for the emulator: `node watch/app/dev/stub-hub.mjs --port 5173` from the repo root.
 

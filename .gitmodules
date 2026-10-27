@@ -1,0 +1,3 @@
+[submodule "watch/pebble-ui"]
+	path = watch/pebble-ui
+	url = https://github.com/michaelthatsit/pebble-ui.git

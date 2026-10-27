@@ -1,21 +1,19 @@
 {
- 	"include":  [
+	"include": [
 		"$(MODDABLE)/examples/manifest_mod.json"
 	],
 	"config": {
-		"creation": { "stack": 5120, "slot": 43008, "chunk": 23552 }
+		"creation": { "stack": 5120, "slot": 45056, "chunk": 21504 }
 	},
 	"modules": {
-		"format": "../../../shared/js/format",
+		"pebble-ui/sdk": "../../../pebble-ui/modules/sdk",
+		"pebble-ui/View": "../../../pebble-ui/modules/View",
+		"pebble-ui/WindowStack": "../../../pebble-ui/modules/WindowStack",
+		"pebble-ui/Menu": "../../../pebble-ui/modules/Menu",
+		"pebble-ui/ActionMenu": "../../../pebble-ui/modules/ActionMenu",
+		"pebble-ui/StatusBar": "../../../pebble-ui/modules/StatusBar",
 		"link": "../../../shared/js/link",
-		"piu/View": "./modules/piuView",
-		"Menu": "./modules/Menu",
-		"*": [ "./assets", "./main", "./modules/model", "./modules/listWindow", "./modules/ListScreen", "./views/*" ]
-	},
-	"ffi": {
-		"sources": [ "./exit.c" ],
-		"functions": {
-			"pi_exit": { "arguments": [], "returns": "void" }
-		}
+		"windows/*": "./windows/*",
+		"*": [ "./main", "./theme", "./modules/model" ]
 	}
 }

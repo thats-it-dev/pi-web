@@ -5,7 +5,7 @@ Two Pebble Alloy projects (Moddable SDK on PebbleOS), both for emery (Pebble Tim
 - [The watchapp](#watchapp), `watch/app/` (see `app/CLAUDE.md`): the full UI for dialogs, finished turns, sessions, history and dictation.
 - [The watchface](#watchface), `watch/face/` (see `face/CLAUDE.md`): the time and four corners, with a sheet that rises when a request is pending and opens the app on a wrist flick.
 
-Both talk to the hub through a PebbleKit JS phone side. `watch/shared/` holds the modules they both use. The toolchain, emulator commands and stub hub below serve both; run `pebble` in `watch/app` or `watch/face`. `npm run test:watch` (`node --test watch/app/test/ watch/face/test/`) tests both.
+Both talk to the hub through a PebbleKit JS phone side. `watch/shared/` holds the modules they both use. The toolchain, emulator commands and stub hub below serve both; run `pebble` in `watch/app` or `watch/face`. `npm run test:watch` (`node --test watch/app/test/`) tests the app. `watch/face/` has been removed (the watch UI rewrite); the app builds on the `watch/pebble-ui` submodule: run `git submodule update --init` before `pebble build`.
 
 Shared modules live in `watch/shared/` (`js/` watch-side via manifest paths, `pkjs/` phone-side via relative `require`). The plain relative `require("../../../shared/pkjs/hub")` bundles fine with the SDK webpack (no symlink or copies needed).
 
@@ -153,14 +153,7 @@ The ceiling is about 42.8 KB; keep a working margin under 42.5 KB:
 
 On hardware the archive is mapped from flash, so the ceiling there is unknown until a Time 2 install.
 
-When a change pushes the full build over the ceiling, check a screen with a subset of the views:
-
-```bash
-cd watch/app
-node dev/build-subset.mjs MenuView History    # Home is always in; then pebble install as usual
-```
-
-`dev/build-subset.mjs` writes a temporary manifest that lists only the named views, then runs `pebble build`. It restores the real manifest afterwards, also on failure; never commit the temporary one. It removes `build/mods` before and after, so the next full `pebble build` relinks. Opening a screen that was left out aborts the app.
+Measure the build with `bash ../pebble-ui/tools/sizes.sh .` (in `watch/app`).
 
 ### With the real hub
 

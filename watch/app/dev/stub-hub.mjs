@@ -1,15 +1,12 @@
-// A stand-in hub for the emulator: canned watch data, no auth.
+// A stand-in hub for the emulator: canned watch data in the query protocol
+// (shared/src/protocol.ts WatchPending), no auth.
 // Run from the repo root (ws resolves from the root node_modules):
-//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene dialog|finished|empty|stream] [--dark 0|1] [--delay ms] [--options 1-4]
-//     [--platform emery|gabbro] [--no-launch-port]
-//     [--corners date,pi,hr,steps] [--after ms] [--resolve ms]
-// --delay holds every POST's answer that long (to see the watch's `sending…` state).
-// --platform picks the emulator whose phone simulator port /dev/settings reports as LAUNCH_PORT
-// (for the face's launch); --no-launch-port reports 0 instead.
-// --after <ms>: on any scene, a second dialog (dialog:s3:d2 on llmwiki cron) appears that long after the
-// first socket opens. --resolve <ms>: each request leaves that long after it appeared (the scene's own
-// requests appear when the first socket opens), so the face's counter drops and its sheet slides away.
-import { readFileSync } from "node:fs";
+//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring] [--dark 0|1] [--delay ms]
+// Scenes: default = three sessions (waiting, running, done) and a pi query on the waiting one;
+// all = the same plus a session in error; empty = no sessions, no queries;
+// ring = the default plus a ring-profile query.
+// POST /stub/notice {text} sends a notice frame; POST /stub/query {text?, options?, source?} raises a query;
+// POST /stub/dark {dark: 0|1} changes what /dev/settings reports (the phone reads it at start).
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -18,99 +15,57 @@ import { WebSocketServer } from "ws";
 const NOW = Date.now();
 const MIN = 60 * 1000;
 
-const LIVE = [
-	{ id: "s1", title: "pi-web watch", state: "running", live: true, model: "qwen3", contextPercent: 41, contextTokens: 53700, contextWindow: 131072, tps: 62, updatedAt: NOW - 1 * MIN },
-	{ id: "s2", title: "notesky sync", state: "needs_you", live: true, model: "qwen3", contextPercent: 18, contextTokens: 23600, contextWindow: 131072, tps: null, updatedAt: NOW - 4 * MIN },
-	{ id: "s3", title: "llmwiki cron", state: "idle", live: true, model: "gpt-oss", contextPercent: 7, contextTokens: 9200, contextWindow: 131072, tps: null, updatedAt: NOW - 30 * MIN },
-];
-
-const CLOSED_TITLES = ["fix ios chin", "pebble alloy spike", "hub auth", "push dedupe", "readme pass", "weather route", "history paging", "model picker", "ring webhook", "stpyv8 wheel", "clay settings", "piu list", "dictation", "theme toggle", "sessions menu", "tailscale serve", "deploy notes", "bridge tests", "stub hub", "screenshots", "gabbro centring", "say it again", "release 0.2"];
-const CLOSED = CLOSED_TITLES.map((title, n) => ({
-	id: "c" + (n + 1),
+const session = (id, title, status, ago) => ({
+	id,
 	title,
-	state: "idle",
-	live: false,
-	model: n % 3 ? "qwen3" : null,
-	contextPercent: null,
-	contextTokens: 1000 * (n + 3),
-	contextWindow: null,
-	tps: null,
-	updatedAt: NOW - (n + 1) * 5 * 60 * MIN,
-}));
+	state: { waiting: "needs_you", running: "running", done: "idle", error: "error" }[status],
+	status,
+	live: status !== "done",
+	model: "qwen3",
+	contextPercent: 41,
+	contextTokens: 53700,
+	contextWindow: 131072,
+	tps: status === "running" ? 62 : null,
+	updatedAt: NOW - ago * MIN,
+});
 
-const SESSIONS = [...LIVE, ...CLOSED];
+const SESSIONS = [
+	session("s1", "notesky sync", "waiting", 2),
+	session("s2", "pi-web watch", "running", 1),
+	session("s3", "flash-auto", "done", 20),
+];
+const ERRORED = session("s4", "tips site", "error", 110);
 
-const DIALOG = {
-	id: "dialog:s2:d1",
-	kind: "dialog",
-	sessionId: "s2",
-	sessionTitle: "notesky sync",
-	tool: "bash",
-	message: "Allow bash?\ngit push origin main",
-	options: ["allow", "deny"],
-	method: "select",
+const PI_QUERY = {
+	id: "q1",
+	source: "pi",
+	sessionId: "s1",
+	label: "pi · notesky sync",
+	text: "Allow bash?\ngit push origin main",
+	options: ["Allow", "Always allow", "Deny"],
 	createdAt: NOW - 2 * MIN,
 };
-const FINISHED = {
-	id: "finished:s1:12",
-	kind: "finished",
-	sessionId: "s1",
-	sessionTitle: "pi-web watch",
-	tool: "question",
-	message: "Done. The bridge tests pass and the build is clean. Want me to run the emulator smoke test next?",
-	options: [],
-	method: null,
+const RING_QUERY = {
+	id: "q2",
+	source: "ring-profile",
+	sessionId: null,
+	label: "ring · follow-up",
+	text: "You mentioned the dentist twice this week. Should I add a reminder for Thursday?",
+	options: ["Yes", "No", "Later"],
 	createdAt: NOW - 1 * MIN,
 };
 
-// The request --after adds.
-const LATER = {
-	id: "dialog:s3:d2",
-	kind: "dialog",
-	sessionId: "s3",
-	sessionTitle: "llmwiki cron",
-	tool: "edit",
-	message: "Allow edit?\nwiki/index.md",
-	options: ["allow", "deny"],
-	method: "select",
-	createdAt: 0,
+const REPLIES = {
+	s1: "Synced 14 notes. One conflict in daily/2026-10-27.md; I need to push the merge.",
+	s2: "Rendering the session list with pebble-ui Menu. Status dots are drawn as 10 px circles. Next: the query screen and its action menu.",
+	s3: "Benchmark finished. flash-auto picked low reasoning on 71% of turns; accuracy within 1 point of always-high. Report is in reports/2026-10-27.md.",
+	s4: "Deploy failed: wrangler pages deploy exited 1 (auth token expired). Run cf auth login on the spark, then retry.",
 };
-
-const SCENES = {
-	dialog: [DIALOG, FINISHED],
-	finished: [FINISHED],
-	empty: [],
-	stream: [],
-};
-
-const LONG = "This line is long on purpose so the history view has to wrap it over several rows and the phone has to chunk the page across more than one AppMessage. ".repeat(2).slice(0, 240);
-const HISTORY = {};
-for (const s of SESSIONS) {
-	const turns = [];
-	for (let i = 0; i < 40; i++) {
-		const role = i % 5 === 3 ? "tool" : i % 2 ? "agent" : "you";
-		const text = role === "tool" ? "bash · npm test" : i % 4 === 1 ? LONG : `${role === "you" ? "Question" : "Answer"} ${i} for ${s.title}.`;
-		turns.push({ i, role, text });
-	}
-	HISTORY[s.id] = turns;
-}
 
 const MODELS = [
 	{ provider: "spark", id: "qwen3-30b-a3b", name: "Qwen3 30B A3B" },
 	{ provider: "spark", id: "gpt-oss-120b", name: "gpt-oss 120B" },
-	{ provider: "spark", id: "gemma3-27b", name: "Gemma 3 27B" },
 	{ provider: "anthropic", id: "claude-sonnet", name: "Claude Sonnet" },
-];
-
-const STREAM_SENTENCES = [
-	"Reading the bridge first.",
-	" The outbox keeps one dict in flight.",
-	" Home, stats and text coalesce to the latest.",
-	" Results and lists stay in order.",
-	" Stats go at most once a second.",
-	" A failed send is retried once after half a second.",
-	" Then it is dropped and logged.",
-	" That is everything the watch needs.",
 ];
 
 // --- Args -------------------------------------------------------------------
@@ -120,47 +75,33 @@ function arg(name, fallback) {
 	return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 const PORT = Number(arg("port", "5173"));
-const SCENE = arg("scene", "dialog");
-const DARK = Number(arg("dark", "1")) ? 1 : 0;
+const SCENE = arg("scene", "default");
+let DARK = Number(arg("dark", "0")) ? 1 : 0;
 const DELAY = Number(arg("delay", "0")) || 0;
-const PLATFORM = arg("platform", "emery");
-// --corners tl,tr,bl,br: the four widget ids /dev/settings reports (default date,pi,hr,steps).
-const CORNERS = arg("corners", "date,pi,hr,steps").split(",");
-const NO_LAUNCH_PORT = process.argv.includes("--no-launch-port");
-const AFTER = Number(arg("after", "0")) || 0;
-const RESOLVE = Number(arg("resolve", "0")) || 0;
-// --options <n>: the dialog offers n options (2 by default; 4 fills Home with five rows).
-DIALOG.options = ["allow", "deny", "allow always", "deny always"].slice(0, Math.max(1, Math.min(4, Number(arg("options", "2")) || 2)));
+const SCENES = {
+	default: () => [SESSIONS, [PI_QUERY]],
+	all: () => [[...SESSIONS, ERRORED], [PI_QUERY]],
+	empty: () => [[], []],
+	ring: () => [SESSIONS, [PI_QUERY, RING_QUERY]],
+};
 if (!SCENES[SCENE]) {
-	console.error(`unknown scene ${SCENE}; use dialog, finished, empty or stream`);
+	console.error(`unknown scene ${SCENE}; use ${Object.keys(SCENES).join(", ")}`);
 	process.exit(2);
-}
-
-// The emulator's phone simulator (pypkjs) port, read per request (the emulator may start after the stub).
-// /tmp/pb-emulator.json: { <platform>: { <sdk version>: { qemu, pypkjs: { pid, port } } } }.
-function launchPort() {
-	if (NO_LAUNCH_PORT) return 0;
-	try {
-		const byVersion = JSON.parse(readFileSync("/tmp/pb-emulator.json", "utf8"))[PLATFORM];
-		const port = byVersion[Object.keys(byVersion)[0]].pypkjs.port;
-		return Number.isInteger(port) ? port : 0;
-	} catch {
-		return 0;
-	}
 }
 
 // --- State ------------------------------------------------------------------
 
+let [sessions, queries] = SCENES[SCENE]().map((list) => list.map((x) => ({ ...x })));
 let cursor = 1;
-let requests = SCENES[SCENE].slice();
 let showing = null;
-// The session the client reports on screen; like the real hub, text frames go only for it.
-let showingSession = null;
+let nextQuery = 3;
 const waiters = new Set();
 const sockets = new Set();
 
-function pendingNow() {
-	return { cursor, requests, showing, sessions: SESSIONS };
+const pendingNow = () => ({ cursor, queries, showing, sessions });
+
+function broadcast(frame) {
+	for (const ws of sockets) ws.send(JSON.stringify(frame));
 }
 
 function changed() {
@@ -168,42 +109,25 @@ function changed() {
 	const p = pendingNow();
 	for (const w of waiters) w(p);
 	waiters.clear();
-	for (const ws of sockets) ws.send(JSON.stringify({ type: "pending", ...p }));
+	broadcast({ type: "pending", ...p });
 }
 
-// --after and --resolve, from the first socket open. Each change goes out as a fresh pending frame.
-let timeline = false;
-function resolveLater(r) {
-	if (RESOLVE) setTimeout(() => {
-		console.log(`resolve ${r.id}`);
-		removeRequest(r.id);
-	}, RESOLVE);
-}
-function startTimeline() {
-	if (timeline) return;
-	timeline = true;
-	for (const r of requests) resolveLater(r);
-	if (AFTER) setTimeout(() => {
-		const r = { ...LATER, createdAt: Date.now() };
-		console.log(`after: ${r.id} appears`);
-		requests = [...requests.filter((x) => x.id !== r.id), r];
-		changed();
-		resolveLater(r);
-	}, AFTER);
+// A session with no query left stops waiting and runs.
+function removeQuery(id) {
+	const q = queries.find((x) => x.id === id);
+	if (!q) return false;
+	queries = queries.filter((x) => x.id !== id);
+	const s = q.sessionId && sessions.find((x) => x.id === q.sessionId);
+	if (s && !queries.some((x) => x.sessionId === s.id)) Object.assign(s, { status: "running", state: "running", updatedAt: Date.now() });
+	changed();
+	return true;
 }
 
-function setShowing(f) {
-	showing = f.requestId ?? null;
-	const r = showing ? requests.find((x) => x.id === showing) : null;
-	showingSession = f.sessionId ?? (r ? r.sessionId : null);
-}
-
-function removeRequest(id) {
-	const before = requests.length;
-	requests = requests.filter((r) => r.id !== id);
-	if (showing === id) showing = null;
-	if (requests.length !== before) changed();
-	return requests.length !== before;
+// Launch codes: 1 opens the first query, 2 the first session.
+function launchTarget(code) {
+	if (code === 1 && queries[0]) return { queryId: queries[0].id };
+	if (code === 2 && sessions[0]) return { sessionId: sessions[0].id };
+	return null;
 }
 
 // --- HTTP -------------------------------------------------------------------
@@ -231,13 +155,10 @@ async function handle(req, res) {
 	const url = new URL(req.url, "http://stub");
 	const q = url.searchParams;
 	const path = url.pathname;
-	console.log(`${req.method} ${url.pathname}${url.search}`);
+	console.log(`${req.method} ${path}${url.search}`);
 
 	if (req.method === "GET") {
-		if (path === "/dev/settings") return json(res, 200, { DARK, CORNER_TL: CORNERS[0], CORNER_TR: CORNERS[1], CORNER_BL: CORNERS[2], CORNER_BR: CORNERS[3], UNIT: "C", LAUNCH_PORT: launchPort() });
-		if (path === "/api/watch/weather") return json(res, 200, { tempC: 11.5, code: 3 });
-		if (path === "/api/watch/health") return json(res, 200, { ok: true, hubVersion: "stub", sessions: { running: 1, pending: requests.length } });
-		if (path === "/api/watch/sessions") return json(res, 200, { sessions: SESSIONS });
+		if (path === "/dev/settings") return json(res, 200, { DARK });
 		if (path === "/api/watch/pending") {
 			const since = Number(q.get("since")) || 0;
 			if (q.get("wait") !== "1" || cursor > since) return json(res, 200, pendingNow());
@@ -254,15 +175,24 @@ async function handle(req, res) {
 			return;
 		}
 		if (path === "/api/watch/history") {
-			const turns = HISTORY[q.get("session")];
-			if (!turns) return json(res, 404, { error: "Session not found" });
+			const id = q.get("session");
+			const s = sessions.find((x) => x.id === id) || (id === ERRORED.id && ERRORED);
+			if (!s) return json(res, 404, { error: "Session not found" });
+			const turns = [
+				{ i: 0, role: "you", text: "Go on." },
+				{ i: 1, role: "tool", text: "bash · npm test" },
+				{ i: 2, role: "agent", text: REPLIES[id] || "Done." },
+			];
 			const limit = Math.min(Number(q.get("limit")) || 12, 50);
-			const before = q.has("before") ? Math.max(0, Math.min(Number(q.get("before")), turns.length)) : turns.length;
-			return json(res, 200, { turns: turns.slice(Math.max(0, before - limit), before), total: turns.length });
+			return json(res, 200, { turns: turns.slice(-limit), total: turns.length });
 		}
 		if (path === "/api/watch/models") {
-			if (!LIVE.some((s) => s.id === q.get("session"))) return json(res, 404, { error: "Session not found" });
+			if (!sessions.some((s) => s.id === q.get("session"))) return json(res, 404, { error: "Session not found" });
 			return json(res, 200, { current: MODELS[0], models: MODELS });
+		}
+		if (path === "/api/watch/launch-target") {
+			const target = launchTarget(Number(q.get("code")));
+			return target ? json(res, 200, target) : json(res, 404, { error: "unknown code" });
 		}
 		return json(res, 404, { error: "not found" });
 	}
@@ -273,25 +203,55 @@ async function handle(req, res) {
 		console.log("  body", JSON.stringify(body));
 		if (DELAY) await new Promise((done) => setTimeout(done, DELAY));
 		if (path === "/api/watch/showing") {
-			setShowing(body);
+			showing = { queryId: body.queryId ?? null, sessionId: body.sessionId ?? null };
 			return json(res, 200, { ok: true });
 		}
 		if (path === "/api/watch/answer") {
-			const r = requests.find((x) => x.id === body.requestId);
-			if (!r) return json(res, 200, { ok: false, reason: "gone" });
-			// On the dialog scene, dictated text never matches: exercises no_match.
-			if (SCENE === "dialog" && r.kind === "dialog" && typeof body.text === "string") return json(res, 200, { ok: false, reason: "no_match", options: r.options });
-			removeRequest(r.id);
+			const query = queries.find((x) => x.id === body.queryId);
+			if (!query) return json(res, 200, { ok: false, reason: "gone" });
+			if (!query.options.includes(body.option)) return json(res, 200, { ok: false, reason: "no_match", options: query.options });
+			removeQuery(query.id);
 			return json(res, 200, { ok: true });
 		}
-		if (path === "/api/watch/dismiss") {
-			removeRequest(body.requestId);
+		if (path === "/api/watch/skip") {
+			removeQuery(body.queryId);
 			return json(res, 200, { ok: true });
 		}
-		if (path === "/api/watch/prompt" || path === "/api/watch/model") return json(res, 200, { ok: true });
-		if (path === "/api/watch/launch") {
-			console.log(`  launch ${body.uuid} (stub: nothing launches)`);
+		if (path === "/api/watch/abort") {
+			const s = sessions.find((x) => x.id === body.sessionId);
+			if (!s || s.status !== "running") return json(res, 200, { ok: false, reason: "gone" });
+			Object.assign(s, { status: "done", state: "idle", updatedAt: Date.now() });
+			changed();
 			return json(res, 200, { ok: true });
+		}
+		if (path === "/api/watch/archive") {
+			sessions = sessions.filter((x) => x.id !== body.sessionId);
+			changed();
+			return json(res, 200, { ok: true });
+		}
+		if (path === "/api/watch/prompt") {
+			const s = sessions.find((x) => x.id === body.sessionId);
+			if (s) {
+				Object.assign(s, { status: "running", state: "running", updatedAt: Date.now() });
+				changed();
+			}
+			return json(res, 200, { ok: true });
+		}
+		if (path === "/api/watch/model") return json(res, 200, { ok: true });
+		if (path === "/stub/notice") {
+			broadcast({ type: "notice", text: body.text || "Didn't catch that" });
+			return json(res, 200, { ok: true });
+		}
+		if (path === "/stub/query") {
+			const id = "q" + nextQuery++;
+			const ring = body.source === "ring-profile";
+			queries = [...queries, { id, source: ring ? "ring-profile" : "pi", sessionId: ring ? null : "s2", label: ring ? "ring · follow-up" : "pi · pi-web watch", text: body.text || "Allow edit?\nwatch/app/src/embeddedjs/main.js", options: body.options || ["Allow", "Deny"], createdAt: Date.now() }];
+			changed();
+			return json(res, 200, { ok: true, id });
+		}
+		if (path === "/stub/dark") {
+			DARK = Number(body.dark) ? 1 : 0;
+			return json(res, 200, { ok: true, DARK });
 		}
 		return json(res, 404, { error: "not found" });
 	}
@@ -322,41 +282,20 @@ wss.on("connection", (ws) => {
 	console.log("ws open");
 	sockets.add(ws);
 	ws.send(JSON.stringify({ type: "pending", ...pendingNow() }));
-	startTimeline();
-	let streamTimer = null;
-	if (SCENE === "stream") {
-		LIVE[0].state = "running";
-		const start = Date.now();
-		let text = "";
-		let n = 0;
-		streamTimer = setInterval(() => {
-			if (Date.now() - start >= 6000) {
-				clearInterval(streamTimer);
-				streamTimer = null;
-				if (showingSession === "s1") ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: false }));
-				// The turn is over: s1 goes idle (the watch's speed figure stops blinking).
-				LIVE[0].state = "idle";
-				changed();
-				return;
-			}
-			text += (n ? " " : "") + STREAM_SENTENCES[n++ % STREAM_SENTENCES.length].trim();
-			if (showingSession === "s1") ws.send(JSON.stringify({ type: "text", sessionId: "s1", text: text.slice(-240), streaming: true }));
-		}, 250);
-	}
 	ws.on("message", (m) => {
 		console.log("ws <", String(m));
 		try {
 			const f = JSON.parse(String(m));
-			if (f && f.type === "showing") setShowing(f);
+			if (f && f.type === "showing") showing = { queryId: f.queryId ?? null, sessionId: f.sessionId ?? null };
 		} catch {}
 	});
 	ws.on("close", () => {
 		console.log("ws close");
 		sockets.delete(ws);
-		if (streamTimer) clearInterval(streamTimer);
+		showing = null;
 	});
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK} launch port=${launchPort()} (${NO_LAUNCH_PORT ? "off" : PLATFORM})${AFTER ? " after=" + AFTER : ""}${RESOLVE ? " resolve=" + RESOLVE : ""}`);
+	console.log(`stub hub on http://127.0.0.1:${PORT} scene=${SCENE} dark=${DARK}`);
 });
