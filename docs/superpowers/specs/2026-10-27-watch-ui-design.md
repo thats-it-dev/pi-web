@@ -273,6 +273,14 @@ coredevices/mobileapp `test-apps/plugins.md` and `PKJSInterface.kt` /
 - Auth stays tailnet identity only (standing decision). No tokens.
 - Keep the hub's existing non-watch behaviour (web app, sessions) unchanged.
 
+## 8a. On-watch revisions (Michael, 2026-10-27)
+
+After the first on-watch test:
+- **Header line: no time.** It shows only the label (session name or source) in the source colour, clipped with "…" to fit, over the 1 px theme-text-colour bottom border.
+- **Status dots only for running and waiting sessions.** Done and error rows have no dot; their status line still says "Done · HH:MM" or "Error".
+- **Bigger Home text:** title Gothic 24 Bold, status line Gothic 18 Bold, row height about 56 px. Nothing under 18 px on Home.
+- **Home memory:** each row is one drawn Port, not four contents. This fixes "memory full" with 12 rows (headroom: 17 rows).
+
 ## 9. Decided vs. left to the builder
 
 Decided by Michael:
