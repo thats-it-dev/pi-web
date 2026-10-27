@@ -1,6 +1,6 @@
 # pi-web watch UI — Pebble-native rewrite
 
-Date: 2026-10-27. Status: approved by Michael 2026-10-27.
+Date: 2026-10-27. Status: implemented on feat/watch-ui-rewrite (approved by Michael 2026-10-27).
 Related: `~/workspace/ring-profile/docs/superpowers/specs/2026-10-27-ring-profile-design.md`
 (the ring-profile design, approved; it depends on this project's query contract).
 
