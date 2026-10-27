@@ -1,6 +1,6 @@
 # pi-web watch UI — Pebble-native rewrite
 
-Date: 2026-10-27. Status: draft for review.
+Date: 2026-10-27. Status: approved by Michael 2026-10-27.
 Related: `~/workspace/ring-profile/docs/superpowers/specs/2026-10-27-ring-profile-design.md`
 (the ring-profile design, approved; it depends on this project's query contract).
 
@@ -94,9 +94,9 @@ Anti-goals
 - **Themes:** Light (white background, black text) and Dark (black
   background, white text). Status dots, the selected row and the action menu
   are the same in both. The theme is chosen on the phone (§4.4).
-- Mockups: `pi-web/.superpowers/brainstorm/280854-1793118289/content/`
-  (`query-flow-v2.html`, `sessions.html`, `thatsit-palette.html` option A,
-  `dark-mode.html`). The fonts there are browser stand-ins.
+- Mockups: `pi-web/.superpowers/brainstorm/280854-1793118289/content/`.
+  **`prototype-v12.html` is the final, clickable reference** (it supersedes
+  the earlier static pages). Its fonts are browser stand-ins.
 
 ## 4. Screens and buttons
 
