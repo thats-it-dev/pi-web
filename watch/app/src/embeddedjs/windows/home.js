@@ -9,6 +9,7 @@ import WindowStack from "pebble-ui/WindowStack";
 import StatusBar from "pebble-ui/StatusBar";
 import { palette, AMBER, BLACK } from "theme";
 import { showNotice, hideNotice } from "notice";
+import { ellipsize } from "model";
 
 const CELL = 44;
 const DOT = 10;
@@ -31,42 +32,48 @@ function message(m) {
 }
 
 // A filled circle, one row of pixels at a time (crisp, as the firmware draws it).
-function disc(port, color, at, r) {
-	for (let y = 0; y < 2 * r; y++) {
-		const dy = y + 0.5 - r;
+function disc(port, color, x, y, r) {
+	for (let i = 0; i < 2 * r; i++) {
+		const dy = i + 0.5 - r;
 		const w = 2 * Math.round(Math.sqrt(r * r - dy * dy));
-		port.fillColor(color, at + r - w / 2, at + y, w, 1);
+		port.fillColor(color, x + r - w / 2, y + i, w, 1);
 	}
 }
 
-// The dot in a 12 px box: the 1 px black ring when the row is highlighted.
-class DotBehavior extends Behavior {
-	onCreate(port, color) {
-		this.color = color;
-	}
-	onDraw(port) {
-		if (this.ring)
-			disc(port, BLACK, 0, DOT / 2 + 1);
-		disc(port, this.color, 1, DOT / 2);
-	}
-}
+// A row is one Port (one content per row: the Menu builds them all and Home
+// stays under the windows it opens, so Labels per row run the chunk heap out
+// at about seven rows). It draws what two Labels and a dot Port drew: the
+// title (Gothic 18 Bold) and status line (Gothic 14 Bold) with the Labels'
+// boxes and styles (textLayerStyle's offsets, [normal, highlighted] colours
+// by the row's state), and the dot in a 12 px box, ringed when highlighted.
+const TEXT_W = screen.width - TITLE_INSET - (DOT_RIGHT + DOT + 8);
 
 class RowBehavior extends Behavior {
-	onReload(row, highlighted) {
-		const dot = row.last;
-		dot.behavior.ring = highlighted;
-		dot.invalidate();
+	onCreate(port, $) {
+		const styles = $.menu.styles, row = $.item;
+		this.styles = styles;
+		this.color = $.menu.dots[row.status] ?? $.menu.dots.d;
+		this.title = ellipsize(row.title, TEXT_W, s => styles[0].measure(s).width);
+		this.sub = subLine(row);
+		this.state = 0;
+	}
+	// The Menu sets each row's state too, but a Port's state is write-only.
+	onReload(port, highlighted) {
+		this.state = highlighted ? 1 : 0;
+		port.invalidate();
+	}
+	onDraw(port) {
+		const state = this.state, styles = this.styles;
+		port.drawStyle(this.title, styles[0], TITLE_INSET, 2, TEXT_W, 22, false, state);
+		port.drawStyle(this.sub, styles[1], TITLE_INSET, 23, TEXT_W, 18, false, state);
+		const x = port.width - DOT_RIGHT + 1 - (DOT + 2), y = (CELL - DOT) / 2 - 1;
+		if (state)
+			disc(port, BLACK, x, y, DOT / 2 + 1);
+		disc(port, this.color, x + 1, y + 1, DOT / 2);
 	}
 }
 
-const Row = Container.template($ => ({
-	left: 0, right: 0, Behavior: RowBehavior,
-	contents: [
-		Label($, { left: TITLE_INSET, right: DOT_RIGHT + DOT + 8, top: 2, height: 22, style: $.menu.styles[0], string: $.item.title }),
-		Label($, { left: TITLE_INSET, right: DOT_RIGHT + DOT + 8, top: 23, height: 18, style: $.menu.styles[1], string: subLine($.item) }),
-		Port($.menu.dots[$.item.status] ?? $.menu.dots.d, { right: DOT_RIGHT - 1, top: (CELL - DOT) / 2 - 1, width: DOT + 2, height: DOT + 2, Behavior: DotBehavior }),
-	],
-}));
+const Row = Port.template($ => ({ left: 0, right: 0, Behavior: RowBehavior }));
 
 const Message = Container.template($ => ({
 	left: 0, right: 0, top: BAR, bottom: 0,

@@ -31,6 +31,21 @@ export function scrollClamp(offset, contentHeight, viewHeight) {
 	return Math.max(0, Math.min(offset, contentHeight - viewHeight));
 }
 
+// text cut to fit width (measured by width(string)) and ended with "…".
+export function ellipsize(text, width, measure) {
+	if (measure(text) <= width)
+		return text;
+	let lo = 0, hi = text.length - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (measure(text.slice(0, mid).trimEnd() + "\u2026") <= width)
+			lo = mid;
+		else
+			hi = mid - 1;
+	}
+	return text.slice(0, lo).trimEnd() + "\u2026";
+}
+
 // The action menu: a query's options then Skip, or a session's actions.
 export function drawerItems(mode, options) {
 	return mode === "query" ? options.concat("Skip") : ["Continue", "Stop", "Model", "Archive"];

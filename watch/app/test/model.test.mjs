@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createModel, parseRows, parseOptions, scrollClamp, drawerItems } from "../src/embeddedjs/modules/model.js";
+import { createModel, parseRows, parseOptions, scrollClamp, drawerItems, ellipsize } from "../src/embeddedjs/modules/model.js";
 
 const M = (o) => new Map(Object.entries(o));
 const QUERY = { MSG: "query", ID: "q1", SOURCE: "pi", SESSION_ID: "s1", LABEL: "pi · notesky", TEXT: "Allow bash?", OPTIONS: "Allow\x1fAlways allow\x1fDeny", AT: "14:02" };
@@ -104,4 +104,14 @@ test("drawerItems(query) appends Skip", () => {
 
 test("drawerItems(session) is Continue/Stop/Model/Archive", () => {
 	assert.deepEqual(drawerItems("session"), ["Continue", "Stop", "Model", "Archive"]);
+});
+
+test("ellipsize keeps text that fits and cuts the rest with an ellipsis", () => {
+	const w = (s) => s.length; // one unit per character
+	assert.equal(ellipsize("notesky sync", 12, w), "notesky sync");
+	assert.equal(ellipsize("notesky sync", 8, w), "notesky\u2026");
+	assert.equal(ellipsize("notesky sync", 9, w), "notesky\u2026"); // no space before the ellipsis
+	assert.equal(ellipsize("abcdef", 4, w), "abc\u2026");
+	assert.equal(ellipsize("abcdef", 0, w), "\u2026");
+	assert.equal(ellipsize("", 0, w), "");
 });

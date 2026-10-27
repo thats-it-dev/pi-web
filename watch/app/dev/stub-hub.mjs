@@ -1,10 +1,11 @@
 // A stand-in hub for the emulator: canned watch data in the query protocol
 // (shared/src/protocol.ts WatchPending), no auth.
 // Run from the repo root (ws resolves from the root node_modules):
-//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring] [--dark 0|1] [--delay ms]
+//   node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring|many] [--dark 0|1] [--delay ms]
 // Scenes: default = three sessions (waiting, running, done) and a pi query on the waiting one;
 // all = the same plus a session in error; empty = no sessions, no queries;
-// ring = the default plus a ring-profile query.
+// ring = the default plus a ring-profile query; many = twelve sessions with
+// ~40-char titles and ~600-char replies (the phone's row limit; Home's memory).
 // POST /stub/notice {text} sends a notice frame; POST /stub/query {text?, options?, source?} raises a query;
 // POST /stub/dark {dark: 0|1} changes what /dev/settings reports (the phone reads it at start).
 import http from "node:http";
@@ -62,6 +63,31 @@ const REPLIES = {
 	s4: "Deploy failed: wrangler pages deploy exited 1 (auth token expired). Run cf auth login on the spark, then retry.",
 };
 
+// many: twelve rows (the bridge's HOME_ROWS), titles near the bridge's 40-char clip.
+const MANY_TITLES = [
+	"notesky sync: merge daily notes conflicts",
+	"pi-web watch: Home rows as a single port",
+	"flash-auto router benchmark, low vs high",
+	"tips.thatsit.app deploy via the gateway",
+	"llama-swap config reload for the 27b model",
+	"pebble-ui action menu long-press repeat",
+	"atproto-sync cron and llmwiki pipeline",
+	"ring-profile follow-ups for the calendar",
+	"ui-patterns-alloy status bar separators",
+	"spark sglang backend memory regression",
+	"pi-web chat app plus menu and model pick",
+	"fitsky patterns dashboard card layouts",
+];
+const MANY_STATUS = ["waiting", "running", "done", "error", "running", "done", "done", "running", "done", "done", "running", "done"];
+const MANY = MANY_TITLES.map((title, i) => session("m" + (i + 1), title, MANY_STATUS[i], i * 7 + 1));
+const MANY_QUERY = { ...PI_QUERY, sessionId: "m1", label: "pi · notesky sync: merge daily…" };
+const LONG_REPLY = (title) =>
+	`Finished the pass on ${title}. I read watch/app/src/embeddedjs/windows/home.js and ~/workspace/pebble-ui/modules/Menu.js, ` +
+	"then changed the row template so each session is drawn by one port instead of two labels and a dot. The full path of the " +
+	"file I touched is /home/michael/workspace/pi-web-watch-ui/watch/app/src/embeddedjs/windows/home.js and the stub scene lives " +
+	"in watch/app/dev/stub-hub.mjs. Tests pass (node --test watch/app/test/), the build is under the emulator ceiling, and the " +
+	"screenshots match the previous ones in light and dark. Next I will scroll this reply to its end to check the text window.";
+
 const MODELS = [
 	{ provider: "spark", id: "qwen3-30b-a3b", name: "Qwen3 30B A3B" },
 	{ provider: "spark", id: "gpt-oss-120b", name: "gpt-oss 120B" },
@@ -83,6 +109,7 @@ const SCENES = {
 	all: () => [[...SESSIONS, ERRORED], [PI_QUERY]],
 	empty: () => [[], []],
 	ring: () => [SESSIONS, [PI_QUERY, RING_QUERY]],
+	many: () => [MANY, [MANY_QUERY]],
 };
 if (!SCENES[SCENE]) {
 	console.error(`unknown scene ${SCENE}; use ${Object.keys(SCENES).join(", ")}`);
@@ -183,7 +210,7 @@ async function handle(req, res) {
 			const turns = [
 				{ i: 0, role: "you", text: "Go on." },
 				{ i: 1, role: "tool", text: "bash · npm test" },
-				{ i: 2, role: "agent", text: REPLIES[id] || "Done." },
+				{ i: 2, role: "agent", text: REPLIES[id] || (id.startsWith("m") ? LONG_REPLY(s.title) : "Done.") },
 			];
 			const limit = Math.min(Number(q.get("limit")) || 12, 50);
 			return json(res, 200, { turns: turns.slice(-limit), total: turns.length });
