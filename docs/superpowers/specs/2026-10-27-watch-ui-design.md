@@ -98,7 +98,7 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   approval", "Running · 4:12", "Done · 13:40", "Error"), and a status dot
   (orange waiting, blue running, grey done, red error).
 - Order: sessions waiting on Michael first, then by most recent activity.
-- The selected row is highlighted in blue.
+- The selected row is highlighted in **amber** (`#FFAA00`, black text; Michael's call). On the selected row the status dot gets a black outline, so a waiting (amber) dot stays visible.
 - Select opens a session. If a session has a pending query, Select opens the
   query instead.
 
