@@ -68,7 +68,7 @@ Smoke test: Moddable's `hellopebble` example built, installed on emery, and logg
 
 ```bash
 # from the repo root (ws resolves from the root node_modules)
-node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring] [--dark 0|1] [--delay ms]
+node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring|many] [--dark 0|1] [--delay ms]
 ```
 
 | Scene | What the watch gets |

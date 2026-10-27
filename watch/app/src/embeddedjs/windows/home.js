@@ -49,12 +49,14 @@ function disc(port, color, x, y, r) {
 const TEXT_W = screen.width - TITLE_INSET - (DOT_RIGHT + DOT + 8);
 
 class RowBehavior extends Behavior {
+	// Strings are chunk heap too: the clipped title replaces the row's own (the
+	// original is freed; the session window's header falls back to it until its
+	// reply arrives), and the status line is made at each draw.
 	onCreate(port, $) {
-		const styles = $.menu.styles, row = $.item;
-		this.styles = styles;
-		this.color = $.menu.dots[row.status] ?? $.menu.dots.d;
-		this.title = ellipsize(row.title, TEXT_W, s => styles[0].measure(s).width);
-		this.sub = subLine(row);
+		const menu = $.menu, row = $.item;
+		this.menu = menu;
+		this.row = row;
+		row.title = ellipsize(row.title, TEXT_W, s => menu.styles[0].measure(s).width);
 		this.state = 0;
 	}
 	// The Menu sets each row's state too, but a Port's state is write-only.
@@ -63,13 +65,13 @@ class RowBehavior extends Behavior {
 		port.invalidate();
 	}
 	onDraw(port) {
-		const state = this.state, styles = this.styles;
-		port.drawStyle(this.title, styles[0], TITLE_INSET, 2, TEXT_W, 22, false, state);
-		port.drawStyle(this.sub, styles[1], TITLE_INSET, 23, TEXT_W, 18, false, state);
+		const state = this.state, menu = this.menu, styles = menu.styles, row = this.row;
+		port.drawStyle(row.title, styles[0], TITLE_INSET, 2, TEXT_W, 22, false, state);
+		port.drawStyle(subLine(row), styles[1], TITLE_INSET, 23, TEXT_W, 18, false, state);
 		const x = port.width - DOT_RIGHT + 1 - (DOT + 2), y = (CELL - DOT) / 2 - 1;
 		if (state)
 			disc(port, BLACK, x, y, DOT / 2 + 1);
-		disc(port, this.color, x + 1, y + 1, DOT / 2);
+		disc(port, menu.dots[row.status] ?? menu.dots.d, x + 1, y + 1, DOT / 2);
 	}
 }
 
