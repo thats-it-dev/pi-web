@@ -83,8 +83,8 @@ Anti-goals
   in error red. Under it is a 1 px bottom border in the theme's text colour,
   not coloured. On Dark, pi blue text uses `#55AAFF`, because `#0055AA` is
   too dim on black (Claude's call).
-- **Action menu:** black, with a strip down the left edge in the screen's
-  colour; the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
+- **Action menu:** black, with **no coloured strip** (Michael's call; keep
+  the left margin and the small white indicator dot, with no fill behind them); the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
@@ -121,7 +121,8 @@ Home), Select opens the action menu, and Up/Down scroll or move.
 
 ### 4.3 Query
 - The clock bar, then the header line (source label, time asked), then the
-  query text. Its action menu's strip is blue (pi) or green (ring-profile).
+  query text. The header's text colour is what shows the source (pi blue,
+  ring-profile green).
 - Up/Down scroll long text.
 - Select opens the action menu with the query's options, then **Skip**
   always last. **Skip on a pi dialog only hides it from the watch** (Michael's
