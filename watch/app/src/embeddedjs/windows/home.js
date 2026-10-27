@@ -8,6 +8,7 @@ import Menu, { TITLE_INSET } from "pebble-ui/Menu";
 import WindowStack from "pebble-ui/WindowStack";
 import StatusBar from "pebble-ui/StatusBar";
 import { palette, AMBER, BLACK } from "theme";
+import { showNotice, hideNotice } from "notice";
 
 const CELL = 44;
 const DOT = 10;
@@ -85,9 +86,11 @@ class HomeBehavior extends View.Behavior {
 			this.build(screen);
 		super.onDisplayed(screen);
 		this.menu?.focus();
+		showNotice(this, screen);
 	}
 	onUndisplaying(screen) {
 		this.displayed = false;
+		hideNotice(this, screen);
 		this.remember();
 		super.onUndisplaying(screen);
 	}
@@ -98,6 +101,8 @@ class HomeBehavior extends View.Behavior {
 			this.view.selected = menu.items[menu.selection]?.id;
 	}
 	onModel(screen, kind) {
+		if (kind === "notice")
+			showNotice(this, screen);
 		// Not while sliding in or out: changing a window's contents during the
 		// transition leaves the screen unpainted. One sliding in rebuilds when it lands.
 		if (kind === "home" || kind === "net" || kind === "cfg") {
@@ -121,10 +126,15 @@ class HomeBehavior extends View.Behavior {
 		screen.skin = new Skin({ fill: p.bg });
 		screen.add(new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg }));
 		const string = message(m);
-		if (string !== null) {
+		if (string !== null)
 			screen.add(new Message({ string, style: textLayerStyle(FONT_KEY.GOTHIC_24_BOLD, p.fg) }));
-			return;
-		}
+		else
+			this.addMenu(screen, view, m, p);
+		// A notice showing stays on top through the rebuild.
+		if (this.box)
+			screen.add(this.box);
+	}
+	addMenu(screen, view, m, p) {
 		const index = m.home.findIndex(row => row.id === view.selected);
 		const menu = view.menu = new Menu({
 			items: m.home, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? 0 : index,

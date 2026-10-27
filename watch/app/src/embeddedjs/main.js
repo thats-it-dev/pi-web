@@ -17,7 +17,7 @@ export const KEYS = (
 const DARK_KEY = "pi-web.dark";
 const CONNECTING_MS = 10000; // "connecting" for this long reads as offline
 const SESSION_BIT = 0x80000000; // a launch code for a session alert; without it, a query
-const LAUNCH_QUIET_MS = 5000; // the alert that launched the app has buzzed already
+const LAUNCH_MS = 10000; // how long a launch waits for the phone's answer
 
 class PiStack extends WindowStack {
 	onCreate(application, $) {
@@ -43,6 +43,9 @@ class PiStack extends WindowStack {
 				}
 				if (net !== model.net)
 					this.watchNet();
+				// Kept until a window lands to show it (notice.js).
+				if (kind === "notice")
+					this.notice = { string: model.notice, at: Date.now() };
 				this.changed(kind);
 			},
 		});
@@ -71,16 +74,20 @@ class PiStack extends WindowStack {
 			}, CONNECTING_MS);
 	}
 	// Opened from an alert: the phone resolves the launch code to a query
-	// (sent as query) or a session (sent as reply). The reason and arguments
-	// are logged to check them on the watch.
+	// (sent as query; the alert has buzzed already, so for 10 s a new query
+	// doesn't) or a session (sent as reply: the first reply in 10 s opens it,
+	// unless a session window is up already). The reason and arguments are
+	// logged to check them on the watch (emulator: 6 and the unsigned code).
 	launch() {
 		const launch = watch.launch ?? {};
 		console.log("pi-web: launch reason " + launch.reason + " arguments " + launch.arguments);
 		const code = Number(launch.arguments) >>> 0;
 		if (!code)
 			return;
-		this.launched = code >= SESSION_BIT ? "session" : "query";
-		this.quietUntil = Date.now() + LAUNCH_QUIET_MS;
+		if (code >= SESSION_BIT)
+			this.sessionUntil = Date.now() + LAUNCH_MS;
+		else
+			this.quietUntil = Date.now() + LAUNCH_MS;
 		this.link.send("launched", { CODE: code | 0 });
 	}
 	onModelChanged(application) {
@@ -92,9 +99,10 @@ class PiStack extends WindowStack {
 		const kinds = this.kinds;
 		this.kinds = null;
 		this.syncQuery(kinds.includes("query"));
-		if (this.launched === "session" && kinds.includes("reply")) {
-			this.launched = null;
-			this.open("session", this.model.reply.sessionId);
+		if (Date.now() < this.sessionUntil && kinds.includes("reply")) {
+			this.sessionUntil = 0;
+			if (!this.windows.some(view => view.data.mode === "session"))
+				this.open("session", this.model.reply.sessionId);
 		}
 		for (const kind of kinds)
 			application.distribute("onModel", kind);

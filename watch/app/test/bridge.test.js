@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createBridge, dictBytes, clock, elapsed } = require("../src/pkjs/bridge.js");
+const { createBridge, dictBytes, clock, elapsed, breakable } = require("../src/pkjs/bridge.js");
 const { FakeTimers } = require("./support/fakes.js");
 
 const MIN = 60 * 1000;
@@ -469,4 +469,32 @@ test("launched before the first pending frame still makes that query current", (
 	// Once a real frame lacks it, the oldest is current again.
 	const o2 = t.pend([query("q1", 1)], []);
 	assert.deepEqual(o2.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"], ["query", "q1"]]);
+});
+
+const PATH = "/home/michael/workspace/pi-web-watch-ui/hub/src/watch.ts";
+const longest = (s) => Math.max(...s.split(" ").map((w) => w.length));
+
+test("breakable splits long tokens after / and every 16 characters, leaves short words and CJK alone", () => {
+	const out = breakable("Allow edit? " + PATH + " now");
+	assert.ok(longest(out) <= 16, out);
+	assert.equal(out.replace(/ /g, ""), ("Allow edit? " + PATH + " now").replace(/ /g, ""));
+	assert.ok(out.startsWith("Allow edit? "));
+	assert.ok(longest(breakable("x".repeat(50))) <= 16);
+	assert.equal(breakable("short words stay as they are"), "short words stay as they are");
+	assert.equal(breakable("中".repeat(40)), "中".repeat(40));
+});
+
+test("query and reply TEXT carry breakable long paths and still fit one dict", () => {
+	const t = setup();
+	t.pend([query("q1", 1, { text: ("Allow edit? " + PATH + " ").repeat(12), options: ["x".repeat(60), "y".repeat(60)] })], []);
+	const q = t.last("query");
+	assert.ok(longest(q.TEXT) <= 16, q.TEXT);
+	assert.ok(dictBytes(q) <= 1000);
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: ("Wrote " + PATH + ". ").repeat(20) }], total: 1 });
+	t.drain();
+	const r = t.last("reply");
+	assert.ok(longest(r.TEXT) <= 16, r.TEXT);
+	assert.ok(dictBytes(r) <= 1000);
 });

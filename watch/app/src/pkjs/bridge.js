@@ -27,6 +27,27 @@ function clean(s) {
 	return str(s).replace(/[\t\n\r\x1e\x1f]/g, " ").replace(/^\s+|\s+$/g, "");
 }
 
+// Piu wraps only at spaces (and CJK), so a long path would run off the
+// watch's edge: within a long Latin token, a space after a "/" once the piece
+// is 8 characters, and at most every 15 (16 with a clipping ellipsis).
+var PIECE_MAX = 15;
+function breakable(s) {
+	return s.replace(/[\x21-\u2000]{16,}/g, function (token) {
+		var out = "";
+		var run = 0;
+		for (var i = 0; i < token.length; i++) {
+			var c = token.charAt(i);
+			out += c;
+			run++;
+			if (i < token.length - 1 && ((c === "/" && run >= 8) || run >= PIECE_MAX)) {
+				out += " ";
+				run = 0;
+			}
+		}
+		return out;
+	});
+}
+
 function pad2(n) {
 	return (n < 10 ? "0" : "") + n;
 }
@@ -303,7 +324,7 @@ function createBridge(deps) {
 			SOURCE: q.source === "ring-profile" ? "ring" : "pi",
 			SESSION_ID: q.sessionId ? str(q.sessionId) : "",
 			LABEL: clipTo(clean(q.label), LABEL_MAX),
-			TEXT: clipTo(clean(q.text), TEXT_MAX),
+			TEXT: clipTo(breakable(clean(q.text)), TEXT_MAX),
 			OPTIONS: "",
 			AT: clock(q.createdAt),
 		};
@@ -355,7 +376,7 @@ function createBridge(deps) {
 			MSG: "reply",
 			SESSION_ID: str(sid),
 			LABEL: s ? clipTo(clean(s.title), LABEL_MAX) : "",
-			TEXT: clipTo(clean(text), TEXT_MAX),
+			TEXT: clipTo(breakable(clean(text)), TEXT_MAX),
 			AT: s ? clock(s.updatedAt) : "",
 			STATUS: s ? letterOf(s) : "d",
 		};
@@ -565,6 +586,7 @@ function createBridge(deps) {
 module.exports = {
 	createBridge: createBridge,
 	clean: clean,
+	breakable: breakable,
 	clock: clock,
 	elapsed: elapsed,
 	dictBytes: dictBytes,
