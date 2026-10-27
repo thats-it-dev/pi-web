@@ -588,3 +588,17 @@ test("reply TEXT keeps heading line break", () => {
 	r.drain();
 	assert.equal(r.last("reply").TEXT, "Title\nBody here\n\u2022 x\n\u2022 y");
 });
+
+test("scrub: globs and arithmetic are not emphasis", () => {
+	for (const g of ["src/*.ts, lib/*.ts", "rm -rf *.o *.a", "use *.ts and *.js", "2*3*4", "a_b and c_d"]) assert.equal(scrubMarkdown(g), g);
+	assert.equal(scrubMarkdown("*emphasis* here"), "emphasis here");
+	assert.equal(scrubMarkdown("a _em_ b"), "a em b");
+});
+test("scrub: adversarial 20k inputs finish fast", () => {
+	const cases = ["-".repeat(20000) + "x", "[".repeat(20000), "- ".repeat(10000), ":-".repeat(10000), "<b ".repeat(7000), "|-".repeat(10000), "*a ".repeat(7000), "_a ".repeat(7000), "#".repeat(20000) + " x", "`".repeat(20000)];
+	for (const c of cases) {
+		const t0 = Date.now();
+		scrubMarkdown(c);
+		assert.ok(Date.now() - t0 < 200, "slow: " + c.slice(0, 6));
+	}
+});

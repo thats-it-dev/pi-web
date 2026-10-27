@@ -31,10 +31,12 @@ function clean(s) {
 // surprise returns the input unchanged.
 var HTML_TAGS = "br|hr|b|i|u|s|em|strong|p|div|span|a|code|pre|ul|ol|li|h[1-6]|table|thead|tbody|tr|td|th|sup|sub|details|summary|img|blockquote|kbd|del|ins|mark|small|center";
 var HTML_RE = new RegExp("<\\/?(?:" + HTML_TAGS + ")(?:\\s[^>\\n]*)?\\/?>", "gi");
+var SCRUB_CAP = 6000;
 function scrubMarkdown(text) {
 	var input = str(text);
 	try {
-		var s = input.replace(/\r\n?/g, "\n");
+		// TEXT is clipped to 600 chars anyway; the cap keeps regex backtracking cheap.
+		var s = input.slice(0, SCRUB_CAP).replace(/\r\n?/g, "\n");
 		// Fenced blocks (an unterminated one runs to the end).
 		s = s.replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g, function (m, body) {
 			var lines = body.split("\n");
@@ -50,7 +52,9 @@ function scrubMarkdown(text) {
 		s = s.replace(/\[([^\]\n]+)\]\([^)\n]*\)/g, "$1");
 		s = s.replace(/^[ \t]*#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/gm, "$1");
 		s = s.replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, "");
-		s = s.replace(/^[ \t]*\|?[ \t:-]*-[ \t:|-]*$\n?/gm, function (m) { return m.indexOf("|") >= 0 ? "" : m; });
+		s = s.split("\n").filter(function (l) {
+			return !(/^[\s|:-]+$/.test(l) && l.indexOf("-") >= 0 && l.indexOf("|") >= 0);
+		}).join("\n");
 		s = s.replace(/^[ \t]*\|(.*?)\|?[ \t]*$/gm, function (m, row) {
 			return row.split("|").map(function (c) { return c.replace(/^\s+|\s+$/g, ""); }).join(" · ");
 		});
@@ -58,8 +62,8 @@ function scrubMarkdown(text) {
 		s = s.replace(/^[ \t]*[-*+][ \t]+/gm, "• ");
 		s = s.replace(/\*\*(?=\S)([^\n]*?\S)\*\*/g, "$1");
 		s = s.replace(/(^|[^\w])__(?=\S)([^\n]*?\S)__(?!\w|\.\w)/gm, "$1$2");
-		s = s.replace(/(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])/gm, "$1$2");
-		s = s.replace(/(^|[^\w])_(?=[^\s_])([^_\n]*?[^\s_])_(?!\w)/gm, "$1$2");
+		s = s.replace(/(^|\s)\*(?=\w)([^*\n]*?\w)\*(?![\w*])/gm, "$1$2");
+		s = s.replace(/(^|\s)_(?=\w)([^_\n]*?\w)_(?!\w)/gm, "$1$2");
 		s = s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
 		return s.replace(/^\s+|\s+$/g, "");
 	} catch (e) {
