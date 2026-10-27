@@ -77,7 +77,7 @@ Anti-goals
   with a white label on the left and a LECO time on the right. The bar turns
   orange (black text) while the screen is waiting on Michael.
 - **Action menu:** black, with a strip down the left edge in the screen's
-  colour; the selected item is white and the rest are dark grey, in Gothic 24
+  colour; the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
