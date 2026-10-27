@@ -85,7 +85,7 @@ Anti-goals
   too dim on black (Claude's call).
 - **Action menu:** a black drawer starting about 12 px from the left edge.
   The space to its left is plain **theme background** (white in Light, black
-  in Dark); the screen underneath does not show through. A 2 px **left
+  in Dark); the screen underneath does not show through. A 1 px **left
   border** in the theme's text colour: **black in Light, white in Dark**. No
   coloured strip. The small indicator dot sits in the margin **left of the
   border**, in the theme's text colour (all Michael's calls); the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
