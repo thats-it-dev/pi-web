@@ -177,3 +177,27 @@ describe("images in the conversation", () => {
 		expect(out).toContain(".loader={");
 	});
 });
+
+describe("routed thinking level per reply", () => {
+	const reply = (extra: Record<string, unknown>, content: unknown[]) =>
+		flat(renderConversation(createConversation([{ role: "assistant", content, timestamp: 1, ...extra } as never])));
+
+	it("puts the reply's level in the thinking line", () => {
+		const out = reply({ thinkingLevel: "xhigh", stopReason: "stop" }, [{ type: "thinking", thinking: "two words" }, { type: "text", text: "done" }]);
+		expect(out).toContain("thinking · xhigh · 2 words");
+	});
+
+	it("marks a final reply that used no thinking", () => {
+		expect(reply({ thinkingLevel: "off", stopReason: "stop" }, [{ type: "text", text: "Hello!" }])).toContain("no thinking");
+	});
+
+	it("doesn't mark tool steps at off", () => {
+		expect(reply({ thinkingLevel: "off", stopReason: "toolUse" }, [{ type: "text", text: "listing" }])).not.toContain("no thinking");
+	});
+
+	it("is unchanged when a reply has no recorded level", () => {
+		const out = reply({ stopReason: "stop" }, [{ type: "thinking", thinking: "two words" }, { type: "text", text: "done" }]);
+		expect(out).toContain("thinking · 2 words");
+		expect(out).not.toContain("no thinking");
+	});
+});

@@ -67,6 +67,8 @@ function renderUser(m: AgentMessage, loader: ImageLoader | null) {
 
 function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null) {
 	const blocks = Array.isArray(m.content) ? m.content : [];
+	// The level this reply was actually sent at (a router like flash-auto picks it per prompt); pi records it on message_end.
+	const level = typeof m.thinkingLevel === "string" ? m.thinkingLevel : null;
 	return html`<div class="assistant">
 		${blocks.map((b) => {
 			if (!b) return nothing;
@@ -74,7 +76,7 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 				const thinking = String(b.thinking ?? "");
 				if (thinking.trim()) {
 					const words = streaming ? wordCount(thinking) : memo(b, "words", () => wordCount(thinking));
-					return html`<details class="think"><summary>thinking · ${words} words</summary><div class="think-body">${thinking}</div></details>`;
+					return html`<details class="think"><summary>thinking · ${level ? `${level} · ` : ""}${words} words</summary><div class="think-body">${thinking}</div></details>`;
 				}
 				return b.redacted ? html`<div class="note">thinking (redacted)</div>` : nothing;
 			}
@@ -88,6 +90,7 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 		${m.stopReason === "error" ? html`<div class="err" role="alert">${String(m.errorMessage ?? "The model returned an error.")}</div>` : nothing}
 		${m.stopReason === "aborted" ? html`<div class="note">stopped</div>` : nothing}
 		${streaming && blocks.length === 0 ? html`<div class="note">working…</div>` : nothing}
+		${!streaming && level === "off" && m.stopReason === "stop" ? html`<div class="note">no thinking</div>` : nothing}
 	</div>`;
 }
 
