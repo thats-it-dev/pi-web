@@ -87,7 +87,8 @@ Anti-goals
   The space to its left is plain **theme background** (white in Light, black
   in Dark); the screen underneath does not show through. A 2 px **left
   border** in the theme's text colour: **black in Light, white in Dark**. No
-  coloured strip; keep the small white indicator dot (all Michael's calls); the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
+  coloured strip. The small indicator dot sits in the margin **left of the
+  border**, in the theme's text colour (all Michael's calls); the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
