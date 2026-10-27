@@ -11,8 +11,10 @@
 // POST /stub/dark {dark: 0|1} changes what /dev/settings reports (the phone reads it at start).
 // POST /stub/stream {sessionId?, ms?, count?} streams a reply like the real hub: the session runs,
 // a `text` frame (streaming, the last 240 chars of a growing reply) goes out every ms (250), a
-// pending frame once a second, then a final text frame and the session is done. sessionId
-// defaults to the one on screen; a second stream on a session replaces the first.
+// pending frame once a second, then a final text frame and the session is done; its history
+// then ends with the streamed reply. sessionId defaults to the one on screen; a second stream on
+// a session replaces the first. The phone relays no streamed text: the watch shows a typing
+// indicator while the session runs and gets the reply from the history when the run ends.
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -140,6 +142,7 @@ let nextQuery = 3;
 const waiters = new Set();
 const sockets = new Set();
 const streams = new Map(); // session id -> interval timer
+const streamed = new Map(); // session id -> its last streamed reply, what its history then ends with
 
 const pendingNow = () => ({ cursor, queries, showing, sessions });
 
@@ -196,6 +199,7 @@ function startStream(s, ms, count) {
 		if (last) {
 			clearInterval(timer);
 			streams.delete(s.id);
+			streamed.set(s.id, text.trim());
 			Object.assign(s, { status: "done", state: "idle", updatedAt: Date.now() });
 			changed();
 			console.log(`stream ${s.id}: ${n} frames, done`);
@@ -261,7 +265,7 @@ async function handle(req, res) {
 			const turns = [
 				{ i: 0, role: "you", text: "Go on." },
 				{ i: 1, role: "tool", text: "bash · npm test" },
-				{ i: 2, role: "agent", text: REPLIES[id] || (id.startsWith("m") ? LONG_REPLY(s.title) : "Done.") },
+				{ i: 2, role: "agent", text: streamed.get(id) ?? REPLIES[id] ?? (id.startsWith("m") ? LONG_REPLY(s.title) : "Done.") },
 			];
 			const limit = Math.min(Number(q.get("limit")) || 12, 50);
 			return json(res, 200, { turns: turns.slice(-limit), total: turns.length });

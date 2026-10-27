@@ -4,6 +4,9 @@
 // colour over a 1 px rule in the text colour), then the text, scrolled 40 px
 // at a time by Up/Down. Select opens the action menu: the query's options and
 // Skip, or Continue / Stop / Model / Archive. Notices: notice.js.
+// While the session runs, the last finished reply stays and three dots at the
+// header's right end animate; the phone sends the new reply when the run ends
+// (streamed text is not relayed).
 import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR } from "pebble-ui/sdk";
 import View from "pebble-ui/View";
 import WindowStack from "pebble-ui/WindowStack";
@@ -18,6 +21,9 @@ const INSET = 8;
 const STEP = 40;
 const MODELS_MS = 10000; // a models list later than this opens no menu
 const WIDTH = screen.width - 2 * INSET; // given, not left/right: the text is measured before its window is laid out
+const DOTS = 24; // the typing indicator's box at the header's right end
+const DOT_MS = 500; // one dot lights per tick
+const DOT_Y = 12; // the dots' top in the header line: on the text's baseline, like "…"
 
 const stack = () => WindowStack.current;
 
@@ -30,8 +36,32 @@ function shown(mode, id, m, p) {
 	const r = m.reply && m.reply.sessionId === id ? m.reply : null;
 	const row = m.home.find(row => row.id === id);
 	const status = r ? r.status : row && row.status;
-	return { label: r ? r.label : row ? row.title : "", text: r ? r.text : "", color: status === "e" ? p.err : p.pi };
+	return { label: r ? r.label : row ? row.title : "", text: r ? r.text : "", color: status === "e" ? p.err : p.pi, running: status === "r" };
 }
+
+// The typing indicator: three 4 px dots, one lit per tick, drawn (no Style, no
+// string: a tick only invalidates). Ticks run only while it shows (TextBehavior.dots).
+class DotsBehavior extends Behavior {
+	onCreate(port, $) {
+		this.on = $.on;
+		this.off = $.off;
+		this.lit = 0;
+	}
+	onTimeChanged(port) {
+		this.lit = (this.lit + 1) % 3;
+		port.invalidate();
+	}
+	onDraw(port) {
+		const y = DOT_Y;
+		for (let i = 0; i < 3; i++) {
+			const x = DOTS - 20 + 8 * i, color = i === this.lit ? this.on : this.off;
+			port.fillColor(color, x + 1, y, 2, 1);
+			port.fillColor(color, x, y + 1, 4, 2);
+			port.fillColor(color, x + 1, y + 3, 2, 1);
+		}
+	}
+}
+const Dots = Port.template($ => ({ right: INSET, width: DOTS, top: BAR, height: HEAD, visible: false, Behavior: DotsBehavior }));
 
 function drawer(items, onSelect) {
 	const p = palette(stack().model.dark);
@@ -48,19 +78,21 @@ class TextBehavior extends View.Behavior {
 		this.displayed = true;
 		if (this.stale)
 			this.update(screen);
+		this.dots();
 		super.onDisplayed(screen);
 		this.scroll(0);
 		showNotice(this, screen);
 	}
 	onUndisplaying(screen) {
 		this.displayed = false;
+		this.dots();
 		hideNotice(this, screen);
 		super.onUndisplaying(screen);
 	}
-	// The screen, made once per theme. A reply streaming in (4 a second) only
-	// changes the strings and the header's style (fill): new Styles, a
+	// The screen, made once per theme. A new reply or status only changes the
+	// strings, the header's style and the indicator (fill): new Styles, a
 	// StatusBar's among them, stay in the chunk heap until the next window
-	// change (theme.js style), and rebuilding per reply ran it out in 3 s.
+	// change (theme.js style), and rebuilding per streamed reply ran it out in 3 s.
 	build(screen) {
 		const m = stack().model, p = palette(m.dark);
 		this.dark = m.dark;
@@ -70,6 +102,9 @@ class TextBehavior extends View.Behavior {
 		screen.add(new StatusBar({ font: "LECO_20_BOLD_NUMBERS", color: p.fg, background: p.bg }));
 		this.head = new Label(null, { left: INSET, width: WIDTH, top: BAR, height: HEAD });
 		screen.add(this.head);
+		const typing = this.typing = new Dots({ on: p.pi, off: p.sub });
+		typing.interval = DOT_MS;
+		screen.add(typing);
 		screen.add(new Content(null, { left: 0, right: 0, top: BAR + HEAD - 1, height: 1, skin: new Skin({ fill: p.fg }) }));
 		const font = this.view.data.mode === "query" ? FONT_KEY.GOTHIC_24_BOLD : FONT_KEY.GOTHIC_18_BOLD;
 		this.body = new Container(null, {
@@ -88,8 +123,18 @@ class TextBehavior extends View.Behavior {
 		// Kept as two statements; the chained form (head = this.head.style = …) failed on this XS build.
 		const head = style(FONT_KEY.GOTHIC_18_BOLD, c.color);
 		this.head.style = head;
-		this.head.string = ellipsize(c.label, WIDTH, s => head.measure(s).width);
+		this.head.string = ellipsize(c.label, c.running ? WIDTH - DOTS : WIDTH, s => head.measure(s).width);
 		this.body.first.string = c.text;
+		this.dots();
+	}
+	// The indicator shows while the session runs; it ticks only while the window is up.
+	dots() {
+		const typing = this.typing, on = !!this.shown.running;
+		typing.visible = on;
+		if (on && this.displayed)
+			typing.start();
+		else
+			typing.stop();
 	}
 	update(screen) {
 		if (this.dark !== stack().model.dark)
@@ -155,7 +200,7 @@ class TextBehavior extends View.Behavior {
 			// a second copy of the text and make another per dict, and a dict landing
 			// during a slide, with both screens up, ran the chunk heap out.
 			const was = this.shown;
-			if (c && (m.dark !== this.dark || c.label !== was.label || c.text !== was.text || c.color !== was.color)) {
+			if (c && (m.dark !== this.dark || c.label !== was.label || c.text !== was.text || c.color !== was.color || c.running !== was.running)) {
 				if (!this.displayed)
 					this.stale = true;
 				else {

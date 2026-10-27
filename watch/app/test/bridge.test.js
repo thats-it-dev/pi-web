@@ -307,7 +307,7 @@ test("notice frame -> notice dict", () => {
 	assert.deepEqual(t.drain().filter((d) => d.MSG === "notice"), [{ MSG: "notice", NOTICE: "Session closed" }]);
 });
 
-test("open fetches the last turn and sends a reply; live text for that session is relayed", () => {
+test("open fetches the last turn and sends a reply; streamed text is not relayed", () => {
 	const t = setup();
 	t.pend([], [sess("s1", "done", { title: "Fix tests", updatedAt: new Date(2026, 9, 27, 9, 5).getTime() })]);
 	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
@@ -317,84 +317,116 @@ test("open fetches the last turn and sends a reply; live text for that session i
 	t.drain();
 	assert.deepEqual(t.last("reply"), { MSG: "reply", SESSION_ID: "s1", LABEL: "Fix tests", TEXT: "All green.", AT: "09:05", STATUS: "d" });
 	t.bridge.onText({ sessionId: "s1", text: "typing", streaming: true });
-	t.bridge.onText({ sessionId: "other", text: "ignored", streaming: true });
+	t.bridge.onText({ sessionId: "other", text: "ignored", streaming: false });
 	t.drain();
-	assert.equal(t.all("reply").length, 2);
-	assert.equal(t.last("reply").TEXT, "typing");
-	// Leaving the reply screen stops the relay.
-	t.bridge.onAppMessage({ CMD: "showing" });
-	t.bridge.onText({ sessionId: "s1", text: "more", streaming: true });
-	assert.equal(t.drain().filter((d) => d.MSG === "reply").length, 0);
+	assert.equal(t.all("reply").length, 1);
+	assert.equal(t.timers.pending().length, 0);
 });
 
 function openedRunning() {
 	const t = setup();
 	t.pend([], [sess("s1", "running"), sess("s2", "done")]);
 	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
-	t.hub.reply(null, { turns: [], total: 0 });
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "Last reply." }], total: 2 });
 	t.drain();
 	return t;
 }
 
-test("streamed text: one reply per second, intermediate frames coalesce to the latest", () => {
+test("while a session runs, streamed and final frames send nothing; the reply keeps STATUS r", () => {
 	const t = openedRunning();
-	const base = t.all("reply").length;
-	for (let i = 1; i <= 10; i++) {
-		t.clock.t += 50;
-		t.bridge.onText({ sessionId: "s1", text: "t" + i, streaming: true });
-	}
-	t.drain();
-	assert.equal(t.all("reply").length, base + 1);
-	assert.equal(t.last("reply").TEXT, "t1");
-	assert.equal(t.timers.pending().length, 1);
-	t.clock.t += 500;
-	t.timers.fire(0);
-	t.drain();
-	assert.equal(t.all("reply").length, base + 2);
-	assert.equal(t.last("reply").TEXT, "t10");
-	assert.equal(t.timers.pending().length, 0);
-});
-
-test("streamed text: the final frame sends at once and leaves no stale send", () => {
-	const t = openedRunning();
-	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
-	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
-	t.drain();
+	assert.equal(t.last("reply").TEXT, "Last reply.");
+	assert.equal(t.last("reply").STATUS, "r");
 	const n = t.all("reply").length;
-	t.bridge.onText({ sessionId: "s1", text: "abc", streaming: false });
-	t.drain();
-	assert.equal(t.all("reply").length, n + 1);
-	assert.equal(t.last("reply").TEXT, "abc");
-	assert.equal(t.timers.pending().length, 0);
-});
-
-test("streamed text: leaving the running status sends at once and cancels the pending send", () => {
-	const t = openedRunning();
-	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
-	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
-	t.drain();
-	const n = t.all("reply").length;
-	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
-	assert.equal(t.all("reply").length, n + 1);
-	assert.equal(t.last("reply").TEXT, "ab");
-	assert.equal(t.last("reply").STATUS, "d");
-	assert.equal(t.timers.pending().length, 0);
-});
-
-test("streamed text: switching sessions cancels the pending send", () => {
-	const t = openedRunning();
-	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
-	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s2" });
-	assert.equal(t.timers.pending().length, 0);
-	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "other" }], total: 1 });
-	t.drain();
-	assert.equal(t.last("reply").SESSION_ID, "s2");
-	const n = t.all("reply").length;
-	t.clock.t += 2000;
+	for (let i = 1; i <= 10; i++) t.bridge.onText({ sessionId: "s1", text: "t" + i, streaming: true });
+	t.bridge.onText({ sessionId: "s1", text: "Let me look at the file.", streaming: false });
 	t.drain();
 	assert.equal(t.all("reply").length, n);
+	assert.equal(t.timers.pending().length, 0);
+});
+
+test("the run's end fetches the last turn and sends it once, with the new status", () => {
+	const t = openedRunning();
+	t.bridge.onText({ sessionId: "s1", text: "…tail of the answer", streaming: false });
+	t.drain();
+	const n = t.all("reply").length, gets = t.hub.of("get").length;
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	assert.equal(t.all("reply").length, n, "nothing before the history arrives");
+	assert.equal(t.hub.of("get").length, gets + 1);
+	assert.equal(t.hub.of("get")[gets].path, "/api/watch/history?session=s1&limit=6");
+	// Another frame while the history is on its way fetches nothing more.
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done", { title: "renamed" })]);
+	assert.equal(t.hub.of("get").length, gets + 1);
+	t.hub.reply(null, { turns: [{ i: 3, role: "agent", text: "The whole answer." }], total: 4 });
+	t.drain();
+	assert.equal(t.all("reply").length, n + 1);
+	assert.equal(t.last("reply").TEXT, "The whole answer.");
+	assert.equal(t.last("reply").STATUS, "d");
+});
+
+test("the run's end without history falls back to the final frame, else the last reply", () => {
+	const t = openedRunning();
+	t.bridge.onText({ sessionId: "s1", text: "final tail", streaming: false });
+	t.pend([], [sess("s1", "waiting", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	t.hub.reply(new Error("network error"));
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "final tail");
+	assert.equal(t.last("reply").STATUS, "w");
+
+	const u = openedRunning();
+	u.pend([], [sess("s1", "error", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	u.hub.reply(null, { turns: [], total: 0 });
+	u.drain();
+	assert.equal(u.last("reply").TEXT, "Last reply.");
+	assert.equal(u.last("reply").STATUS, "e");
+});
+
+test("a session that starts running gets its status at once, with the last reply", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "Old." }], total: 2 });
+	t.drain();
+	const gets = t.hub.of("get").length;
+	t.pend([], [sess("s1", "running", { updatedAt: NOW + 60000 })]);
+	assert.equal(t.last("reply").TEXT, "Old.");
+	assert.equal(t.last("reply").STATUS, "r");
+	assert.equal(t.hub.of("get").length, gets);
+});
+
+test("a final frame for a session that is not running sends at once", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "Old." }], total: 2 });
+	t.drain();
+	t.bridge.onText({ sessionId: "s1", text: "New.", streaming: false });
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "New.");
+});
+
+test("a frame before open's history arrives does not send another session's text", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done"), sess("s2", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "s1 text" }], total: 2 });
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s2" });
+	t.pend([], [sess("s1", "done"), sess("s2", "done", { updatedAt: NOW + 60000 })]);
+	assert.ok(!t.all("reply").some((d) => d.SESSION_ID === "s2" && d.TEXT === "s1 text"));
+});
+
+test("switching sessions while the run's history is on its way drops it", () => {
+	const t = openedRunning();
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s2" });
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "other" }], total: 1 });
+	t.drain();
+	const n = t.all("reply").length;
+	// The run's history for s1 arrives late.
+	t.hub.reply(null, { turns: [{ i: 3, role: "agent", text: "s1 answer" }], total: 4 }, "/api/watch/history?session=s1");
+	t.drain();
+	assert.equal(t.all("reply").length, n);
+	assert.equal(t.last("reply").SESSION_ID, "s2");
 });
 
 test("continue, stop, model post to the hub; archive drops the row", () => {
@@ -498,20 +530,27 @@ test("open shows the last agent turn, not a trailing tool or you line", () => {
 
 test("an open reply follows its session's status and time", () => {
 	const t = setup();
-	t.pend([], [sess("s1", "running")]);
+	t.pend([], [sess("s1", "done")]);
 	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
 	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "working" }], total: 1 });
 	t.drain();
-	assert.equal(t.last("reply").STATUS, "r");
+	assert.equal(t.last("reply").STATUS, "d");
 	const at = new Date(2026, 9, 27, 14, 2).getTime();
-	const out = t.pend([], [sess("s1", "done", { updatedAt: at })]);
+	const out = t.pend([], [sess("s1", "running", { updatedAt: at })]);
 	const r = out.filter((d) => d.MSG === "reply");
 	assert.equal(r.length, 1);
-	assert.equal(r[0].STATUS, "d");
+	assert.equal(r[0].STATUS, "r");
 	assert.equal(r[0].AT, "14:02");
 	assert.equal(r[0].TEXT, "working");
 	// Unchanged frames send nothing more.
-	assert.equal(t.pend([], [sess("s1", "done", { updatedAt: at })]).filter((d) => d.MSG === "reply").length, 0);
+	assert.equal(t.pend([], [sess("s1", "running", { updatedAt: at })]).filter((d) => d.MSG === "reply").length, 0);
+	// A new minute while it runs keeps a final frame held for the run's end.
+	t.bridge.onText({ sessionId: "s1", text: "held", streaming: false });
+	t.pend([], [sess("s1", "running", { updatedAt: at + 60000 })]);
+	t.pend([], [sess("s1", "done", { updatedAt: at + 60000 })]);
+	t.hub.reply(new Error("network error"));
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "held");
 });
 
 test("a reply of 600 multibyte characters still fits one dict", () => {
@@ -521,7 +560,7 @@ test("a reply of 600 multibyte characters still fits one dict", () => {
 	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "中".repeat(700) }], total: 1 });
 	t.drain();
 	assert.ok(dictBytes(t.last("reply")) <= 1000);
-	t.bridge.onText({ sessionId: "s1", text: "😀".repeat(300), streaming: true });
+	t.bridge.onText({ sessionId: "s1", text: "😀".repeat(300), streaming: false });
 	t.drain();
 	assert.ok(dictBytes(t.last("reply")) <= 1000);
 	assert.ok(t.last("reply").TEXT.length > 0);

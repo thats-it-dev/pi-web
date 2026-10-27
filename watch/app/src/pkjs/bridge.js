@@ -243,12 +243,9 @@ function createBridge(deps) {
 	var answering = {}; // query ids with an answer or skip on its way to the hub
 	var runStart = {}; // session id -> when the phone first saw it running
 	var openSession = null; // the session whose reply the watch is looking at
-	var STREAM_MS = 1000; // at most one streamed reply dict per this long
-	var streamAt = -STREAM_MS; // when a streamed reply was last sent
-	var streamText = null; // the latest streamed text waiting for the throttle
-	var streamTimer = null;
 	var openText = ""; // the text last sent for it
-	var openMeta = ""; // its status and time as last sent
+	var openMeta = ""; // its status and time as last sent (or, while its history loads, as now)
+	var finalText = null; // the last finished message of its run (a text frame with streaming false)
 	var gotFrame = false; // a real pending frame has arrived
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
 
@@ -423,7 +420,13 @@ function createBridge(deps) {
 		syncQuery(force);
 		if (openSession !== null) {
 			var s = sessionById(openSession);
-			if (s && openMeta !== letterOf(s) + clock(s.updatedAt)) sendReply(openSession, streamText !== null ? streamText : openText, false);
+			var meta = s ? letterOf(s) + clock(s.updatedAt) : openMeta;
+			if (meta === openMeta) return;
+			// The run is over: its last turn comes from the history, sent once.
+			if (openMeta.charAt(0) === "r" && meta.charAt(0) !== "r") {
+				openMeta = meta;
+				fetchReply(openSession, finalText !== null ? finalText : openText);
+			} else sendReply(openSession, openText, false);
 		}
 	}
 
@@ -455,35 +458,7 @@ function createBridge(deps) {
 		return dict;
 	}
 
-	function cancelStream() {
-		if (streamTimer !== null) deps.clearTimeout(streamTimer);
-		streamTimer = null;
-		streamText = null;
-	}
-
-	// Streamed frames: the first goes out at once, the rest coalesce to the latest text per STREAM_MS.
-	function streamReply(sid, text) {
-		var wait = streamAt + STREAM_MS - deps.now();
-		if (streamTimer === null && wait <= 0) {
-			sendReply(sid, text, false);
-			streamAt = deps.now();
-			return;
-		}
-		streamText = text;
-		if (streamTimer !== null) return;
-		streamTimer = deps.setTimeout(function () {
-			streamTimer = null;
-			var t = streamText;
-			streamText = null;
-			if (t !== null && openSession === sid) {
-				sendReply(sid, t, false);
-				streamAt = deps.now();
-			}
-		}, wait);
-	}
-
 	function sendReply(sid, text, force) {
-		cancelStream();
 		var dict = replyDict(sid, text);
 		openText = text;
 		var s = sessionById(sid);
@@ -491,25 +466,34 @@ function createBridge(deps) {
 		enqueue(dict, force);
 	}
 
-	function open(sid) {
-		openSession = sid;
-		cancelStream();
+	// The last agent turn from the hub's history, sent as the open session's reply.
+	// Without one (no agent turn, or no history), fallback; with no fallback, no
+	// agent turn is "" and a failed fetch a notice.
+	function fetchReply(sid, fallback) {
 		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=6", function (err, json) {
-			if (err || !json) {
-				log("pi-web: history for " + sid + " failed: " + (err && err.message));
+			if (openSession !== sid) return;
+			var text = null;
+			var turns = (json && json.turns) || [];
+			for (var i = turns.length - 1; i >= 0 && text === null; i--) if (turns[i].role === "agent") text = str(turns[i].text);
+			if (err || !json) log("pi-web: history for " + sid + " failed: " + (err && err.message));
+			if (text === null && fallback === null && (err || !json)) {
 				notice("Couldn't load the reply");
 				return;
 			}
-			var turns = json.turns || [];
-			var text = "";
-			for (var i = turns.length - 1; i >= 0; i--) {
-				if (turns[i].role === "agent") {
-					text = str(turns[i].text);
-					break;
-				}
-			}
-			if (openSession === sid) sendReply(sid, text, true);
+			finalText = null;
+			sendReply(sid, text !== null ? text : fallback !== null ? fallback : "", true);
 		});
+	}
+
+	// Streamed text is not relayed: the watch shows the last finished reply and,
+	// while the session runs, a typing indicator; the run's end sends the new reply.
+	function open(sid) {
+		var s = sessionById(sid);
+		openSession = sid;
+		openText = "";
+		openMeta = s ? letterOf(s) + clock(s.updatedAt) : "";
+		finalText = null;
+		fetchReply(sid, null);
 	}
 
 	// Commands -------------------------------------------------------------
@@ -613,7 +597,7 @@ function createBridge(deps) {
 		showing = { id: id, sessionId: sid };
 		var was = openSession;
 		openSession = id === null && sid !== null ? sid : null;
-		if (openSession !== was) cancelStream();
+		if (openSession !== was) finalText = null;
 		hub.showing(id, sid);
 	}
 
@@ -655,9 +639,11 @@ function createBridge(deps) {
 			frame = { queries: f.queries || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
 			update(force);
 		},
+		// Only finished messages (streaming false), and while the session runs only kept
+		// for the run's end: one turn can finish several messages around its tool calls.
 		onText: function (f) {
-			if (!f || !f.sessionId || f.sessionId !== openSession) return;
-			if (f.streaming === true) streamReply(f.sessionId, str(f.text));
+			if (!f || !f.sessionId || f.sessionId !== openSession || f.streaming === true) return;
+			if (openMeta.charAt(0) === "r") finalText = str(f.text);
 			else sendReply(f.sessionId, str(f.text), false);
 		},
 		onNotice: function (f) {
