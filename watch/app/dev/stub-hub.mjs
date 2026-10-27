@@ -8,6 +8,10 @@
 // ~40-char titles and ~600-char replies (the phone's row limit; Home's memory).
 // POST /stub/notice {text} sends a notice frame; POST /stub/query {text?, options?, source?} raises a query;
 // POST /stub/dark {dark: 0|1} changes what /dev/settings reports (the phone reads it at start).
+// POST /stub/stream {sessionId?, ms?, count?} streams a reply like the real hub: the session runs,
+// a `text` frame (streaming, the last 240 chars of a growing reply) goes out every ms (250), a
+// pending frame once a second, then a final text frame and the session is done. sessionId
+// defaults to the one on screen; a second stream on a session replaces the first.
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -124,6 +128,7 @@ let showing = null;
 let nextQuery = 3;
 const waiters = new Set();
 const sockets = new Set();
+const streams = new Map(); // session id -> interval timer
 
 const pendingNow = () => ({ cursor, queries, showing, sessions });
 
@@ -157,6 +162,41 @@ function launchTarget(code) {
 	if (code === 1 && queries[0]) return { queryId: queries[0].id };
 	if ((code === 2 || (code > 0x80000000 && code < 0x80000100)) && sessions[0]) return { sessionId: sessions[0].id };
 	return null;
+}
+
+// --- Streaming --------------------------------------------------------------
+
+const STREAM_WORDS = ("Reading the session list, then the text window. Each frame adds a few words, " +
+	"as a model would, so the tail moves the way a real reply does on the watch: ").split(" ");
+const TEXT_TAIL = 240; // as the hub's watch.ts
+
+function startStream(s, ms, count) {
+	clearInterval(streams.get(s.id));
+	Object.assign(s, { status: "running", state: "running", updatedAt: Date.now() });
+	changed();
+	let text = "";
+	let n = 0;
+	let tickAt = Date.now();
+	const timer = setInterval(() => {
+		n++;
+		text += " " + STREAM_WORDS[n % STREAM_WORDS.length] + " " + n;
+		const last = n >= count;
+		broadcast({ type: "text", sessionId: s.id, text: text.trim().slice(-TEXT_TAIL), streaming: !last });
+		if (last) {
+			clearInterval(timer);
+			streams.delete(s.id);
+			Object.assign(s, { status: "done", state: "idle", updatedAt: Date.now() });
+			changed();
+			console.log(`stream ${s.id}: ${n} frames, done`);
+		} else if (Date.now() - tickAt >= 1000) {
+			// The hub wakes pollers about once a second while streaming (t/s moves).
+			tickAt = Date.now();
+			s.updatedAt = tickAt;
+			changed();
+		}
+	}, ms);
+	streams.set(s.id, timer);
+	console.log(`stream ${s.id}: ${count} frames every ${ms} ms`);
 }
 
 // --- HTTP -------------------------------------------------------------------
@@ -277,6 +317,13 @@ async function handle(req, res) {
 			queries = [...queries, { id, source: ring ? "ring-profile" : "pi", sessionId: ring ? null : "s2", label: ring ? "ring · follow-up" : "pi · pi-web watch", text: body.text || "Allow edit?\nwatch/app/src/embeddedjs/main.js", options: body.options || ["Allow", "Deny"], createdAt: Date.now() }];
 			changed();
 			return json(res, 200, { ok: true, id });
+		}
+		if (path === "/stub/stream") {
+			const id = body.sessionId || (showing && showing.sessionId);
+			const s = sessions.find((x) => x.id === id);
+			if (!s) return json(res, 404, { error: "no such session (open one or pass sessionId)" });
+			startStream(s, Number(body.ms) || 250, Number(body.count) || 200);
+			return json(res, 200, { ok: true, sessionId: s.id });
 		}
 		if (path === "/stub/dark") {
 			DARK = Number(body.dark) ? 1 : 0;
