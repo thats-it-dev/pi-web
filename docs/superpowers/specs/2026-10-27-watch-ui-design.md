@@ -243,6 +243,22 @@ coredevices/mobileapp `test-apps/plugins.md` and `PKJSInterface.kt` /
 `fw/services/timeline/timeline.c`; Moddable `pebble-examples` `helloinfo` and
 `hellowakeup` for `watch.launch`.
 
+### Spike results (2026-10-27, iPhone + Time 2)
+
+| Path | Pebble app foreground | Pebble app background |
+|---|---|---|
+| Developer Connection: auto-launch (AppRunState) | ✅ app opened | ❌ port 9000 refused (iOS suspends the app's server) |
+| Developer Connection: BlobDB notification with OpenWatchapp action | ✅ popup and buzz; **Open** launched the app; BlobDB status Success | ❌ same: unreachable |
+| pi-web PWA Web Push (existing `PushStore`), mirrored by iOS to the watch | — | ✅ phone and watch, after re-subscribing (two stale Apple subscriptions were still accepted with 2xx but never delivered) |
+
+**Decision (Claude's ruling, after Michael pointed at PWA push):**
+- The Notifier tries the Developer Connection notification first (rich, with **Open**).
+- If the phone is unreachable, it falls back to a PWA Web Push. That shows on the watch as a plain iOS notification without an Open action.
+- `watchAlert` becomes `"auto"` (default), `"notification"`, `"push"` or `"off"`.
+- **ring-profile pushes carry no question text** (title "ring · follow-up", body "Question waiting"). pi pushes keep today's payload (session title plus kind).
+- The verified frame is `hub/test/fixtures/notification-frame.hex`.
+- `watch.launch.reason` / `arguments` strings were not captured; Task 9 verifies them on the watch.
+
 ## 8. Constraints
 
 - **Alloy (Moddable JS)**, emery, built with the toolchain in

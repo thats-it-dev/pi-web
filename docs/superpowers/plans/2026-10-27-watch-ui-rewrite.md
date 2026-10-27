@@ -272,7 +272,8 @@ A query that is pending but not on screen is never answered (Review Focus 4).
 
 **Files:**
 - Create: `hub/src/notifier.ts`, `hub/src/notification-frame.ts` (only if Task 1 chose notifications)
-- Modify: `hub/src/config.ts` (`watchAlert: "notification" | "launch" | "off"`, default from Task 1), `hub/src/main.ts`
+- Modify: `hub/src/config.ts` (`watchAlert: "auto" | "notification" | "push" | "off"`, default `"auto"`), `hub/src/main.ts`, `shared/src/protocol.ts` (`PushKind` gains `"query"`), `app/public/sw.js` (body text for `"query"`: the payload's `body` if present, else "Question waiting")
+- Spike result (spec §7 "Spike results"): the Developer Connection works only while the Pebble app is in the foreground on iOS; PWA Web Push works in the background. **`auto` = try the notification frame; if the phone is unreachable or the socket fails, send a Web Push through the existing `PushStore`.** Push payload for queries: `{ sessionId, title: label, kind: "query" }`; never the query text for `source: "ring-profile"`.
 - Test: `hub/test/notifier.test.ts`, `hub/test/notification-frame.test.ts`
 
 **Interfaces:**
@@ -284,15 +285,18 @@ A query that is pending but not on screen is never answered (Review Focus 4).
   - `watch.onTurnAlert`.
 - Produces:
   - `notificationFrame(input: { appUuid: string; itemId: string; title: string; body: string; launchCode: number; time: number }): Uint8Array`, matching the Task 1 fixture byte for byte;
-  - `class Notifier { constructor(deps: { mode: "notification" | "launch" | "off"; appUuid: string; phone: () => string | null; appOpen: () => boolean; send?: (host: string, frame: Uint8Array) => Promise<boolean>; markDelivered: (queryId: string) => void; log?: (m: string) => void }); query(q: WatchQuery): Promise<void>; turn(a: { sessionId: string; kind: "finished" | "error"; title: string; text: string }): Promise<void> }`.
+  - `class Notifier { constructor(deps: { mode: "auto" | "notification" | "push" | "off"; appUuid: string; phone: () => string | null; appOpen: () => boolean; send?: (host: string, frame: Uint8Array) => Promise<boolean>; push: (p: PushPayload) => Promise<boolean>; markDelivered: (queryId: string) => void; log?: (m: string) => void }); query(q: WatchQuery): Promise<void>; turn(a: { sessionId: string; kind: "finished" | "error"; title: string; text: string }): Promise<void> }`. `PushStore.send` returns whether at least one subscription answered 2xx.
+  - Turn alerts: **only through the notification frame**. When it falls back to push, skip it, because `watchPush` already pushes finished/error turns, and pushing twice would double-buzz.
 
 Launch codes: a 32-bit integer. The high bit set means a session alert; the low 31 bits index a small table `launchTargets: Map<number, { queryId } | { sessionId }>` that the Notifier keeps (last 32 entries). The watch sends the code back on launch (Task 9), and pkjs resolves it with `GET /api/watch/launch-target?code=N`, which returns `{queryId} | {sessionId} | 404`.
 
 - [ ] **Step 1: Write the failing tests:**
   - `app open → no alert, query is delivered by showing only`;
   - `app closed, mode notification → one frame sent to phone:9000 and markDelivered called`;
-  - `app closed, phone unreachable → no throw, not delivered, no retry` (Review Focus 2);
-  - `mode launch → launchOnPhone called, delivered on ok`;
+  - `auto, phone unreachable → one Web Push with kind query, delivered when push returns true`;
+  - `auto, ring-profile query → push payload has no query text`;
+  - `auto, phone unreachable and push fails → no throw, not delivered, no retry` (Review Focus 2);
+  - `turn alert with phone unreachable → no push (watchPush already sent one)`;
   - `mode off → nothing sent`;
   - `turn alert uses a session launch code` (high bit set).
   - If notification mode: `notificationFrame matches fixture` (read `hub/test/fixtures/notification-frame.hex` with the inputs from its comment line).
