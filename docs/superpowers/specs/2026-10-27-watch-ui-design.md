@@ -92,10 +92,11 @@ Anti-goals
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
   rather than writing a new one.
 - **Themes:** Light (white background, black text) and Dark (black
-  background, white text). Status dots, the selected row and the action menu
-  are the same in both. The theme is chosen on the phone (§4.4).
+  background, white text). Status dots, the selected row and the drawer itself
+  are the same in both; the drawer's border and margin follow the theme. The theme is chosen on the phone (§4.4).
 - Mockups: `pi-web/.superpowers/brainstorm/280854-1793118289/content/`.
-  **`prototype-v12.html` is the final, clickable reference** (it supersedes
+  **`prototype-v12.html` is the final, clickable reference**, committed as
+  `docs/superpowers/mockups/2026-10-27-watch-ui-prototype.html` (it supersedes
   the earlier static pages). Its fonts are browser stand-ins.
 
 ## 4. Screens and buttons

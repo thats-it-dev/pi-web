@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Watch UI prototype</title>
+<style>
+  :root { --pi:#0055AA; --ring:#00AA55; --wait:#FFAA00; --err:#FF0055; }
+  body { margin:0; background:#1b1b1d; color:#ddd; font-family: system-ui, sans-serif; }
+  .page { display:flex; gap:40px; justify-content:center; align-items:flex-start; padding:28px 16px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0 0 4px; color:#fff; } .hint { font-size:13px; color:#999; margin:0 0 14px; max-width:340px; }
+  .rig { position:relative; width:320px; height:365px; margin-top:20px; }
+  .case { position:absolute; left:0; top:0; width:200px; height:228px; transform:scale(1.6); transform-origin:top left;
+          border-radius:12px; box-shadow:0 0 0 7px #2c2c2e, 0 0 0 9px #555; background:#000; overflow:hidden; }
+  .case.buzz { animation: buzz .35s; } @keyframes buzz { 0%,100%{translate:0} 25%{translate:-3px} 75%{translate:3px} }
+  .btn { position:absolute; width:16px; height:46px; background:#555; border-radius:4px; cursor:pointer; border:none; }
+  .btn:hover { background:#888; } .btn span { position:absolute; font-size:11px; color:#aaa; white-space:nowrap; top:15px; }
+  #bBack { left:-34px; top:60px; } #bBack span { right:22px; }
+  #bUp { left:334px; top:30px; } #bSel { left:334px; top:160px; } #bDown { left:334px; top:290px; }
+  #bUp span, #bSel span, #bDown span { left:22px; }
+  .ctl { width:330px; } .ctl h3 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:#888; margin:18px 0 6px; }
+  .ctl button { display:block; width:100%; text-align:left; margin:4px 0; padding:7px 10px; background:#2c2c2e; color:#eee; border:1px solid #3a3a3c; border-radius:6px; cursor:pointer; font-size:13px; }
+  .ctl button:hover { background:#3a3a3c; } .log { font-size:12px; color:#9a9; min-height:2em; margin-top:10px; }
+  /* watch screen */
+  .scr { position:absolute; inset:0; font-family:"Arial Narrow","Roboto Condensed","Helvetica Neue",Arial,sans-serif; font-weight:700; overflow:hidden; }
+  .light { background:#fff; color:#000; --sub:#555; --line:#e6e6e6; --done:#AAAAAA; }
+  .dark { background:#000; color:#fff; --sub:#AAAAAA; --line:#333; --done:#555555; }
+  .leco { font-family:"DIN Condensed","Bahnschrift","Arial Narrow",sans-serif; letter-spacing:.5px; }
+  .sb { text-align:center; font-size:14px; padding:2px 0; background:inherit; color:inherit; }
+  .mi { padding:4px 8px; height:44px; box-sizing:border-box; border-bottom:1px solid var(--line); position:relative; }
+  .mi .t { font-size:19px; line-height:1.1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:18px; }
+  .mi .s { font-size:14px; color:var(--sub); }
+  .mi.on { background:#FFAA00; color:#000; } .mi.on .s { color:#000; }
+  .dot { position:absolute; right:8px; top:16px; width:10px; height:10px; border-radius:5px; }
+  .bar { color:#fff; font-size:15px; padding:4px 8px; display:flex; justify-content:space-between; }
+  .bodyw { position:absolute; left:0; right:0; top:44px; bottom:0; overflow:hidden; }
+  .hd { font-size:15px; padding:2px 8px 3px; border-bottom:1px solid currentColor; display:flex; justify-content:space-between; }
+  .hd span { color:var(--hc); }
+  .light { --hpi:#0055AA; --hring:#00AA55; --herr:#FF0055; }
+  .dark  { --hpi:#55AAFF; --hring:#00AA55; --herr:#FF0055; }
+  .body { font-size:19px; line-height:1.17; padding:6px 8px 8px; transition: transform .15s; }
+  .menu { position:absolute; inset:0; background:#000; }
+  .mbg { position:absolute; inset:0; }
+  .mbg.light { background:#fff; } .mbg.dark { background:#000; }
+  .menu.drawer { left:12px; }
+  .mdot { position:absolute; top:7px; left:4px; width:4px; height:4px; border-radius:2px; }
+  .mbg.light .mdot { background:#000; } .mbg.dark .mdot { background:#fff; }
+  .mbg.light .menu.drawer { border-left:1px solid #000; }
+  .mbg.dark .menu.drawer { border-left:1px solid #fff; }
+  .strip { position:absolute; left:0; top:0; bottom:0; width:12px; background:transparent !important; }
+  .strip:after { content:""; position:absolute; top:7px; left:4px; width:4px; height:4px; border-radius:2px; background:#fff; }
+  .items { position:absolute; left:26px; right:4px; top:0; transition: transform .15s; }
+  .it { font-size:19px; color:#555; height:48px; line-height:48px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .it.on { color:#FFAA00; }
+  .toast { position:absolute; left:8px; right:8px; bottom:8px; background:#000; color:#fff; font-size:15px; padding:6px 8px; border-radius:6px; border:1px solid #444; }
+  .face { position:absolute; inset:0; background:#000; color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .face .tm { font-size:56px; } .face .dt { font-size:16px; color:#aaa; font-family:"Arial Narrow",Arial,sans-serif; font-weight:700; }
+  .notif { position:absolute; inset:0; background:#fff; color:#000; }
+  .notif .app { padding:6px 8px 2px; font-size:14px; color:#555; } .notif .ti { padding:0 8px; font-size:22px; line-height:1.1; }
+  .notif .tx { padding:4px 8px; font-size:18px; line-height:1.17; }
+  .empty { position:absolute; left:10px; right:10px; top:80px; font-size:20px; line-height:1.2; }
+</style></head>
+<body>
+<div class="page">
+  <div>
+    <h1>pi-web watch: clickable prototype</h1>
+    <p class="hint">Click the side buttons, or use the keyboard: ↑ ↓ Enter (Select), Esc (Back). Gothic and LECO are browser stand-ins.</p>
+    <div class="rig">
+      <div class="case" id="case"><div id="screen"></div></div>
+      <button class="btn" id="bBack" onclick="press('back')"><span>Back</span></button>
+      <button class="btn" id="bUp" onclick="press('up')"><span>Up</span></button>
+      <button class="btn" id="bSel" onclick="press('select')"><span>Select</span></button>
+      <button class="btn" id="bDown" onclick="press('down')"><span>Down</span></button>
+    </div>
+  </div>
+  <div class="ctl">
+    <h3>App</h3>
+    <button onclick="openApp()">Open the app</button>
+    <button onclick="closeApp()">Close the app (watchface)</button>
+    <h3>Phone settings (Clay)</h3>
+    <button onclick="clay()">Open Clay config page</button>
+    <div id="clay" style="display:none;background:#f4f4f4;color:#222;border-radius:8px;padding:10px 12px;margin-top:6px;font-size:13px">
+      <div style="font-weight:700;margin-bottom:8px">pi-web</div>
+      <label style="display:block;margin-bottom:8px">Hub URL<br><input style="width:95%;padding:5px" value="https://spark-713a.tail9274fa.ts.net:7878"></label>
+      <label style="display:block;margin-bottom:10px"><input type="checkbox" id="darkbox"> Dark theme</label>
+      <button style="background:#0055AA;color:#fff;border:none;text-align:center" onclick="saveClay()">Save</button>
+    </div>
+    <h3>Arrivals</h3>
+    <button onclick="arrive(piQuery())">pi approval request arrives</button>
+    <button onclick="arrive(ringQuery())">ring-profile follow-up arrives</button>
+    <button onclick="finishSession('ring-profile','done')">ring-profile session finishes</button>
+    <button onclick="finishSession('flash-auto','error')">flash-auto session errors</button>
+    <h3>Ring</h3>
+    <button onclick="ringAgent('yes, go ahead')">Agent gesture: "yes, go ahead"</button>
+    <button onclick="ringAgent('hmm, what does that touch?')">Agent gesture: "hmm, what does that touch?"</button>
+    <button onclick="ringNotes('mostly typing, voice is too slow for paths')">Notes gesture: "mostly typing, voice is too slow for paths"</button>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+<script>
+const C = { pi:'#0055AA', ring:'#00AA55', wait:'#FFAA00', err:'#FF0055' };
+let theme = 'light';
+let appOpen = true;
+let qid = 0;
+const sessions = [
+  { id:'watch-ui', status:'running', since:'4:12', at:'14:01', reply:'Rendering the session list with pebble-ui Menu. Status dots are drawn as 10 px circles. Next: the query screen and its action menu.' },
+  { id:'ring-profile', status:'running', since:'1:05', at:'13:58', reply:'Added the burst grouping and the 5-minute debounce. Tests pass (42). Next: the notes webhook forwarder in the hub. Want me to start on it?' },
+  { id:'flash-auto', status:'done', at:'13:40', reply:'Benchmark finished. flash-auto picked low reasoning on 71% of turns; accuracy within 1 point of always-high. Report is in reports/2026-10-27.md.' },
+  { id:'tips site', status:'error', at:'12:12', reply:'Deploy failed: wrangler pages deploy exited 1 (auth token expired). Run cf auth login on the spark, then retry.' },
+];
+let queries = [];
+// navigation stack: each entry {kind, ...}
+let stack = [];
+let toast = null, toastTimer = null;
+let notif = null; // native notification overlay when app closed
+
+function now() { const d=new Date(); return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'); }
+function log(m) { document.getElementById('log').textContent = m; }
+function buzz() { const c=document.getElementById('case'); c.classList.remove('buzz'); void c.offsetWidth; c.classList.add('buzz'); }
+function showToast(t) { toast=t; clearTimeout(toastTimer); toastTimer=setTimeout(()=>{toast=null;render();},1800); render(); }
+function sess(id) { return sessions.find(s=>s.id===id); }
+function pendingFor(id) { return queries.find(q=>q.source==='pi' && q.session===id && !q.hidden); }
+
+function piQuery() { return { id:++qid, source:'pi', session:'watch-ui', text:'Run <u>npm test</u> in pi-web/hub?', options:['Allow','Always allow','Deny'], at:now() }; }
+function ringQuery() { return { id:++qid, source:'ring', text:'On 20 Oct you said voice replaces the keyboard. Right now, in the terminal?', options:['Mostly voice','Mostly typing','Neither'], at:now() }; }
+
+function homeRows() {
+  const order = { waiting:0, running:1, error:2, done:3 };
+  const rows = sessions.map(s => ({ s, waiting: !!pendingFor(s.id) }))
+    .sort((a,b) => (b.waiting-a.waiting) || (order[a.s.status]-order[b.s.status]));
+  return rows;
+}
+function cur() { return stack[stack.length-1]; }
+function resetHome() { stack=[{kind:'home', idx:0}]; }
+resetHome();
+
+function render() {
+  const el = document.getElementById('screen');
+  let h = '';
+  if (!appOpen) {
+    if (notif) h = renderNotif();
+    else h = `<div class="face"><div class="tm leco">${now()}</div><div class="dt">TUE 27 OCT</div></div>`;
+    el.innerHTML = h; return;
+  }
+  const t = cur();
+  if (t.kind==='home') h = renderHome(t);
+  else if (t.kind==='session') h = renderSession(t);
+  else if (t.kind==='query') h = renderQuery(t);
+  else if (t.kind==='menu') {
+    h = `<div class="mbg ${theme}"><div class="mdot"></div>` + renderMenu(t) + '</div>';
+  }
+  if (toast) h += `<div class="toast">${toast}</div>`;
+  el.innerHTML = h;
+}
+function renderHome(t) {
+  const rows = homeRows();
+  const n = rows.length;
+  t.idx = Math.min(t.idx, n-1);
+  const first = Math.max(0, Math.min(t.idx-2, n-4));
+  let h = `<div class="scr ${theme}"><div class="sb leco">${now()}</div>`;
+  for (let i=first;i<Math.min(n, first+5);i++) {
+    if (i < rows.length) {
+      const {s, waiting} = rows[i];
+      const st = waiting ? 'Waiting · approval' : s.status==='running' ? `Running · <span class="leco">${s.since}</span>` : s.status==='done' ? `Done · <span class="leco">${s.at}</span>` : 'Error';
+      const col = waiting ? C.wait : s.status==='running' ? C.pi : s.status==='error' ? C.err : 'var(--done)';
+      const ring = i===t.idx ? 'box-shadow:0 0 0 2px #000;' : '';
+      h += `<div class="mi ${i===t.idx?'on':''}"><div class="t">${s.id}</div><div class="s">${st}</div><div class="dot" style="background:${col};${ring}"></div></div>`;
+    }
+  }
+  return h + '</div>';
+}
+function renderSession(t) {
+  const s = sess(t.id);
+  const col = s.status==='error' ? C.err : C.pi;
+  const hc = s.status==='error' ? 'var(--herr)' : 'var(--hpi)';
+  return `<div class="scr ${theme}"><div class="sb leco">${now()}</div>
+    <div class="hd" style="--hc:${hc}"><span>${s.id}</span><span class="leco">${s.at}</span></div>
+    <div class="bodyw"><div class="body" style="transform:translateY(${-t.scroll}px)">${s.reply}</div></div></div>`;
+}
+function renderQuery(t) {
+  const q = queries.find(x=>x.id===t.id);
+  if (!q) return renderHome(stack[0]);
+  const label = q.source==='pi' ? `pi · ${q.session}` : 'ring · follow-up';
+  const hc = q.source==='pi' ? 'var(--hpi)' : 'var(--hring)';
+  return `<div class="scr ${theme}"><div class="sb leco">${now()}</div>
+    <div class="hd" style="--hc:${hc}"><span>${label}</span><span class="leco">${q.at}</span></div>
+    <div class="bodyw"><div class="body" style="transform:translateY(${-t.scroll}px)">${q.text}</div></div></div>`;
+}
+function renderMenu(t) {
+  const off = Math.max(0, t.idx-2) * 48;
+  let h = `<div class="menu drawer"><div class="items" style="top:38px;left:20px;transform:translateY(${-off}px)">`;
+  t.items.forEach((it,i)=> h += `<div class="it ${i===t.idx?'on':''}">${it}</div>`);
+  return h + '</div></div>';
+}
+function renderNotif() {
+  if (notif.menu) {
+    const t = notif.menu;
+    let h = `<div class="menu"><div class="strip" style="background:#555"></div><div class="items" style="top:38px">`;
+    t.items.forEach((it,i)=> h += `<div class="it ${i===t.idx?'on':''}">${it}</div>`);
+    return h + '</div></div>';
+  }
+  return `<div class="notif"><div class="app">pi-web · <span class="leco">${now()}</span></div><div class="ti">${notif.title}</div><div class="tx">${notif.text}</div></div>`;
+}
+
+function press(b) {
+  if (!appOpen) return pressClosed(b);
+  const t = cur();
+  if (b==='back') {
+    if (stack.length>1) stack.pop(); else { closeApp(); return; }
+    return render();
+  }
+  if (t.kind==='home') {
+    const n = homeRows().length;
+    if (b==='up') t.idx = Math.max(0, t.idx-1);
+    if (b==='down') t.idx = Math.min(n-1, t.idx+1);
+    if (b==='select') {
+      const rows = homeRows();
+      if (rows.length) {
+        const s = rows[t.idx].s, q = pendingFor(s.id);
+        stack.push(q ? {kind:'query', id:q.id, scroll:0} : {kind:'session', id:s.id, scroll:0});
+      }
+    }
+  } else if (t.kind==='session' || t.kind==='query') {
+    if (b==='down') t.scroll = Math.min(t.scroll+40, 160);
+    if (b==='up') t.scroll = Math.max(t.scroll-40, 0);
+    if (b==='select') {
+      if (t.kind==='session') {
+        const s = sess(t.id);
+        stack.push({kind:'menu', color: s.status==='error'?C.err:C.pi, idx:0, items:['Continue','Stop','Model','Archive'], pick(i){
+          stack.pop();
+          if (i===0) { s.status='running'; s.since='0:00'; showToast(`Continue sent to ${s.id}`); }
+          if (i===1) { s.status='done'; s.at=now(); showToast('Stopped'); }
+          if (i===2) { stack.push({kind:'menu', color:C.pi, idx:0, items:['flash-next','qwen3.8-27b','qwen3.6-35b-a3b'], pick(j){ stack.pop(); showToast(`Model: ${this.items[j]}`); }}); }
+          if (i===3) { sessions.splice(sessions.indexOf(s),1); stack=[stack[0]]; showToast('Archived'); }
+        }});
+      } else {
+        const q = queries.find(x=>x.id===t.id);
+        stack.push({kind:'menu', color: q.source==='pi'?C.pi:C.ring, idx:0, items:[...q.options,'Skip'], pick(i){
+          stack.pop();
+          const opt = this.items[i];
+          answer(q, opt==='Skip' ? 'skip' : opt);
+        }});
+      }
+    }
+  } else if (t.kind==='menu') {
+    if (b==='up') t.idx = Math.max(0, t.idx-1);
+    if (b==='down') t.idx = Math.min(t.items.length-1, t.idx+1);
+    if (b==='select') { t.pick(t.idx); }
+  }
+  render();
+}
+function answer(q, opt) {
+  if (opt==='skip' && q.source==='pi') { q.hidden = true; log(`Skip: pi dialog hidden from the watch; still answerable in the web app.`); }
+  else { queries = queries.filter(x=>x!==q); log(q.source==='pi' ? `pi dialog answered: ${opt}` : `ring-profile outcome: ${opt==='skip'?'skip':'option "'+opt+'"'}`); }
+  if (q.source==='pi' && opt!=='skip') { const s=sess(q.session); if (s) { s.status='running'; } }
+  // leave the query screen, back to where Michael was
+  stack = stack.filter(e => !(e.kind==='query' && e.id===q.id));
+  if (!stack.length) resetHome();
+  showToast(opt==='skip' ? 'Skipped' : opt);
+}
+function pressClosed(b) {
+  if (!notif) { if (b==='select') openApp(); return; }
+  if (notif.menu) {
+    const t = notif.menu;
+    if (b==='up') t.idx=Math.max(0,t.idx-1);
+    if (b==='down') t.idx=Math.min(t.items.length-1,t.idx+1);
+    if (b==='back') notif.menu=null;
+    if (b==='select') {
+      if (t.items[t.idx]==='Open') { const target=notif.target; notif=null; openApp(target); return; }
+      notif=null; log('Notification dismissed; query stays pending (delivered).');
+    }
+  } else {
+    if (b==='select') notif.menu = { idx:0, items:['Open','Dismiss'] };
+    if (b==='back') { notif=null; }
+  }
+  render();
+}
+function openApp(target) {
+  appOpen = true; notif = null; resetHome();
+  if (target) stack.push(target);
+  render();
+}
+function closeApp() { appOpen=false; notif=null; render(); log('App closed.'); }
+function arrive(q) {
+  queries.push(q);
+  if (q.source==='pi') { const s=sess(q.session); if (s) s.status='running'; }
+  buzz();
+  if (appOpen) {
+    if (cur().kind!=='query') stack.push({kind:'query', id:q.id, scroll:0});
+    log(q.source==='pi' ? 'pi query shown full-screen (app open).' : 'ring-profile query shown full-screen (app open).');
+  } else {
+    notif = { title: q.source==='pi' ? `pi · ${q.session}` : 'ring · follow-up', text: q.text.replace(/<[^>]+>/g,''), target:{kind:'query', id:q.id, scroll:0} };
+    log('App closed → native notification. Select → Open jumps straight to the query (launch code).');
+  }
+  render();
+}
+function finishSession(id, how) {
+  const s = sess(id); if (!s) return;
+  s.status = how; s.at = now();
+  if (how==='done') s.reply = 'Notes webhook forwarder done: deliveries carry audio bytes and dedupe by delivery id. 51 tests pass.';
+  if (how==='error') s.reply = 'Benchmark crashed: llama-swap returned 503 (model loading timed out after 120 s).';
+  buzz();
+  if (!appOpen) { notif = { title: `${id} ${how==='done'?'finished':'failed'}`, text: s.reply, target:{kind:'session', id, scroll:0} }; log('Turn alert as native notification; Open → that session.'); }
+  else log(`${id} ${how==='done'?'finished':'errored'}: list updates, one buzz.`);
+  render();
+}
+function ringAgent(text) {
+  const t = appOpen ? cur() : null;
+  if (t && t.kind==='query') {
+    const q = queries.find(x=>x.id===t.id);
+    const yes = /\b(yes|allow|go ahead|ok)\b/i.test(text);
+    if (q.source==='pi' && !yes) { showToast("Didn't catch that"); log('Agent ring note did not match the options: nothing approved or denied, query stays.'); return; }
+    if (q.source==='ring') { answer(q, 'ring answer'); log('Agent ring note answered the on-screen ring-profile query.'); return; }
+    answer(q, 'Allow'); log('Agent ring note matched "Allow" on the on-screen query; cleared.'); return;
+  }
+  if (t && t.kind==='session') { const s=sess(t.id); s.status='running'; s.since='0:00'; showToast(`Sent to ${s.id}`); log(`Open session is the target: prompt sent to ${s.id}.`); render(); return; }
+  sessions.unshift({ id:'ring session', status:'running', since:'0:00', at:now(), reply:`Working on: "${text}"` });
+  if (appOpen) showToast('New session started'); log('No query on screen, no session open → new pi session.'); render();
+}
+function ringNotes(text) {
+  const q = queries.find(x=>x.source==='ring');
+  if (q) { answer(q, 'ring answer'); log('Notes gesture cleared the pending ring-profile query (ring-profile checks relatedness).'); }
+  else log('Notes gesture → journal note to ring-profile. Nothing on the watch changes.');
+}
+function clay(){ const d=document.getElementById('clay'); document.getElementById('darkbox').checked = theme==='dark'; d.style.display = d.style.display==='none'?'block':'none'; }
+function saveClay(){ theme = document.getElementById('darkbox').checked ? 'dark' : 'light'; document.getElementById('clay').style.display='none'; log('Clay saved → settings sent to the watch.'); render(); }
+document.addEventListener('keydown', e => {
+  const k = { ArrowUp:'up', ArrowDown:'down', Enter:'select', Escape:'back', Backspace:'back' }[e.key];
+  if (k) { e.preventDefault(); press(k); }
+});
+setInterval(render, 30000);
+render();
+</script>
+</body></html>
