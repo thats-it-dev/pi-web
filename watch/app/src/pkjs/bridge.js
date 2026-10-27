@@ -14,6 +14,7 @@ var NOTICE_MAX = 120;
 var HUB_ERROR_MAX = 40; // the notice box fits about this many characters
 var RETRY_MS = 500;
 var NOTICE_FAIL = "Hub unreachable";
+var EMPTY_TEXT = "New session — send a ring note"; // a session with no turns yet (Home's "+ New session")
 var DARK_KEY = "pi-web.dark";
 var COALESCE = { home: true, net: true, cfg: true, reply: true };
 var NETS = { connecting: true, online: true, offline: true, unconfigured: true };
@@ -249,6 +250,7 @@ function createBridge(deps) {
 	var fetching = null; // the session whose reply is being fetched from the history
 	var gotFrame = false; // a real pending frame has arrived
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
+	var creating = false; // a "+ New session" on its way to the hub
 
 	var queue = [];
 	var inFlight = null;
@@ -494,7 +496,7 @@ function createBridge(deps) {
 				return;
 			}
 			finalText = null;
-			sendReply(sid, text !== null ? text : fallback !== null ? fallback : "", true);
+			sendReply(sid, text !== null ? text : fallback !== null ? fallback : turns.length ? "" : EMPTY_TEXT, true);
 		});
 	}
 
@@ -570,6 +572,17 @@ function createBridge(deps) {
 		});
 	}
 
+	// Home's "+ New session": an empty session in ~/pebble, opened like a session
+	// alert's (the watch opens the reply that follows). Its next ring note is the prompt.
+	function create() {
+		if (creating) return;
+		creating = true;
+		post("/api/watch/new", {}, function (err, json) {
+			creating = false;
+			if (!err && json && json.sessionId) open(str(json.sessionId));
+		});
+	}
+
 	function models(sid) {
 		hub.get("/api/watch/models?session=" + encodeURIComponent(sid), function (err, json) {
 			if (err || !json) {
@@ -628,6 +641,7 @@ function createBridge(deps) {
 		else if (cmd === "models" && sid) models(sid);
 		else if (cmd === "model" && sid) post("/api/watch/model", { sessionId: sid, provider: str(p.PROVIDER), modelId: str(p.MODEL_ID) });
 		else if (cmd === "launched") launched(p);
+		else if (cmd === "new") create();
 		else log("pi-web: unknown command " + cmd);
 	}
 

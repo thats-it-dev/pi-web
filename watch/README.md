@@ -86,9 +86,12 @@ curl -s -XPOST localhost:5173/stub/notice -d '{"text":"Didn'"'"'t catch that"}' 
 curl -s -XPOST localhost:5173/stub/query  -d '{"text":"Ship it?","options":["Yes","No"],"source":"ring-profile"}'
 curl -s -XPOST localhost:5173/stub/dark   -d '{"dark":1}'                          # what /dev/settings reports (read at start)
 curl -s -XPOST localhost:5173/stub/stream -d '{"count":240}'                        # run the open session (typing indicator, then the reply)
+curl -s -XPOST localhost:5173/stub/ring   -d '{"text":"draft the notes"}'           # a ring note, routed as the hub does (spec §5)
 ```
 
 `/stub/stream` (`{sessionId?, ms?, count?}`, defaults: the session on screen, 250, 200) streams a reply the way the real hub does while pi runs (`hub/src/watch.ts`): the session goes to running, a `text` frame with the last 240 characters of a growing reply goes out every `ms`, a pending frame about once a second (the session's `updatedAt` moves), then a final frame and the session is done; its history then ends with the streamed reply. Open a session on the watch first.
+
+Home's "+ New session" row posts `/api/watch/new`; the stub adds an empty session `pebble` (ids `n1`, `n2`, …) whose history has no turns, so the watch shows "New session — send a ring note". `/stub/ring` (`{text}`) then routes a note like the hub's agent webhook: it answers the query on screen (an exact option), else prompts the session on screen (a new session takes the note as its title and streams a short reply), else starts a new session.
 
 **No live streaming.** The phone relays no streamed text (`streaming: true` frames) to the watch (spec §8a). While the open session's STATUS is `r`, the session screen keeps the last finished reply and three dots animate at the header's right end (`text.js` `Dots`: one Port, drawn with `fillColor`, ticking every 500 ms only while the window is up; a tick allocates nothing). When the session leaves running, the phone fetches the last agent turn from the history, as `open` does, and sends it once with the new status; a `streaming: false` frame that came during the run is the fallback if the history fails. Status changes otherwise still send the reply with the last text (`bridge.js` `update`). Over a 70 s stub run with the drawer and Home visited six times, the phone sent 10 reply dicts instead of one per streamed frame.
 
@@ -110,7 +113,7 @@ pebble kill
 
 **Settings (Clay).** Hub URL and Dark theme. With no URL set the emulator uses `http://127.0.0.1:5173`; a real phone reports unconfigured until one is saved.
 
-**Memory.** The VM runs with `stack 6144, slot 45056, chunk 21504` (`src/c/mdbl.c`, mirrored in `manifest.json`). The stack was raised from 5120 because Home's menu is built during the slide transition. The mod archive `build/mods/emery/mc.xsa` is 40,005 B.
+**Memory.** The VM runs with `stack 6144, slot 45056, chunk 21504` (`src/c/mdbl.c`, mirrored in `manifest.json`). The stack was raised from 5120 because Home's menu is built during the slide transition. The mod archive `build/mods/emery/mc.xsa` is 40,230 B.
 
 **Styles stay in the chunk heap.** Piu keeps a style link and a computed Style for every Style instance a content has used, and frees them only in `application.purge()`, which pebble-ui's WindowStack calls after each slide. A screen rebuilt in place (a new reply or status, Home on each home dict) must not make new Styles or StatusBars each time: take styles from `theme.js` `style(font, color)` (one per font and colour) and change strings in place. Rebuilding the session window per streamed reply aborted with `Chunk allocation: 532 bytes failed` / `fxAbort memory full` after about eight replies (`.superpowers/sdd/2026-10-27-watch-ui-rewrite/stream-report.md`). During a slide both windows' screens are up and the heap is nearly full, so a dict that lands then must not allocate much: windows in history keep no screen data (Home drops its menu on leaving) and the text window compares fields instead of building a key string. A dict that lands during a slide is not applied until the slide ends (`main.js` `receive`, held in `onTransitionEnded`; home, reply, net and cfg dicts coalesce to the latest): popping back to Home builds its 12-row menu at the slide's start, and a home dict parsed then, with the text window still up, aborted with `Chunk allocation: 72 bytes failed`. The phone answers Archive with a home dict, so Archive hit it every time on a full list (`archive-typing-report.md`). Check with `/stub/stream`, with the drawer opened and Home visited mid-stream, and by archiving sessions in the `many` scene.
 
@@ -131,7 +134,7 @@ Vite's `/api` proxy (with `ws: true`) adds the `Tailscale-User-Login` header the
 
 - **Internal API** (`hub/src/internal-server.ts`), loopback only, `127.0.0.1:7879` (config `internalPort`), for local services such as the ring profile: `GET /queries`; `POST /queries` with `{label, text, options[], callbackUrl, timeoutMs?}` raises an external query (the outcome is POSTed to `callbackUrl`); `POST /queries/:id/clear-by-ring` with `{text}`. Example: `curl -s -XPOST 127.0.0.1:7879/queries -d '{"label":"ring · follow-up","text":"test?","options":["A","B"],"callbackUrl":"http://127.0.0.1:9/x"}'`.
 - **Queries** are held by `QueryStore` (`hub/src/queries.ts`). A voice note from the ring (agent webhook, `index-webhook.ts`) answers only the query on screen, else prompts the open session, else starts a new session; unmatched notes get the notices "Didn't catch that" / "Already answered".
-- **Watch API:** `/api/watch/{answer,skip,showing,abort,archive,launch-target}` plus the stream and settings endpoints.
+- **Watch API:** `/api/watch/{answer,skip,showing,abort,archive,new,launch-target}` (`new`: an empty session in `~/pebble`, for Home's "+ New session") plus the stream and settings endpoints.
 - **`watchAlert`** (hub config; `hub/src/notifier.ts`) decides how a closed watch app is alerted: `auto` (default behaviour: a Developer Connection BlobDB notification first, the PWA Web Push as fallback), `notification`, `push`, or `off`. One alert per event; push bodies carry the details.
 
 ### Pebble app setup (watchapp)

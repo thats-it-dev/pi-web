@@ -465,6 +465,56 @@ test("continue, stop, model post to the hub; archive drops the row", () => {
 	assert.deepEqual(rowsOf(home).map((r) => r[0]), ["s2"]);
 });
 
+test("new posts /api/watch/new once, then opens the new session with a placeholder reply", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "new" });
+	t.bridge.onAppMessage({ CMD: "new" }); // a second press while the first is on its way
+	assert.deepEqual(t.hub.of("post").map((c) => [c.path, c.body]), [["/api/watch/new", {}]]);
+	t.hub.reply(null, { ok: true, sessionId: "n1" }, "/api/watch/new");
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/history?session=n1&limit=6");
+	// The hub's pending frame with the new session lands before its (empty) history.
+	t.pend([], [sess("n1", "done", { title: "pebble" }), sess("s1", "done")]);
+	t.hub.reply(null, { turns: [], total: 0 });
+	t.drain();
+	const r = t.last("reply");
+	assert.equal(r.SESSION_ID, "n1");
+	assert.equal(r.TEXT, "New session — send a ring note");
+	assert.equal(r.LABEL, "pebble");
+	assert.equal(r.STATUS, "d");
+	// Pressed again later: another session.
+	t.bridge.onAppMessage({ CMD: "new" });
+	assert.equal(t.hub.of("post", "/api/watch/new").length, 2);
+});
+
+test("a failed new posts a notice and opens nothing; the next press tries again", () => {
+	const t = setup();
+	t.bridge.onAppMessage({ CMD: "new" });
+	const e = new Error("hub answered 503");
+	e.status = 503;
+	e.hubError = "6 pi sessions are already running. Close one first.";
+	t.hub.reply(e, undefined, "/api/watch/new");
+	t.drain();
+	assert.equal(t.all("reply").length, 0);
+	assert.equal(t.hub.of("get").length, 0);
+	assert.ok(t.last("notice"));
+	t.bridge.onAppMessage({ CMD: "new" });
+	assert.equal(t.hub.of("post", "/api/watch/new").length, 2);
+});
+
+test("a session with no turns at all opens with the placeholder; one with only a prompt is blank", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done"), sess("s2", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [], total: 0 });
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "New session — send a ring note");
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s2" });
+	t.hub.reply(null, { turns: [{ i: 0, role: "you", text: "hi" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("reply").TEXT, "");
+});
+
 test("models fetches the catalogue and sends provider/id/name rows", () => {
 	const t = setup();
 	t.bridge.onAppMessage({ CMD: "models", SESSION_ID: "s1" });

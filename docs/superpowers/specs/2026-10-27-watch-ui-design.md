@@ -281,6 +281,7 @@ After the first on-watch test:
 - **Bigger Home text:** title Gothic 24 Bold, status line Gothic 18 Bold, row height about 56 px. Nothing under 18 px on Home.
 - **No live streaming** (Michael, after a second on-watch test). While a session runs, the session screen keeps the last finished agent reply and shows a "…" typing indicator. The new reply replaces it once the turn has finished. The phone doesn't relay streamed text to the watch.
 - **Home memory:** each row is one drawn Port, not four contents. This fixes "memory full" with 12 rows (headroom: 17 rows).
+- **"+ New session" row** (Michael's call). Home's first row is "+ New session", drawn by the same one-Port row (title only, no status line or dot); it isn't a session and counts in nothing. Select creates an **empty** pi session in `~/pebble` (no prompt; the same folder and model choice as `startRingSession`, via `POST /api/watch/new`) and opens it, with "New session — send a ring note" in place of a reply. The watch reports it as shown, so §5's routing sends the next ring note to it as its first prompt. Home's cursor still starts on the first session (a waiting one first), so "+" is one Up away; with no sessions the list is just that row. A new session the hub reaps while idle (`idleMinutes`) before any note was sent has nothing to reopen, so the next note starts a fresh ring session instead.
 
 ## 9. Decided vs. left to the builder
 

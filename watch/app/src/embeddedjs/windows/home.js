@@ -1,7 +1,7 @@
-// Home: the session list (spec §4.1) under the clock bar. One row per
-// session: the title, a status line and, for running and waiting sessions, a status dot; the selected row is
-// amber with black text and a black outline round its dot. With no rows, or
-// no hub, one full-screen line instead.
+// Home: the session list (spec §4.1) under the clock bar. First a "+ New
+// session" row, then one row per session: the title, a status line and, for
+// running and waiting sessions, a status dot; the selected row is amber with
+// black text and a black outline round its dot. With no hub, one full-screen line instead.
 import { FONT_KEY, STATUS_BAR_LAYER_HEIGHT as BAR } from "pebble-ui/sdk";
 import View from "pebble-ui/View";
 import Menu, { TITLE_INSET } from "pebble-ui/Menu";
@@ -16,6 +16,7 @@ const DOT = 10;
 const DOT_RIGHT = 12; // from the screen's edge
 const RUNNING = "#0055AA"; // dots are the same in both themes
 const STATUS = { w: "Waiting · approval", r: "Running", d: "Done", e: "Error" };
+const NEW = { id: "", title: "+ New session" }; // the first row (spec §8a); not a session
 
 const stack = () => WindowStack.current;
 
@@ -27,8 +28,7 @@ function subLine(row) {
 function message(m) {
 	if (m.net === "unconfigured") return "Set the hub URL in the Pebble app";
 	if (m.net === "offline") return "Hub unreachable";
-	if (m.home.length) return null;
-	return m.net === "connecting" ? "" : "No sessions";
+	return m.home.length || m.net !== "connecting" ? null : "";
 }
 
 // A filled circle, one row of pixels at a time (crisp, as the firmware draws it).
@@ -66,7 +66,7 @@ class RowBehavior extends Behavior {
 	}
 	onDraw(port) {
 		const state = this.state, menu = this.menu, styles = menu.styles, row = this.row;
-		port.drawStyle(row.title, styles[0], TITLE_INSET, 2, TEXT_W, 28, false, state);
+		port.drawStyle(row.title, styles[0], TITLE_INSET, row.id ? 2 : 14, TEXT_W, 28, false, state);
 		port.drawStyle(subLine(row), styles[1], TITLE_INSET, 30, TEXT_W, 22, false, state);
 		if (row.status !== "r" && row.status !== "w")
 			return; // done and error rows have no dot
@@ -156,9 +156,11 @@ class HomeBehavior extends View.Behavior {
 			screen.add(this.box);
 	}
 	addMenu(screen, view, m, p) {
-		const index = m.home.findIndex(row => row.id === view.selected);
+		// The cursor starts on the first session (a waiting one, if any: the phone
+		// sends those first), or on the session last selected; "+" is one Up away.
+		const items = [NEW].concat(m.home), index = view.selected ? items.findIndex(row => row.id === view.selected) : -1;
 		const menu = view.menu = new Menu({
-			items: m.home, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? 0 : index,
+			items, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? Math.min(1, m.home.length) : index,
 			normal: [p.bg, p.fg], highlight: [AMBER, BLACK], onSelect: open,
 		});
 		menu.styles = [style(FONT_KEY.GOTHIC_24_BOLD, [p.fg, BLACK]), style(FONT_KEY.GOTHIC_18_BOLD, [p.sub, BLACK])];
@@ -168,10 +170,16 @@ class HomeBehavior extends View.Behavior {
 	}
 }
 
-// Select: the session's pending query when it is the current one, else the session.
+// Select: "+" asks the phone for a new session, which it opens as a session
+// alert's (main.js launch); the session's pending query when it is the current
+// one; else the session.
 function open(index, row) {
 	const s = stack(), query = s.model.query;
-	if (row.status === "w" && query && query.sessionId === row.id)
+	if (!row.id) {
+		s.sessionUntil = Date.now() + 15000;
+		s.link.send("new");
+	}
+	else if (row.status === "w" && query && query.sessionId === row.id)
 		s.open("query", query.id);
 	else {
 		s.link.send("open", { SESSION_ID: row.id });

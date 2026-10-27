@@ -15,6 +15,10 @@
 // then ends with the streamed reply. sessionId defaults to the one on screen; a second stream on
 // a session replaces the first. The phone relays no streamed text: the watch shows a typing
 // indicator while the session runs and gets the reply from the history when the run ends.
+// POST /api/watch/new (Home's "+ New session") adds an empty session "pebble" (id n1, n2, …) whose
+// history has no turns until it is prompted. POST /stub/ring {text} stands in for a ring note and
+// routes it as the hub does (spec §5): it answers the query on screen, else prompts the session on
+// screen (which then streams a short reply), else starts a new session with it.
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -139,6 +143,9 @@ let [sessions, queries] = SCENES[SCENE]().map((list) => list.map((x) => ({ ...x 
 let cursor = 1;
 let showing = null;
 let nextQuery = 3;
+let nextNew = 1;
+const fresh = new Set(); // sessions from /api/watch/new not prompted yet: no turns
+const prompts = new Map(); // session id -> its last prompt, the "you" turn of its history
 const waiters = new Set();
 const sockets = new Set();
 const streams = new Map(); // session id -> interval timer
@@ -214,6 +221,52 @@ function startStream(s, ms, count) {
 	console.log(`stream ${s.id}: ${count} frames every ${ms} ms`);
 }
 
+// --- New sessions and ring notes --------------------------------------------
+
+// An empty session in ~/pebble, titled after its folder as the hub's are.
+function newSession() {
+	const s = { ...session("n" + nextNew++, "pebble", "done", 0), updatedAt: Date.now() };
+	sessions = [s, ...sessions];
+	fresh.add(s.id);
+	changed();
+	return s;
+}
+
+// A prompt runs the session. A new session's first prompt becomes its title and it
+// streams a short reply (/stub/stream); others just run, as before.
+function prompt(s, text) {
+	prompts.set(s.id, text);
+	if (fresh.delete(s.id)) {
+		s.title = text.slice(0, 40);
+		startStream(s, 250, 12);
+	} else {
+		Object.assign(s, { status: "running", state: "running", updatedAt: Date.now() });
+		changed();
+	}
+}
+
+// Spec §5, as hub/src/index-webhook.ts decide(): the query on screen, else the session on screen, else a new session.
+function ring(text) {
+	if (showing && showing.queryId) {
+		const qy = queries.find((x) => x.id === showing.queryId);
+		const option = qy && qy.options.find((o) => o.toLowerCase() === text.trim().toLowerCase());
+		if (!option) {
+			broadcast({ type: "notice", text: qy ? "Didn't catch that" : "Already answered" });
+			return { action: qy ? "no_match" : "gone" };
+		}
+		removeQuery(qy.id);
+		return { action: "answered", queryId: qy.id };
+	}
+	const open = showing && sessions.find((x) => x.id === showing.sessionId);
+	if (open) {
+		prompt(open, text);
+		return { action: "prompted", sessionId: open.id };
+	}
+	const s = newSession();
+	prompt(s, text);
+	return { action: "new_session", sessionId: s.id };
+}
+
 // --- HTTP -------------------------------------------------------------------
 
 function json(res, status, body) {
@@ -262,8 +315,9 @@ async function handle(req, res) {
 			const id = q.get("session");
 			const s = sessions.find((x) => x.id === id) || (id === ERRORED.id && ERRORED);
 			if (!s) return json(res, 404, { error: "Session not found" });
+			if (fresh.has(id)) return json(res, 200, { turns: [], total: 0 });
 			const turns = [
-				{ i: 0, role: "you", text: "Go on." },
+				{ i: 0, role: "you", text: prompts.get(id) ?? "Go on." },
 				{ i: 1, role: "tool", text: "bash · npm test" },
 				{ i: 2, role: "agent", text: streamed.get(id) ?? REPLIES[id] ?? (id.startsWith("m") ? LONG_REPLY(s.title) : "Done.") },
 			];
@@ -315,12 +369,11 @@ async function handle(req, res) {
 		}
 		if (path === "/api/watch/prompt") {
 			const s = sessions.find((x) => x.id === body.sessionId);
-			if (s) {
-				Object.assign(s, { status: "running", state: "running", updatedAt: Date.now() });
-				changed();
-			}
+			if (s) prompt(s, body.text);
 			return json(res, 200, { ok: true });
 		}
+		if (path === "/api/watch/new") return json(res, 200, { ok: true, sessionId: newSession().id });
+		if (path === "/stub/ring") return json(res, 200, ring(String(body.text || "what's next?")));
 		if (path === "/api/watch/model") return json(res, 200, { ok: true });
 		if (path === "/stub/notice") {
 			broadcast({ type: "notice", text: body.text || "Didn't catch that" });
