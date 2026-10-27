@@ -286,6 +286,12 @@ A query that is pending but not on screen is never answered (Review Focus 4).
 - Produces:
   - `notificationFrame(input: { appUuid: string; itemId: string; title: string; body: string; launchCode: number; time: number }): Uint8Array`, matching the Task 1 fixture byte for byte;
   - `class Notifier { constructor(deps: { mode: "auto" | "notification" | "push" | "off"; appUuid: string; phone: () => string | null; appOpen: () => boolean; send?: (host: string, frame: Uint8Array) => Promise<boolean>; push: (p: PushPayload) => Promise<boolean>; markDelivered: (queryId: string) => void; log?: (m: string) => void }); query(q: WatchQuery): Promise<void>; turn(a: { sessionId: string; kind: "finished" | "error"; title: string; text: string }): Promise<void> }`. `PushStore.send` returns whether at least one subscription answered 2xx.
+  - **Detailed PWA pushes** (Michael, 2026-10-27; also covers the existing `watchPush` pushes from `hub/src/push-watch.ts`):
+    - `PushPayload` gains an optional `body: string`, clipped to 160 chars with "…".
+    - `watchPush` fills it per turn kind: for `needs_you`, the waiting dialog's title plus message (as `dialogMessage` builds it in watch.ts); for `finished`, the start of the agent's final reply (`o.text`); for `error`, the error text.
+    - `sw.js` shows `p.body` when it's a non-empty string, else today's `PUSH_BODY[p.kind]`. Its tests or a small pure helper cover both.
+    - ring-profile query pushes send `body: "Question waiting"`, never the question.
+    - Tests: `push body carries the dialog message for needs_you`; `push body is the reply excerpt for finished, clipped to 160`; `sw falls back to PUSH_BODY without body`.
   - Turn alerts: **only through the notification frame**. When it falls back to push, skip it, because `watchPush` already pushes finished/error turns, and pushing twice would double-buzz.
 
 Launch codes: a 32-bit integer. The high bit set means a session alert; the low 31 bits index a small table `launchTargets: Map<number, { queryId } | { sessionId }>` that the Notifier keeps (last 32 entries). The watch sends the code back on launch (Task 9), and pkjs resolves it with `GET /api/watch/launch-target?code=N`, which returns `{queryId} | {sessionId} | 404`.
