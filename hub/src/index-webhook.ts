@@ -96,14 +96,25 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
 	});
 }
 
-// Spec §10: answer what the watch is showing, else start a session in ~/pebble.
-async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, "action" | "sessionId" | "requestId" | "reason">> {
+// Spec §5: answer the query the watch is showing, else prompt the session it
+// has open, else start a session in ~/pebble. A pending query that is not on
+// screen is never answered.
+async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, "action" | "sessionId" | "queryId" | "reason">> {
 	if (!text) return { action: "kept_audio" };
-	const target = watch.currentTarget();
-	if (!target) return { action: "new_session", sessionId: await watch.startRingSession(text) };
-	const r = await watch.answer(target.requestId, { text });
-	if (r.ok) return { action: "answered", requestId: target.requestId };
-	return { action: "no_match", requestId: target.requestId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
+	const shown = watch.onScreen();
+	if (shown?.queryId) {
+		const r = await watch.answer(shown.queryId, { text });
+		if (r.ok) return { action: "answered", queryId: shown.queryId };
+		if (r.reason === "no_match") {
+			watch.notice("Didn't catch that");
+			return { action: "no_match", queryId: shown.queryId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
+		}
+	}
+	if (shown?.sessionId) {
+		const r = await watch.prompt(shown.sessionId, text);
+		if (r.ok) return { action: "prompted", sessionId: shown.sessionId };
+	}
+	return { action: "new_session", sessionId: await watch.startRingSession(text) };
 }
 
 export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {

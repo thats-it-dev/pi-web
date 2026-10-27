@@ -171,7 +171,7 @@ test("a test event is 200 with an empty body and writes nothing", async () => {
 	assert.ok(logs.includes("index: test event ok"));
 });
 
-test("with a dialog showing, the transcription answers it", async () => {
+test("on-screen pi query + \"yes\" answers it", async () => {
 	const { h, requestId } = await raise();
 	watch.showing({ queryId: requestId, sessionId: h.sessionId });
 	const b = multipart({ transcription: " allow \n", recordedAt: "1700000000000", client: "ios" });
@@ -180,7 +180,7 @@ test("with a dialog showing, the transcription answers it", async () => {
 	assert.ok(h.received.some((c) => c.type === "dialog_response" && (c as { value?: string }).value === "allow"));
 	const j = sidecar(s.delivery);
 	assert.equal(j.action, "answered");
-	assert.equal(j.requestId, requestId);
+	assert.equal(j.queryId, requestId);
 	assert.equal(j.transcription, "allow");
 	assert.equal(j.client, "ios");
 	assert.equal(j.headers.signature, undefined);
@@ -188,7 +188,7 @@ test("with a dialog showing, the transcription answers it", async () => {
 	watch.showing({ queryId: null, sessionId: null });
 });
 
-test("with nothing pending, a session is created in <home>/pebble (folder made) and the transcription is its first prompt", async () => {
+test("nothing on screen → new session: a session is created in <home>/pebble (folder made) and the transcription is its first prompt", async () => {
 	const before = created.length;
 	const b = multipart({ transcription: "what is the weather" });
 	const s = signed(b);
@@ -203,19 +203,65 @@ test("with nothing pending, a session is created in <home>/pebble (folder made) 
 	assert.equal(j.sessionId, h.sessionId);
 });
 
-test("a transcription that matches no option is logged and nothing reaches pi", async () => {
+test("on-screen pi query + unmatched text keeps it and emits a notice frame", async () => {
 	const { h, requestId } = await raise();
 	watch.showing({ queryId: requestId, sessionId: h.sessionId });
+	const frames: unknown[] = [];
+	const off = watch.subscribe((f) => frames.push(f));
 	const b = multipart({ transcription: "banana" });
 	const s = signed(b);
 	assert.equal((await post(port, s.headers, b)).status, 200);
+	off();
+	assert.deepEqual(frames.filter((f) => (f as { type: string }).type === "notice"), [{ type: "notice", text: "Didn't catch that" }]);
+	assert.ok(watch.pending().queries.some((q) => q.id === requestId));
 	assert.equal(h.received.filter((c) => c.type === "dialog_response").length, 0);
 	const j = sidecar(s.delivery);
 	assert.equal(j.action, "no_match");
-	assert.equal(j.requestId, requestId);
+	assert.equal(j.queryId, requestId);
 	assert.equal(typeof j.reason, "string");
 	assert.ok(logs.includes(`index: ${s.delivery} no_match (options: allow, deny)`));
 	watch.showing({ queryId: null, sessionId: null });
+	settle(h);
+});
+
+test("on-screen ring-profile query + text resolves ring-answer", async () => {
+	const outcomes: unknown[] = [];
+	const q = watch.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: (o) => outcomes.push(o) });
+	watch.showing({ queryId: q.id, sessionId: null });
+	const b = multipart({ transcription: "go ahead" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.deepEqual(outcomes, [{ kind: "ring-answer", text: "go ahead" }]);
+	assert.equal(sidecar(s.delivery).action, "answered");
+	watch.showing({ queryId: null, sessionId: null });
+});
+
+test("open session, no query on screen → prompt to that session", async () => {
+	const h = (await registry.create("/work/open")) as FakeHandle;
+	watch.showing({ queryId: null, sessionId: h.sessionId });
+	const before = created.length;
+	const b = multipart({ transcription: "and then?" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before);
+	assert.deepEqual(h.received, [{ type: "prompt", text: "and then?", mode: "send" }]);
+	const j = sidecar(s.delivery);
+	assert.equal(j.action, "prompted");
+	assert.equal(j.sessionId, h.sessionId);
+	watch.showing({ queryId: null, sessionId: null });
+});
+
+test("pending query not on screen + nothing open → new session, query untouched", async () => {
+	const { h, requestId } = await raise();
+	watch.showing({ queryId: null, sessionId: null });
+	const before = created.length;
+	const b = multipart({ transcription: "allow" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before + 1);
+	assert.equal(h.received.filter((c) => c.type === "dialog_response").length, 0);
+	assert.ok(watch.pending().queries.some((q) => q.id === requestId));
+	assert.equal(sidecar(s.delivery).action, "new_session");
 	settle(h);
 });
 

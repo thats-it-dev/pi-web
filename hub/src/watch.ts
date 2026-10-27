@@ -24,7 +24,6 @@ import { watchTurns } from "./turns.ts";
 import { closedSession, liveSession, turnsFrom } from "./watch-sessions.ts";
 
 const MESSAGE_MAX = 240;
-const LAST_SHOWN_MAX = 10;
 const WAIT_MS = 25_000;
 const CLOSED_MAX = 20;
 const HISTORY_LIMIT = 12;
@@ -91,7 +90,6 @@ export class WatchService {
 	private alertFns = new Set<(a: TurnAlert) => void>();
 	private created = new Map<string, number>(); // query id → first seen
 	private showingState: ShowingState | null = null;
-	private lastShown: string[] = []; // most recent last
 	private offs: (() => void)[];
 	private tracked = new Map<SessionHandle, Tracked>();
 	private closedFiles: FileSummary[] = []; // the index as last read, newest first
@@ -179,7 +177,6 @@ export class WatchService {
 		const prev = this.showingState;
 		this.showingState = queryId || sid ? { queryId, sessionId: sid, at: this.now() } : null;
 		if (queryId) {
-			this.lastShown = [...this.lastShown.filter((id) => id !== queryId), queryId].slice(-LAST_SHOWN_MAX);
 			this.queries.markDelivered(queryId);
 		}
 		if (prev?.queryId !== this.showingState?.queryId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
@@ -294,15 +291,9 @@ export class WatchService {
 		return { current: snap.state.model ? row(snap.state.model) : null, models: snap.models.map(row) };
 	}
 
-	// Index 01's routing target (spec §10 step 3).
-	currentTarget(): { requestId: string; sessionId: string } | null {
-		const queries = this.pending().queries;
-		const candidates = [this.showingState?.queryId, ...[...this.lastShown].reverse()];
-		for (const id of candidates) {
-			const r = id ? queries.find((x) => x.id === id) : undefined;
-			if (r?.sessionId) return { requestId: r.id, sessionId: r.sessionId };
-		}
-		return null;
+	// A short line for the watch to flash, sent to stream subscribers.
+	notice(text: string): void {
+		for (const s of [...this.subscribers]) s({ type: "notice", text });
 	}
 
 	// A voice note with nothing to answer starts a session in ~/pebble (spec §10).
@@ -350,7 +341,6 @@ export class WatchService {
 		const ids = new Set(present.map((r) => r.id));
 		for (const id of this.dismissed) if (!ids.has(id)) this.dismissed.delete(id);
 		for (const id of this.created.keys()) if (!ids.has(id)) this.created.delete(id);
-		this.lastShown = this.lastShown.filter((id) => ids.has(id));
 		if (this.showingState?.queryId && !ids.has(this.showingState.queryId)) this.showingState = null;
 		return present;
 	}

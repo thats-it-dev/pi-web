@@ -406,25 +406,26 @@ test("wait returns at once when the cursor is already past since; a burst bumps 
 	svc.close();
 });
 
-test("showing is remembered and cleared when its query ends; currentTarget falls back to the most recently shown pending request", async () => {
+test("showing is remembered and cleared when its query ends", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
 	raise(h, push);
-	raise(h, { id: "c1", method: "confirm", title: "Proceed?" });
-	assert.equal(svc.currentTarget(), null);
-	svc.showing({ queryId: "dialog:s-1:c1", sessionId: null });
 	svc.showing({ queryId: "dialog:s-1:d1", sessionId: "s-1" });
 	assert.equal(svc.pending().showing?.queryId, "dialog:s-1:d1");
-	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:d1", sessionId: "s-1" });
 	svc.showing({ queryId: null, sessionId: null });
 	assert.equal(svc.pending().showing, null);
-	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:d1", sessionId: "s-1" });
 	svc.showing({ queryId: "dialog:s-1:d1", sessionId: null });
 	settle(h, "d1");
 	assert.equal(svc.pending().showing, null);
-	assert.deepEqual(svc.currentTarget(), { requestId: "dialog:s-1:c1", sessionId: "s-1" });
-	settle(h, "c1");
-	assert.equal(svc.currentTarget(), null);
+	svc.close();
+});
+
+test("notice goes to stream subscribers as a notice frame", async () => {
+	const { svc } = setup();
+	const got: unknown[] = [];
+	svc.subscribe((f) => got.push(f));
+	svc.notice("hi");
+	assert.deepEqual(got, [{ type: "notice", text: "hi" }]);
 	svc.close();
 });
 
@@ -436,7 +437,6 @@ test("a handle exit with a dialog showing ends the request and clears showing", 
 	registry.close("s-1");
 	assert.deepEqual(svc.pending().queries, []);
 	assert.equal(svc.pending().showing, null);
-	assert.equal(svc.currentTarget(), null);
 	svc.close();
 });
 
