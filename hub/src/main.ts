@@ -9,12 +9,14 @@ import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { createInternalServer } from "./internal-server.ts";
 import { LastModelStore } from "./last-model.ts";
 import { ModelCatalog } from "./model-catalog.ts";
+import { Notifier } from "./notifier.ts";
 import { PushStore } from "./push.ts";
 import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
 import { gitUpdater } from "./update.ts";
+import { sendToPhone } from "./watch-launch.ts";
 import { attachWatchStream } from "./watch-stream.ts";
 import { WatchService } from "./watch.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
@@ -49,6 +51,20 @@ const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0
 const viewers = new Viewers();
 watchPush(registry, (p) => void push.send(p), viewers);
 const watch = new WatchService({ registry, index, viewers, home: homedir(), catalog, lastModel });
+// Alerts for a closed watch app: a notification through the phone, else a Web Push.
+const WATCH_APP_UUID = "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b";
+const notifier = new Notifier({
+	mode: cfg.watchAlert,
+	appUuid: WATCH_APP_UUID,
+	phone: () => watch.phone,
+	appOpen: () => stream.clientCount() > 0,
+	send: async (host, frame) => (await sendToPhone(host, frame)).ok,
+	push: (p) => push.send(p),
+	markDelivered: (id) => watch.queries.markDelivered(id),
+	log: (m) => console.log(m),
+});
+watch.onNewQuery((q) => void notifier.query(q));
+watch.onTurnAlert((a) => void notifier.turn(a));
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
 	bridge = await startBridgeServer({ socketPath: join(cfg.dataDir, "bridge.sock"), registry, log: (m) => console.log(m) });
@@ -59,7 +75,7 @@ try {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel });
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, launchTarget: (c) => notifier.launchTarget(c) });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);

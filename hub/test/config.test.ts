@@ -30,3 +30,13 @@ test("dev mode adds the Vite dev origin", () => {
 	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "localhost:5173", allowedLogin: "dev@local", dev: true }));
 	assert.ok(loadConfig(dir).allowedOrigins.includes("http://localhost:5173"));
 });
+
+test("watchAlert defaults to auto and rejects an unknown mode", () => {
+	const dir = tmp();
+	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github" }));
+	assert.equal(loadConfig(dir).watchAlert, "auto");
+	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github", watchAlert: "push" }));
+	assert.equal(loadConfig(dir).watchAlert, "push");
+	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github", watchAlert: "sms" }));
+	assert.throws(() => loadConfig(dir), ConfigError);
+});

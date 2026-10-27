@@ -12,6 +12,7 @@ export interface WatchRouteDeps {
 	version: string;
 	fetchFn?: typeof fetch;
 	launchFn?: typeof launchOnPhone;
+	launchTarget?: (code: number) => { queryId: string } | { sessionId: string } | null;
 	now?: () => number;
 	log?: (m: string) => void;
 }
@@ -66,6 +67,14 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 			const session = q.get("session");
 			if (!session) throw new HttpError(400, "A session is required");
 			return reply(await watch.models(session)), true;
+		}
+		if (p === "/api/watch/launch-target") {
+			const raw = q.get("code");
+			const code = raw !== null && /^\d{1,10}$/.test(raw) ? Number(raw) : NaN;
+			if (!Number.isInteger(code) || code > 0xffffffff) throw new HttpError(400, "A code is required");
+			const target = deps.launchTarget?.(code);
+			if (!target) throw new HttpError(404, "No such launch target");
+			return reply(target), true;
 		}
 		if (p === "/api/watch/health") return reply({ ok: true, hubVersion: deps.version, sessions: watch.health() }), true;
 		if (p === "/api/watch/weather") return reply(await weather(watch, q.get("lat"), q.get("lon"), deps)), true;

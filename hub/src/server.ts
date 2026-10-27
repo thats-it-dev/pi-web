@@ -40,6 +40,7 @@ export interface HubDeps {
 	images?: ImageStore; // image bytes by ref; absent means a private store
 	fetchFn?: typeof fetch; // the weather proxy's upstream; tests stub it
 	launchFn?: typeof launchOnPhone; // watch launch relay; tests stub it
+	launchTarget?: (code: number) => { queryId: string } | { sessionId: string } | null; // what a notification's launch code meant (Notifier)
 	catalog?: Pick<ModelCatalog, "get">; // models for /api/defaults and new sessions; absent means none known
 	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
 	now?: () => number;
@@ -288,7 +289,7 @@ export function createHubServer(deps: HubDeps): Server {
 				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
 				deps.watch.notePhone(req.headers, req.socket.remoteAddress);
 				const url = new URL(req.url ?? "/", "http://hub");
-				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, launchFn: deps.launchFn, now: deps.now, log }))) throw new HttpError(404, "Not found");
+				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, fetchFn: deps.fetchFn, launchFn: deps.launchFn, launchTarget: deps.launchTarget, now: deps.now, log }))) throw new HttpError(404, "Not found");
 				return;
 			}
 			if (req.method === "POST" && path === "/api/index/webhook") {

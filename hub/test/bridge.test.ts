@@ -51,6 +51,7 @@ async function setup(t: TestContext) {
 		piBin: env.piBin,
 		dev: false,
 		approvalMode: "manual",
+	watchAlert: "auto",
 		dataDir: env.root,
 	};
 	const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: env.workDir, log: () => {} });

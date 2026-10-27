@@ -51,9 +51,12 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "idleMinutes": 20,
   "maxHeadless": 6,
   "piBin": "pi",
-  "approvalMode": "auto"
+  "approvalMode": "auto",
+  "watchAlert": "auto"
 }
 ```
+
+`watchAlert` is how the hub alerts the Pebble watch when its app is closed: `auto` (default) sends a notification with an Open action through the phone's Developer Connection and, if the phone is unreachable (the Pebble app must be in the foreground on iOS), falls back to a Web Push; `notification` and `push` use only one of those; `off` sends nothing.
 
 `approvalMode` is the approval mode new app-started sessions begin in; the session settings sheet in the app (the sliders next to the model) changes it per session. While a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed:
 

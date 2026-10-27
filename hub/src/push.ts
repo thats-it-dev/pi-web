@@ -1,6 +1,6 @@
 // Web Push for the hub (spec §5.5): VAPID keys made once, the browsers that
 // subscribed, and fan-out. web-push builds the encrypted request; we send it.
-// Sending never throws: a dead subscription (404/410) is dropped, anything
+// Sending never throws and says whether anyone answered 2xx: a dead subscription (404/410) is dropped, anything
 // else is logged.
 
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -64,12 +64,14 @@ export class PushStore {
 		this.save();
 	}
 
-	async send(payload: PushPayload): Promise<void> {
+	// True when at least one subscription answered 2xx.
+	async send(payload: PushPayload): Promise<boolean> {
 		const body = JSON.stringify(payload);
-		await Promise.all(this.subs.map((s) => this.sendOne(s, body)));
+		const results = await Promise.all(this.subs.map((s) => this.sendOne(s, body)));
+		return results.some(Boolean);
 	}
 
-	private async sendOne(sub: PushSubscriptionInfo, payload: string): Promise<void> {
+	private async sendOne(sub: PushSubscriptionInfo, payload: string): Promise<boolean> {
 		const where = hostOf(sub.endpoint);
 		try {
 			const req = webpush.generateRequestDetails(sub, payload, {
@@ -82,11 +84,13 @@ export class PushStore {
 			if (res.status === 404 || res.status === 410) {
 				this.log(`push: ${where} dropped a subscription (${res.status}); removed it`);
 				this.unsubscribe(sub.endpoint);
-				return;
+				return false;
 			}
 			if (!res.ok) this.log(`push: ${where} answered ${res.status}`);
+			return res.ok;
 		} catch (err) {
 			this.log(`push: sending to ${where} failed: ${(err as Error).message}`);
+			return false;
 		}
 	}
 

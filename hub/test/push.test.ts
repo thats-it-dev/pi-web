@@ -126,3 +126,13 @@ test("isSubscription accepts browser subscriptions and nothing else", () => {
 		assert.equal(isSubscription(bad), false, JSON.stringify(bad));
 	}
 });
+
+test("send says whether any subscription answered 2xx", async () => {
+	const { push } = store();
+	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), false);
+	push.subscribe(sub("/bad2"));
+	statuses.set("/bad2", 500);
+	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), false);
+	push.subscribe(sub("/ok2"));
+	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), true);
+});

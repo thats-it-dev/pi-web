@@ -29,6 +29,7 @@ const cfg: HubConfig = {
 	piBin: "pi",
 	dev: false,
 	approvalMode: "manual",
+	watchAlert: "auto",
 	dataDir: root,
 };
 const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };
@@ -261,5 +262,23 @@ test("notePhone prefers the first X-Forwarded-For entry, strips ::ffff:", () => 
 		assert.equal(w.phone, "100.64.0.7");
 	} finally {
 		w.close();
+	}
+});
+
+test("launch-target resolves a code through launchTarget, 404 for an unknown one, 400 for junk", async () => {
+	const w = new WatchService({ registry, index, viewers: new Viewers(), home: root });
+	const launchTarget = (c: number) => (c === 7 ? { queryId: "rp:1" } : c === 0x80000003 ? { sessionId: "s-9" } : null);
+	const s = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch: w, launchTarget });
+	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+	const p = (s.address() as AddressInfo).port;
+	try {
+		assert.deepEqual((await call(p, "GET", "/api/watch/launch-target?code=7", WATCH)).body, { queryId: "rp:1" });
+		assert.deepEqual((await call(p, "GET", `/api/watch/launch-target?code=${0x80000003}`, WATCH)).body, { sessionId: "s-9" });
+		assert.equal((await call(p, "GET", "/api/watch/launch-target?code=8", WATCH)).status, 404);
+		for (const q of ["", "?code=abc", "?code=-1", "?code=99999999999"]) assert.equal((await call(p, "GET", `/api/watch/launch-target${q}`, WATCH)).status, 400);
+		assert.equal((await call(p, "GET", "/api/watch/launch-target?code=7", { ...WATCH, "tailscale-user-login": undefined })).status, 403);
+	} finally {
+		w.close();
+		s.close();
 	}
 });

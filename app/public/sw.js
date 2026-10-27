@@ -55,8 +55,8 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith(fromNetwork().catch(() => caches.match(req).then((hit) => hit || Response.error())));
 });
 
-// Push (spec §5.5). The payload is { sessionId, title, kind } and nothing else.
-const PUSH_BODY = { finished: "Finished.", needs_you: "Needs you.", error: "Stopped with an error." };
+// Push (spec §5.5). The payload is { sessionId, title, kind } and optionally a short body line.
+const PUSH_BODY = { finished: "Finished.", needs_you: "Needs you.", error: "Stopped with an error.", query: "Question waiting" };
 
 self.addEventListener("push", (event) => {
 	let p = {};
@@ -65,7 +65,8 @@ self.addEventListener("push", (event) => {
 	} catch {}
 	const sessionId = typeof p.sessionId === "string" ? p.sessionId : "";
 	const title = typeof p.title === "string" && p.title ? p.title : "pi";
-	const body = typeof p.kind === "string" && Object.hasOwn(PUSH_BODY, p.kind) ? PUSH_BODY[p.kind] : "Something happened.";
+	const stock = typeof p.kind === "string" && Object.hasOwn(PUSH_BODY, p.kind) ? PUSH_BODY[p.kind] : "Something happened.";
+	const body = typeof p.body === "string" && p.body ? p.body : stock;
 	event.waitUntil(self.registration.showNotification(title, { body, tag: sessionId || "pi-web", renotify: true, data: { sessionId }, icon: "/icons/icon-192.png" }));
 });
 

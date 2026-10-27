@@ -290,13 +290,14 @@ export interface UpdateResult {
 	restarting: boolean;
 }
 
-// Web Push (spec §5.5). The payload names the session and why, and nothing more.
-export type PushKind = "finished" | "needs_you" | "error";
+// Web Push (spec §5.5). The payload names the session, why, and optionally a line of detail.
+export type PushKind = "finished" | "needs_you" | "error" | "query";
 
 export interface PushPayload {
 	sessionId: string;
 	title: string;
 	kind: PushKind;
+	body?: string; // a short line of detail, clipped to 160 characters; absent means the kind's stock text
 }
 
 // A browser PushSubscription as JSON (PushSubscription.toJSON()).

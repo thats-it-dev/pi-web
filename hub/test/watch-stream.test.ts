@@ -29,6 +29,7 @@ const cfg: HubConfig = {
 	piBin: "pi",
 	dev: false,
 	approvalMode: "manual",
+	watchAlert: "auto",
 	dataDir: root,
 };
 const WATCH = { host: "hub.test:7878", "tailscale-user-login": "me@github" };

@@ -3,12 +3,14 @@
 // it. Headless sessions only: someone running a terminal session is at the terminal.
 
 import { basename } from "node:path";
-import type { PushPayload, Snapshot } from "../../shared/src/protocol.ts";
+import type { Dialog, PushPayload, Snapshot } from "../../shared/src/protocol.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import type { Registry } from "./registry.ts";
 import { watchTurns } from "./turns.ts";
 
 const TITLE_MAX = 60;
+const MESSAGE_MAX = 240;
+const BODY_MAX = 160;
 
 // Apps currently open and in front of someone. Each holds the events stream
 // only while it's visible, so a stream counts as a viewer.
@@ -45,8 +47,24 @@ export class Viewers {
 
 export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p: PushPayload) => void, viewers?: Pick<Viewers, "watching">): () => void {
 	return watchTurns(registry, (o, snap) => {
-		if (!viewers?.watching()) send({ sessionId: o.sessionId, title: sessionTitle(snap), kind: o.kind });
+		if (viewers?.watching()) return;
+		const p: PushPayload = { sessionId: o.sessionId, title: sessionTitle(snap), kind: o.kind };
+		// needs_you: what the dialog asks; finished: the start of the reply; error: the error text.
+		const detail = o.kind === "needs_you" ? (snap.dialogs[0] ? dialogMessage(snap.dialogs[0]) : "") : o.text;
+		const body = clipTo(detail, BODY_MAX);
+		if (body) p.body = body;
+		send(p);
 	});
+}
+
+// A pi dialog as one block of text: its title, then its message.
+export function dialogMessage(d: Dialog): string {
+	return clipTo(d.message ? `${d.title}\n${d.message}` : d.title, MESSAGE_MAX);
+}
+
+function clipTo(s: string, max: number): string {
+	const t = s.trim();
+	return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
 // What the sidebar calls the session: its name, else the first prompt's first line, else its folder.

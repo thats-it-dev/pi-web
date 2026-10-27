@@ -948,3 +948,42 @@ test("an empty tail sends no text frame: thinking or tool-call-only partials, a 
 	assert.deepEqual(texts()[1], { type: "text", sessionId: "s-1", text: "Let me look.", streaming: false });
 	svc.close();
 });
+
+test("onNewQuery fires once per query: external at once, a pi dialog when no app holds it back", async () => {
+	const { registry, viewers, svc } = setup();
+	const seen: string[] = [];
+	svc.onNewQuery((q) => seen.push(q.id));
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	const leave = viewers.add();
+	raise(h, push); // held while an app is open
+	await tick();
+	assert.deepEqual(seen, []);
+	const q = svc.queries.raise({ source: "ring-profile", label: "ring", text: "t", options: [], timeoutMs: 60_000, onOutcome: () => {} });
+	await tick();
+	assert.deepEqual(seen, [q.id]);
+	leave();
+	await tick();
+	assert.deepEqual(seen, [q.id, "dialog:s-1:d1"]);
+	svc.queries.markDelivered(q.id); // other changes do not repeat anything
+	await tick();
+	assert.equal(seen.length, 2);
+	settle(h, "d1");
+	await tick();
+	raise(h, push); // the same id again after it ended is a new question
+	await tick();
+	assert.equal(seen.length, 3);
+	svc.close();
+});
+
+test("a throwing onNewQuery listener is logged, not thrown, and the others still run", async () => {
+	const { svc } = setup();
+	const seen: string[] = [];
+	svc.onNewQuery(() => {
+		throw new Error("boom");
+	});
+	svc.onNewQuery((q) => seen.push(q.id));
+	const q = svc.queries.raise({ source: "ring-profile", label: "ring", text: "t", options: [], timeoutMs: 60_000, onOutcome: () => {} });
+	await tick();
+	assert.deepEqual(seen, [q.id]);
+	svc.close();
+});

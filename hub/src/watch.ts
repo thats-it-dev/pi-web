@@ -14,7 +14,7 @@ import { contentText } from "../../shared/src/reducer.ts";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
-import { sessionTitle, type Viewers } from "./push-watch.ts";
+import { dialogMessage, sessionTitle, type Viewers } from "./push-watch.ts";
 import type { LastModelStore } from "./last-model.ts";
 import { type ModelCatalog, resolveChoice } from "./model-catalog.ts";
 import { QueryStore } from "./queries.ts";
@@ -88,6 +88,8 @@ export class WatchService {
 	private dismissed = new Set<string>();
 	private outcomes = new Map<string, Outcome>(); // by session id
 	private alertFns = new Set<(a: TurnAlert) => void>();
+	private queryFns = new Set<(q: WatchQuery) => void>();
+	private announced = new Set<string>(); // query ids already handed to queryFns, pruned to those still present
 	private created = new Map<string, number>(); // query id → first seen
 	private showingState: ShowingState | null = null;
 	private offs: (() => void)[];
@@ -191,6 +193,15 @@ export class WatchService {
 				}
 			}
 		}
+	}
+
+	// Called once for each query the watch is offered (external ones at once, pi dialogs when
+	// no app holds them back), from the next change after it appears. A throwing listener is logged.
+	onNewQuery(fn: (q: WatchQuery) => void): () => void {
+		this.queryFns.add(fn);
+		return () => {
+			this.queryFns.delete(fn);
+		};
 	}
 
 	// Nothing is sent on subscribe; the caller sends pending() itself.
@@ -468,6 +479,23 @@ export class WatchService {
 		return true;
 	}
 
+	private announceQueries(): void {
+		if (this.queryFns.size === 0) return;
+		const present = new Set(this.refresh().map((q) => q.id));
+		for (const id of this.announced) if (!present.has(id)) this.announced.delete(id);
+		for (const q of this.visible()) {
+			if (this.announced.has(q.id)) continue;
+			this.announced.add(q.id);
+			for (const fn of [...this.queryFns]) {
+				try {
+					fn(q);
+				} catch (err) {
+					this.deps.log?.(`watch: query listener: ${(err as Error).message}`);
+				}
+			}
+		}
+	}
+
 	// Coalesces a burst of changes into one cursor bump and one wake-up.
 	private changed(): void {
 		if (this.scheduled || this.closed) return;
@@ -476,16 +504,13 @@ export class WatchService {
 			this.scheduled = false;
 			if (this.closed) return;
 			this.cursor++;
+			this.announceQueries();
 			if (this.waiters.size + this.subscribers.size === 0) return;
 			const p = this.pending();
 			for (const s of [...this.subscribers]) s({ type: "pending", ...p });
 			for (const w of [...this.waiters]) w(p);
 		});
 	}
-}
-
-function dialogMessage(d: Dialog): string {
-	return clip(d.message ? `${d.title}\n${d.message}` : d.title);
 }
 
 function dialogOptions(d: Dialog): string[] {

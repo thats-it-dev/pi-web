@@ -38,7 +38,7 @@ test("a run that finishes with nobody watching sends 'finished', titled by the f
 	const { registry, sent } = setup();
 	const h = (await registry.create("/work/proj")) as FakeHandle;
 	await run(h);
-	assert.deepEqual(sent, [{ sessionId: "s-1", title: "fix the parser", kind: "finished" }]);
+	assert.deepEqual(sent, [{ sessionId: "s-1", title: "fix the parser", kind: "finished", body: "done" }]);
 });
 
 test("nothing is sent while the app is open somewhere, and everything is once it's gone", async () => {
@@ -140,4 +140,29 @@ test("stop() ends watching", async () => {
 	stop();
 	to(h, "needs_you");
 	assert.deepEqual(sent, []);
+});
+
+test("push body carries the dialog message for needs_you", async () => {
+	const { registry, sent } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	h.dialogs = [{ id: "d1", method: "select", title: "Allow git push?", message: "origin feat/x", options: ["allow", "deny"] }];
+	to(h, "needs_you");
+	assert.equal(sent.length, 1);
+	assert.equal(sent[0].body, "Allow git push?\norigin feat/x");
+});
+
+test("push body is the reply excerpt for finished, clipped to 160", async () => {
+	const { registry, sent } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	await run(h, { role: "assistant", content: [{ type: "text", text: "x".repeat(300) }], stopReason: "stop" });
+	assert.equal(sent[0].body, `${"x".repeat(159)}…`);
+	assert.equal(sent[0].body?.length, 160);
+});
+
+test("push body is the error text for error", async () => {
+	const { registry, sent } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	await run(h, { role: "assistant", content: [], stopReason: "error", errorMessage: "model unreachable" });
+	assert.equal(sent[0].kind, "error");
+	assert.equal(sent[0].body, "model unreachable");
 });

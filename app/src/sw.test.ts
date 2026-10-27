@@ -71,3 +71,16 @@ test("tapping a notification with the app closed opens the session", async () =>
 	await dispatch(handlers.notificationclick, { notification: { close: vi.fn(), data: null } });
 	expect(self.clients.openWindow).toHaveBeenLastCalledWith("/");
 });
+
+test("sw falls back to PUSH_BODY without body, and shows body when it is a non-empty string", async () => {
+	const { handlers, self } = loadWorker();
+	const show = self.registration.showNotification;
+	const push = (p: object) => dispatch(handlers.push, { data: { json: () => p } });
+	await push({ sessionId: "a", title: "t", kind: "finished" });
+	await push({ sessionId: "a", title: "t", kind: "finished", body: "" });
+	await push({ sessionId: "a", title: "t", kind: "finished", body: 5 });
+	await push({ sessionId: "a", title: "t", kind: "finished", body: "Fixed the parser." });
+	await push({ sessionId: "", title: "ring · follow-up", kind: "query" });
+	await push({ sessionId: "", title: "ring · follow-up", kind: "query", body: "Question waiting" });
+	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Finished.", "Finished.", "Fixed the parser.", "Question waiting", "Question waiting"]);
+});

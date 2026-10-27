@@ -3,6 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL_MODES, type ApprovalMode } from "../../shared/src/protocol.ts";
 
+export const WATCH_ALERTS = ["auto", "notification", "push", "off"] as const;
+export type WatchAlert = (typeof WATCH_ALERTS)[number];
+
 export interface HubConfig {
 	port: number;
 	internalPort: number; // loopback-only API for local services (internal-server.ts)
@@ -12,6 +15,7 @@ export interface HubConfig {
 	idleMinutes: number;
 	maxHeadless: number;
 	piBin: string;
+	watchAlert: WatchAlert; // how a closed watch app is alerted (notifier.ts)
 	approvalMode: ApprovalMode; // the default for app-started sessions (see auto-approve.ts)
 	dev: boolean;
 	dataDir: string;
@@ -27,6 +31,7 @@ export const DEFAULTS = {
 	maxHeadless: 6,
 	piBin: "pi",
 	approvalMode: "auto" as ApprovalMode,
+	watchAlert: "auto" as WatchAlert,
 	dev: false,
 };
 
@@ -46,6 +51,7 @@ export function loadConfig(dataDir = defaultDataDir()): HubConfig {
 	const cfg: HubConfig = { ...DEFAULTS, ...raw, dataDir };
 	if (raw.autoApprove === false && raw.approvalMode === undefined) cfg.approvalMode = "manual"; // the setting's earlier, boolean form
 	if (!APPROVAL_MODES.includes(cfg.approvalMode)) throw new ConfigError(`approvalMode in ${file} must be one of ${APPROVAL_MODES.join(", ")}`);
+	if (!WATCH_ALERTS.includes(cfg.watchAlert)) throw new ConfigError(`watchAlert in ${file} must be one of ${WATCH_ALERTS.join(", ")}`);
 	if (!cfg.hostname || !cfg.allowedLogin) {
 		throw new ConfigError(
 			`Set hostname and allowedLogin in ${file}.\n` +
