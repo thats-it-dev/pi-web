@@ -18,6 +18,7 @@ const DARK_KEY = "pi-web.dark";
 const CONNECTING_MS = 10000; // "connecting" for this long reads as offline
 const SESSION_BIT = 0x80000000; // a launch code for a session alert; without it, a query
 const LAUNCH_MS = 10000; // how long a launch waits for the phone's answer
+const COALESCE = ["home", "reply", "net", "cfg"]; // a later dict of these replaces an earlier one (bridge.js)
 
 class PiStack extends WindowStack {
 	onCreate(application, $) {
@@ -27,30 +28,61 @@ class PiStack extends WindowStack {
 			model.dark = localStorage.getItem(DARK_KEY) === "1";
 		} catch (e) {
 		}
-		// A dict is applied as it is read (pebble/message holds one unread dict);
-		// the windows update once, after the read, for everything that arrived.
+		// A dict is applied as it is read (pebble/message holds one unread dict),
+		// or after a slide (receive); the windows update once, after the read,
+		// for everything that arrived.
 		this.link = createLink({
 			keys: KEYS,
-			onMessage: (dict) => {
-				const dark = model.dark, net = model.net, kind = model.apply(dict);
-				if (!kind)
-					return;
-				if (dark !== model.dark) {
-					try {
-						localStorage.setItem(DARK_KEY, model.dark ? "1" : "0");
-					} catch (e) {
-					}
-				}
-				if (net !== model.net)
-					this.watchNet();
-				// Kept until a window lands to show it (notice.js).
-				if (kind === "notice")
-					this.notice = { string: model.notice, at: Date.now() };
-				this.changed(kind);
-			},
+			onMessage: (dict) => this.receive(dict),
 		});
 		this.watchNet();
 		this.launch();
+	}
+	// A dict that lands while a window slides is held until the slide ends.
+	// Both screens are up then, and popping back to Home builds its menu at
+	// the slide's start from the rows it had: a home dict parsed there (new
+	// rows while the old ones are drawn) ran the chunk heap out. The phone
+	// answers Archive with a home dict, so that slide got one every time.
+	receive(dict) {
+		if (this.sliding) {
+			const held = this.held ??= [], msg = dict.get("MSG");
+			const at = COALESCE.includes(msg) ? held.findIndex(d => d.get("MSG") === msg) : -1;
+			if (at < 0)
+				held.push(dict);
+			else
+				held[at] = dict; // the phone coalesces these too: only the latest counts
+			return;
+		}
+		const model = this.model, dark = model.dark, net = model.net, kind = model.apply(dict);
+		if (!kind)
+			return;
+		if (dark !== model.dark) {
+			try {
+				localStorage.setItem(DARK_KEY, model.dark ? "1" : "0");
+			} catch (e) {
+			}
+		}
+		if (net !== model.net)
+			this.watchNet();
+		// Kept until a window lands to show it (notice.js).
+		if (kind === "notice")
+			this.notice = { string: model.notice, at: Date.now() };
+		this.changed(kind);
+	}
+	display(container, view, backwards) {
+		if (this.view)
+			this.sliding = true;
+		super.display(container, view, backwards);
+	}
+	// The screen that slid out is gone (SlideTransition onEnd): apply what was held.
+	onTransitionEnded(container) {
+		this.sliding = false;
+		const held = this.held;
+		this.held = null;
+		if (held)
+			for (const dict of held)
+				this.receive(dict);
+		super.onTransitionEnded(container);
 	}
 	// Queues kind for the one deferred onModelChanged.
 	changed(kind) {

@@ -4,8 +4,9 @@
 //   node watch/app/dev/stub-hub.mjs --port 5173 [--scene default|all|empty|ring|many] [--dark 0|1] [--delay ms]
 // Scenes: default = three sessions (waiting, running, done) and a pi query on the waiting one;
 // all = the same plus a session in error; empty = no sessions, no queries;
-// ring = the default plus a ring-profile query; many = twelve sessions with
-// ~40-char titles and ~600-char replies (the phone's row limit; Home's memory).
+// ring = the default plus a ring-profile query; many = twenty sessions with
+// ~40-char titles and ~600-char replies (the phone sends twelve, its row limit,
+// so an archived row is replaced by the next one, as on the real hub; Home's memory).
 // POST /stub/notice {text} sends a notice frame; POST /stub/query {text?, options?, source?} raises a query;
 // POST /stub/dark {dark: 0|1} changes what /dev/settings reports (the phone reads it at start).
 // POST /stub/stream {sessionId?, ms?, count?} streams a reply like the real hub: the session runs,
@@ -67,7 +68,8 @@ const REPLIES = {
 	s4: "Deploy failed: wrangler pages deploy exited 1 (auth token expired). Run cf auth login on the spark, then retry.",
 };
 
-// many: twelve rows (the bridge's HOME_ROWS), titles near the bridge's 40-char clip.
+// many: twenty sessions, titles near the bridge's 40-char clip. The bridge sends the first
+// twelve (HOME_ROWS); the rest refill the list when one is archived, as the hub's closed sessions do.
 const MANY_TITLES = [
 	"notesky sync: merge daily notes conflicts",
 	"pi-web watch: Home rows as a single port",
@@ -81,8 +83,17 @@ const MANY_TITLES = [
 	"spark sglang backend memory regression",
 	"pi-web chat app plus menu and model pick",
 	"fitsky patterns dashboard card layouts",
+	"hub watch alerts: notification vs push",
+	"pebble phone dev-connection over tailnet",
+	"llmwiki: nightly digest of notesky notes",
+	"thatsit.app kit template and deploy skill",
+	"pi-web images in replies by reference",
+	"ui-patterns-alloy menu inset regression",
+	"flash-auto: private benchmark backups",
+	"pebble-ui PIN window long-press repeat",
 ];
-const MANY_STATUS = ["waiting", "running", "done", "error", "running", "done", "done", "running", "done", "done", "running", "done"];
+const MANY_STATUS = ["waiting", "running", "done", "error", "running", "done", "done", "running", "done", "done", "running", "done",
+	"done", "done", "done", "done", "done", "done", "done", "done"];
 const MANY = MANY_TITLES.map((title, i) => session("m" + (i + 1), title, MANY_STATUS[i], i * 7 + 1));
 const MANY_QUERY = { ...PI_QUERY, sessionId: "m1", label: "pi · notesky sync: merge daily…" };
 const LONG_REPLY = (title) =>
