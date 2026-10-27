@@ -85,7 +85,7 @@ class TextBehavior extends View.Behavior {
 	fill() {
 		const { mode, id } = this.view.data, m = stack().model, p = palette(m.dark);
 		const c = this.shown = shown(mode, id, m, p) ?? { label: "", text: "", color: p.pi };
-		// Not chained (head = this.head.style = …): on a bound Label, head.measure then threw.
+		// Kept as two statements; the chained form (head = this.head.style = …) failed on this XS build.
 		const head = style(FONT_KEY.GOTHIC_18_BOLD, c.color);
 		this.head.style = head;
 		this.head.string = ellipsize(c.label, WIDTH, s => head.measure(s).width);

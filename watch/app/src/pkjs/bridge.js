@@ -243,6 +243,10 @@ function createBridge(deps) {
 	var answering = {}; // query ids with an answer or skip on its way to the hub
 	var runStart = {}; // session id -> when the phone first saw it running
 	var openSession = null; // the session whose reply the watch is looking at
+	var STREAM_MS = 1000; // at most one streamed reply dict per this long
+	var streamAt = -STREAM_MS; // when a streamed reply was last sent
+	var streamText = null; // the latest streamed text waiting for the throttle
+	var streamTimer = null;
 	var openText = ""; // the text last sent for it
 	var openMeta = ""; // its status and time as last sent
 	var gotFrame = false; // a real pending frame has arrived
@@ -419,7 +423,7 @@ function createBridge(deps) {
 		syncQuery(force);
 		if (openSession !== null) {
 			var s = sessionById(openSession);
-			if (s && openMeta !== letterOf(s) + clock(s.updatedAt)) sendReply(openSession, openText, false);
+			if (s && openMeta !== letterOf(s) + clock(s.updatedAt)) sendReply(openSession, streamText !== null ? streamText : openText, false);
 		}
 	}
 
@@ -451,7 +455,35 @@ function createBridge(deps) {
 		return dict;
 	}
 
+	function cancelStream() {
+		if (streamTimer !== null) deps.clearTimeout(streamTimer);
+		streamTimer = null;
+		streamText = null;
+	}
+
+	// Streamed frames: the first goes out at once, the rest coalesce to the latest text per STREAM_MS.
+	function streamReply(sid, text) {
+		var wait = streamAt + STREAM_MS - deps.now();
+		if (streamTimer === null && wait <= 0) {
+			sendReply(sid, text, false);
+			streamAt = deps.now();
+			return;
+		}
+		streamText = text;
+		if (streamTimer !== null) return;
+		streamTimer = deps.setTimeout(function () {
+			streamTimer = null;
+			var t = streamText;
+			streamText = null;
+			if (t !== null && openSession === sid) {
+				sendReply(sid, t, false);
+				streamAt = deps.now();
+			}
+		}, wait);
+	}
+
 	function sendReply(sid, text, force) {
+		cancelStream();
 		var dict = replyDict(sid, text);
 		openText = text;
 		var s = sessionById(sid);
@@ -461,6 +493,7 @@ function createBridge(deps) {
 
 	function open(sid) {
 		openSession = sid;
+		cancelStream();
 		hub.get("/api/watch/history?session=" + encodeURIComponent(sid) + "&limit=6", function (err, json) {
 			if (err || !json) {
 				log("pi-web: history for " + sid + " failed: " + (err && err.message));
@@ -578,7 +611,9 @@ function createBridge(deps) {
 		var id = p.ID ? str(p.ID) : null;
 		var sid = p.SESSION_ID ? str(p.SESSION_ID) : null;
 		showing = { id: id, sessionId: sid };
+		var was = openSession;
 		openSession = id === null && sid !== null ? sid : null;
+		if (openSession !== was) cancelStream();
 		hub.showing(id, sid);
 	}
 
@@ -622,7 +657,8 @@ function createBridge(deps) {
 		},
 		onText: function (f) {
 			if (!f || !f.sessionId || f.sessionId !== openSession) return;
-			sendReply(f.sessionId, str(f.text), false);
+			if (f.streaming === true) streamReply(f.sessionId, str(f.text));
+			else sendReply(f.sessionId, str(f.text), false);
 		},
 		onNotice: function (f) {
 			if (f && f.text) notice(f.text);

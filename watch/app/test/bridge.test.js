@@ -327,6 +327,76 @@ test("open fetches the last turn and sends a reply; live text for that session i
 	assert.equal(t.drain().filter((d) => d.MSG === "reply").length, 0);
 });
 
+function openedRunning() {
+	const t = setup();
+	t.pend([], [sess("s1", "running"), sess("s2", "done")]);
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { turns: [], total: 0 });
+	t.drain();
+	return t;
+}
+
+test("streamed text: one reply per second, intermediate frames coalesce to the latest", () => {
+	const t = openedRunning();
+	const base = t.all("reply").length;
+	for (let i = 1; i <= 10; i++) {
+		t.clock.t += 50;
+		t.bridge.onText({ sessionId: "s1", text: "t" + i, streaming: true });
+	}
+	t.drain();
+	assert.equal(t.all("reply").length, base + 1);
+	assert.equal(t.last("reply").TEXT, "t1");
+	assert.equal(t.timers.pending().length, 1);
+	t.clock.t += 500;
+	t.timers.fire(0);
+	t.drain();
+	assert.equal(t.all("reply").length, base + 2);
+	assert.equal(t.last("reply").TEXT, "t10");
+	assert.equal(t.timers.pending().length, 0);
+});
+
+test("streamed text: the final frame sends at once and leaves no stale send", () => {
+	const t = openedRunning();
+	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
+	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
+	t.drain();
+	const n = t.all("reply").length;
+	t.bridge.onText({ sessionId: "s1", text: "abc", streaming: false });
+	t.drain();
+	assert.equal(t.all("reply").length, n + 1);
+	assert.equal(t.last("reply").TEXT, "abc");
+	assert.equal(t.timers.pending().length, 0);
+});
+
+test("streamed text: leaving the running status sends at once and cancels the pending send", () => {
+	const t = openedRunning();
+	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
+	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
+	t.drain();
+	const n = t.all("reply").length;
+	t.pend([], [sess("s1", "done", { updatedAt: NOW + 60000 }), sess("s2", "done")]);
+	assert.equal(t.all("reply").length, n + 1);
+	assert.equal(t.last("reply").TEXT, "ab");
+	assert.equal(t.last("reply").STATUS, "d");
+	assert.equal(t.timers.pending().length, 0);
+});
+
+test("streamed text: switching sessions cancels the pending send", () => {
+	const t = openedRunning();
+	t.bridge.onText({ sessionId: "s1", text: "a", streaming: true });
+	t.bridge.onText({ sessionId: "s1", text: "ab", streaming: true });
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s2" });
+	assert.equal(t.timers.pending().length, 0);
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "other" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("reply").SESSION_ID, "s2");
+	const n = t.all("reply").length;
+	t.clock.t += 2000;
+	t.drain();
+	assert.equal(t.all("reply").length, n);
+});
+
 test("continue, stop, model post to the hub; archive drops the row", () => {
 	const t = setup();
 	t.pend([], [sess("s1", "done"), sess("s2", "done")]);
