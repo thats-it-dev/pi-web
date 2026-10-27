@@ -251,6 +251,37 @@ test("open session, no query on screen → prompt to that session", async () => 
 	watch.showing({ queryId: null, sessionId: null });
 });
 
+test("on-screen query gone at answer time → no prompt, no new session, notice \"Already answered\"", async () => {
+	const h = (await registry.create("/work/race")) as FakeHandle;
+	const real = watch.onScreen.bind(watch);
+	watch.onScreen = () => ({ queryId: "dialog:gone:d9", sessionId: h.sessionId });
+	const frames: unknown[] = [];
+	const off = watch.subscribe((f) => frames.push(f));
+	const before = created.length;
+	const b = multipart({ transcription: "yes" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	off();
+	watch.onScreen = real;
+	assert.equal(created.length, before);
+	assert.deepEqual(h.received, []);
+	assert.deepEqual(frames.filter((f) => (f as { type: string }).type === "notice"), [{ type: "notice", text: "Already answered" }]);
+	const j = sidecar(s.delivery);
+	assert.equal(j.action, "gone");
+	assert.equal(j.queryId, "dialog:gone:d9");
+});
+
+test("open session gone at prompt time → new session", async () => {
+	watch.showing({ queryId: null, sessionId: "no-such-session" });
+	const before = created.length;
+	const b = multipart({ transcription: "hello again" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before + 1);
+	assert.equal(sidecar(s.delivery).action, "new_session");
+	watch.showing({ queryId: null, sessionId: null });
+});
+
 test("pending query not on screen + nothing open → new session, query untouched", async () => {
 	const { h, requestId } = await raise();
 	watch.showing({ queryId: null, sessionId: null });

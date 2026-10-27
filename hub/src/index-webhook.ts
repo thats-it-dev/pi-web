@@ -105,10 +105,16 @@ async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, 
 	if (shown?.queryId) {
 		const r = await watch.answer(shown.queryId, { text });
 		if (r.ok) return { action: "answered", queryId: shown.queryId };
+		// The note was meant for this query, so it never becomes a prompt or a new session.
 		if (r.reason === "no_match") {
 			watch.notice("Didn't catch that");
 			return { action: "no_match", queryId: shown.queryId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
 		}
+		if (r.reason === "gone") {
+			watch.notice("Already answered");
+			return { action: "gone", queryId: shown.queryId };
+		}
+		return { action: "error", queryId: shown.queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
 	}
 	if (shown?.sessionId) {
 		const r = await watch.prompt(shown.sessionId, text);

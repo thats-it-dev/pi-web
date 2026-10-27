@@ -11,7 +11,7 @@ export interface Sidecar {
 	transcription: string;
 	recordedAt?: string;
 	client?: string;
-	action: "answered" | "no_match" | "prompted" | "new_session" | "kept_audio" | "error";
+	action: "answered" | "no_match" | "gone" | "prompted" | "new_session" | "kept_audio" | "error";
 	sessionId?: string;
 	queryId?: string;
 	reason?: string;
