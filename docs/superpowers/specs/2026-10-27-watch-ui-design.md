@@ -73,11 +73,16 @@ Anti-goals
   | error | `--accent #E4002B` | `#FF0055` |
   | done | — | light `#AAAAAA` / dark `#555555` |
 
-- **No header bars** (Michael's call). Every screen has only a **clock status
-  bar** at the top: the time in LECO, on the **theme's own background and
-  text colours** (white with black in Light, black with white in Dark). The
-  source of a query (pi or ring-profile) shows in its action menu's strip
-  colour.
+- **Clock status bar** on every screen: the time in LECO, on the **theme's
+  own background and text colours** (white with black in Light, black with
+  white in Dark).
+- **Header line** on the session and query screens, **under the clock**
+  (Michael's call). It has no fill. The label (`pi · <session>`,
+  `ring · follow-up`, or the session name) is on the left and a LECO time on
+  the right, both in **coloured text**: pi blue, ring-profile green, a session
+  in error red. Under it is a 1 px bottom border in the theme's text colour,
+  not coloured. On Dark, pi blue text uses `#55AAFF`, because `#0055AA` is
+  too dim on black (Claude's call).
 - **Action menu:** black, with a strip down the left edge in the screen's
   colour; the selected item is **amber** (`#FFAA00`; Michael's call) and the rest are dark grey, in Gothic 24
   Bold. Use pebble-ui's `ActionMenu` (`~/workspace/pebble-ui/modules/ActionMenu.js`)
@@ -105,8 +110,8 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   query instead.
 
 ### 4.2 Session
-- The clock status bar, then the agent's **last reply**, full-screen; Up/Down
-  scroll it.
+- The clock bar, then the header line (session name, time of the last reply),
+  then the agent's **last reply**; Up/Down scroll it.
 - Select opens the action menu: **Continue**, **Stop**, **Model**,
   **Archive**. Model opens a second action menu listing the available models,
   as `/api/watch/models` returns them today.
@@ -115,8 +120,8 @@ Home), Select opens the action menu, and Up/Down scroll or move.
   streaming isn't required.
 
 ### 4.3 Query
-- The clock status bar, then the query text full-screen. Its action menu's
-  strip is blue (pi) or green (ring-profile).
+- The clock bar, then the header line (source label, time asked), then the
+  query text. Its action menu's strip is blue (pi) or green (ring-profile).
 - Up/Down scroll long text.
 - Select opens the action menu with the query's options, then **Skip**
   always last. **Skip on a pi dialog only hides it from the watch** (Michael's
@@ -253,7 +258,9 @@ Decided by Michael:
 - full-screen readable queries answered with the buttons and action menu;
 - a ring answer clears the query, for pi sessions too;
 - the fitsky-style action menu;
-- left-aligned, smaller text; no header bars, only a theme-coloured clock bar;
+- left-aligned, smaller text;
+- a theme-coloured clock bar with an unfilled header line under it (coloured
+  text, plain bottom border);
 - the thatsit palette;
 - Gothic plus LECO digits (option A);
 - light and dark themes;
