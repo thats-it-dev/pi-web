@@ -568,3 +568,23 @@ test("queryDict and replyDict scrub markdown and stay within 1000 B", () => {
 	assert.ok(!/```|\*\*/.test(reply.TEXT));
 	assert.ok(dictBytes(reply) <= 1000);
 });
+
+test("TEXT keeps single line breaks; no blank lines; separators and tabs stripped", () => {
+	const t = setup();
+	const q = t.pend([query("q1", 1, { text: "- a\n- b\n\n\n\n# Head\r\npara\twith\x1ftab\x1e" })], []).filter((d) => d.MSG === "query").pop();
+	assert.equal(q.TEXT, "\u2022 a\n\u2022 b\nHead\npara with tab");
+	assert.ok(!/\n\n/.test(q.TEXT));
+	const long = "- " + "word ".repeat(10) + "\n";
+	const big = t.pend([query("q2", 2, { text: long.repeat(80) })], []).filter((d) => d.MSG === "query").pop();
+	assert.ok(big.TEXT.indexOf("\n") > 0);
+	assert.ok(dictBytes(big) <= 1000);
+	assert.equal(breakable("a".repeat(20) + "\n" + "b".repeat(10)).split("\n")[1], "b".repeat(10));
+});
+test("reply TEXT keeps heading line break", () => {
+	const r = setup();
+	r.pend([], [sess("s1", "done")]);
+	r.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	r.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "## Title\n\nBody here\n\n\n\n- x\n- y" }], total: 2 });
+	r.drain();
+	assert.equal(r.last("reply").TEXT, "Title\nBody here\n\u2022 x\n\u2022 y");
+});

@@ -67,6 +67,16 @@ function scrubMarkdown(text) {
 	}
 }
 
+// Message TEXT keeps its line breaks (Piu Text wraps at "\n"): blank lines
+// collapse to one break, separators and tabs become spaces.
+function cleanText(s) {
+	return scrubMarkdown(s)
+		.replace(/[\x1e\x1f\t]/g, " ")
+		.replace(/\r/g, "")
+		.replace(/[ ]*\n(?:[ ]*\n)*[ ]*/g, "\n")
+		.replace(/^\s+|\s+$/g, "");
+}
+
 // Piu wraps only at spaces (and CJK), so a long path would run off the
 // watch's edge: within a long Latin token, a space after a "/" once the piece
 // is 8 characters, and at most every 15 (16 with a clipping ellipsis).
@@ -364,7 +374,7 @@ function createBridge(deps) {
 			SOURCE: q.source === "ring-profile" ? "ring" : "pi",
 			SESSION_ID: q.sessionId ? str(q.sessionId) : "",
 			LABEL: clipTo(clean(q.label), LABEL_MAX),
-			TEXT: clipTo(breakable(clean(scrubMarkdown(q.text))), TEXT_MAX),
+			TEXT: clipTo(breakable(cleanText(q.text)), TEXT_MAX),
 			OPTIONS: "",
 			AT: clock(q.createdAt),
 		};
@@ -416,7 +426,7 @@ function createBridge(deps) {
 			MSG: "reply",
 			SESSION_ID: str(sid),
 			LABEL: s ? clipTo(clean(s.title), LABEL_MAX) : "",
-			TEXT: clipTo(breakable(clean(scrubMarkdown(text))), TEXT_MAX),
+			TEXT: clipTo(breakable(cleanText(text)), TEXT_MAX),
 			AT: s ? clock(s.updatedAt) : "",
 			STATUS: s ? letterOf(s) : "d",
 		};
