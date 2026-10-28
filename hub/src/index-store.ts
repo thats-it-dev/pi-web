@@ -1,5 +1,7 @@
 // Where Index 01 deliveries are kept: <dataDir>/index/<delivery>.m4a (when there
 // was audio) and <delivery>.json (always). Only the newest `keep` survive.
+// <delivery> is X-Index-Delivery when sent, else the note's content key
+// ("content-<32 hex>", index-webhook.ts contentKey), else a random UUID.
 
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

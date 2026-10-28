@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import type { Dialog } from "../../shared/src/protocol.ts";
 import type { HubConfig } from "../src/config.ts";
-import { type IndexHeaders, ReplayCache, handleIndexWebhook, readIndexHeaders, verifyIndex } from "../src/index-webhook.ts";
+import { type IndexHeaders, ReplayCache, contentKey, handleIndexWebhook, readIndexHeaders, verifyIndex } from "../src/index-webhook.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { createHubServer } from "../src/server.ts";
@@ -29,7 +29,7 @@ test("a request passes once; the same delivery id is a 409 replay", () => {
 	assert.deepEqual(verifyIndex(good(), cache), { ok: false, status: 409, reason: "Duplicate delivery" });
 });
 
-test("a test event passes as isTest; a missing delivery id is accepted and never a replay", () => {
+test("a test event passes as isTest; a missing delivery id is accepted here (the route keys it by content)", () => {
 	const cache = new ReplayCache(undefined, now);
 	assert.deepEqual(verifyIndex(good({ test: "true", trigger: "test-event" }), cache), { ok: true, isTest: true });
 	assert.deepEqual(verifyIndex(good({ delivery: undefined }), cache), { ok: true, isTest: false });
@@ -39,6 +39,17 @@ test("a test event passes as isTest; a missing delivery id is accepted and never
 test("a wrong version is 400; signature and timestamp headers are ignored", () => {
 	assert.deepEqual(verifyIndex(good({ version: "2" }), new ReplayCache()), { ok: false, status: 400, reason: "Unsupported webhook version" });
 	assert.deepEqual(verifyIndex(good({ signature: "00", timestamp: "abc" }), new ReplayCache()), { ok: true, isTest: false });
+});
+
+test("contentKey: same note same key; recordedAt, words or audio change it; none without recordedAt and audio", () => {
+	const a = contentKey("1700000000000", "yes", Buffer.from("x"));
+	assert.match(a ?? "", /^content-[0-9a-f]{32}$/);
+	assert.equal(contentKey("1700000000000", "yes", Buffer.from("x")), a);
+	assert.notEqual(contentKey("1700000000001", "yes", Buffer.from("x")), a);
+	assert.notEqual(contentKey("1700000000000", "no", Buffer.from("x")), a);
+	assert.notEqual(contentKey("1700000000000", "yes", Buffer.from("y")), a);
+	assert.ok(contentKey(undefined, "yes", Buffer.from("x")));
+	assert.equal(contentKey(undefined, "yes", undefined), null);
 });
 
 test("replay cache forgets ids after the ttl", () => {
@@ -253,16 +264,37 @@ test("open session, no query on screen → prompt to that session", async () => 
 	watch.showing({ queryId: null, sessionId: null });
 });
 
-test("a delivery without an id gets a generated one for its log line and files", async () => {
+test("a delivery without an id is named by its content key for its log line and files", async () => {
 	const h = (await registry.create("/work/noid")) as FakeHandle;
 	watch.showing({ queryId: null, sessionId: h.sessionId });
-	const b = multipart({ transcription: "go on" });
+	const b = multipart({ transcription: "go on", recordedAt: "1700000000001" });
 	const { "x-index-delivery": _drop, ...headers } = signed(b).headers;
 	assert.equal((await post(port, headers, b)).status, 200);
 	const line = logs.find((l) => l.endsWith(`prompted ${h.sessionId}`));
-	const id = line?.match(/^index: ([0-9a-f-]{36}) prompted /)?.[1];
+	const id = line?.match(/^index: (content-[0-9a-f]{32}) prompted /)?.[1];
 	assert.ok(id, logs.slice(-3).join(" | "));
 	assert.equal(sidecar(id).action, "prompted");
+	watch.showing({ queryId: null, sessionId: null });
+});
+
+test("without a delivery id, a re-upload of the same note is a 409 and acts once; a different note still acts", async () => {
+	const h = (await registry.create("/work/noid2")) as FakeHandle;
+	watch.showing({ queryId: null, sessionId: h.sessionId });
+	const noId = (b: Buffer) => {
+		const { "x-index-delivery": _drop, ...headers } = signed(b).headers;
+		return headers;
+	};
+	const audio = Buffer.from("same audio");
+	const one = multipart({ transcription: "go on", recordedAt: "1700000000100" }, audio);
+	assert.equal((await post(port, noId(one), one)).status, 200);
+	const again = await post(port, noId(one), one);
+	assert.deepEqual(again, { status: 409, body: JSON.stringify({ error: "Duplicate delivery" }) });
+	// Same words at another time, and the same time with other audio, are different notes.
+	const later = multipart({ transcription: "go on", recordedAt: "1700000000200" }, audio);
+	assert.equal((await post(port, noId(later), later)).status, 200);
+	const other = multipart({ transcription: "go on", recordedAt: "1700000000100" }, Buffer.from("other audio"));
+	assert.equal((await post(port, noId(other), other)).status, 200);
+	assert.equal(h.received.filter((c) => c.type === "prompt").length, 3);
 	watch.showing({ queryId: null, sessionId: null });
 });
 
@@ -337,7 +369,8 @@ let clock = 1_800_000_000_000;
 const cw = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root, now: () => clock });
 const alerts: RingAlert[] = [];
 cw.onRingAlert((a) => alerts.push(a));
-const csrv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: cw, dataDir: root, replays: new ReplayCache(), now: () => clock, log: (m) => logs.push(m) }));
+const creplays = new ReplayCache(); // one cache for the server, as in createHubServer
+const csrv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: cw, dataDir: root, replays: creplays, now: () => clock, log: (m) => logs.push(m) }));
 await new Promise<void>((r) => csrv.listen(0, "127.0.0.1", r));
 const cport = (csrv.address() as AddressInfo).port;
 after(() => {
@@ -389,6 +422,20 @@ test("app closed + two alerted pi dialogs + a matching note → the oldest is an
 	assert.equal(j.queryId, a.id);
 	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id, x.kind === "answered" ? x.option : null]), [["answered", a.id, "deny"]]);
 	assert.ok(logs.includes(`index: ${j.headers.delivery} answered ${a.id}`));
+});
+
+test("app closed + two alerted dialogs: the same note re-uploaded without a delivery id answers only one", async () => {
+	fresh();
+	const a = await raiseOn(ask);
+	clock += 1000;
+	const b2 = await raiseOn(ask);
+	const body = multipart({ transcription: "allow", recordedAt: String(clock) }, Buffer.from("note audio"));
+	const { "x-index-delivery": _drop, ...headers } = signed(body).headers;
+	assert.equal((await post(cport, headers, body)).status, 200);
+	assert.equal((await post(cport, headers, body)).status, 409);
+	assert.equal(a.h.received.filter((c) => c.type === "dialog_response").length, 1);
+	assert.equal(b2.h.received.length, 0);
+	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id]), [["answered", a.id]]);
 });
 
 test("app closed + unmatched note → no_match, nothing answered, one miss alert", async () => {

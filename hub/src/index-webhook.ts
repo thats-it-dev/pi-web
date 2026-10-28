@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
@@ -60,7 +60,8 @@ const fail = (status: 400 | 409, reason: string): Verify => ({ ok: false, status
 
 // The tailnet identity (checked in server.ts) is the only authentication; the
 // Index app's signing is not required (spec §9). Replays are still refused so
-// a retried upload doesn't act twice.
+// a retried upload doesn't act twice: here by X-Index-Delivery, and in
+// handleIndexWebhook by the content key when the app sends no delivery id.
 export function verifyIndex(h: IndexHeaders, replays: ReplayCache): Verify {
 	if (h.version !== "1") return fail(400, "Unsupported webhook version");
 	if (h.delivery && replays.seen(h.delivery)) return fail(409, "Duplicate delivery");
@@ -164,6 +165,23 @@ async function answer(watch: WatchService, queryId: string, text: string, on: Ha
 	return { action: "error", queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
 }
 
+/**
+ * A delivery key from the note itself, for uploads without X-Index-Delivery
+ * (the real Index app sends none): recordedAt, the transcription and the
+ * audio bytes, hashed. A retried upload of the same note has the same key and
+ * is refused as a replay; two notes differ in recordedAt or audio. The files
+ * and the log line use it as the delivery name ("content-" + 32 hex chars).
+ * Null when the note has neither recordedAt nor audio: two such notes saying
+ * the same words would be indistinguishable, so they are not de-duplicated.
+ */
+export function contentKey(recordedAt: string | undefined, transcription: string, audio: Buffer | undefined): string | null {
+	if (!recordedAt && !audio?.length) return null;
+	const h = createHash("sha256");
+	h.update(`${recordedAt ?? ""}\n${transcription}\n`);
+	if (audio) h.update(audio);
+	return `content-${h.digest("hex").slice(0, 32)}`;
+}
+
 // The note's recording time in ms (ms since the epoch, or a date string); null when absent or unparseable.
 function recordedTime(v: string | undefined): number | null {
 	if (!v) return null;
@@ -210,8 +228,17 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		}
 		const text = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
 		const audio = parts.find((p) => p.name === "audio")?.data;
-		const delivery = headers.delivery || randomUUID(); // the Index app may send none; files are named by it
-		let transcription = (text("transcription") ?? "").trim();
+		const raw = text("transcription") ?? "";
+		let delivery = headers.delivery;
+		if (!delivery) {
+			const key = contentKey(text("recordedAt"), raw, audio);
+			if (key && deps.replays.seen(key)) {
+				log("index: rejected (Duplicate delivery)");
+				return sendJson(res, 409, { error: "Duplicate delivery" }, {});
+			}
+			delivery = key ?? randomUUID();
+		}
+		let transcription = raw.trim();
 		if (transcription.length > TEXT_MAX) {
 			transcription = transcription.slice(0, TEXT_MAX);
 			log(`index: ${delivery} transcription cut to ${TEXT_MAX} chars`);
