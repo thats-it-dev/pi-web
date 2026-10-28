@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { HubConfig } from "../src/config.ts";
-import { type NotesBody, type Outbox, createNotesOutbox, createOutbox } from "../src/notes-outbox.ts";
+import { type NotesBody, type Outbox, createNotesOutbox, createOutbox, postNotes } from "../src/notes-outbox.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { createHubServer } from "../src/server.ts";
@@ -94,6 +94,51 @@ test("createNotesOutbox: an empty ringProfileUrl makes no outbox", () => {
 	assert.ok(box);
 	box.stop();
 	assert.ok(existsSync(join(dir, "index", "outbox")));
+});
+
+test("outbox writes atomically and never sends a leftover temp file", async () => {
+	const dir = tmp("pi-web-outbox-");
+	const posted: NotesBody[] = [];
+	const box = createOutbox(dir, async (b) => (posted.push(b), false), { intervalMs: 60_000 });
+	after(() => box.stop());
+	writeFileSync(join(dir, "torn.json.tmp"), '{"dedupeKey":"torn"'); // a write cut off by a crash
+	await box.add("a", { dedupeKey: "a", recordedAt: NOW, receivedAt: NOW, transcript: "", webhook: "notes" });
+	assert.deepEqual(readdirSync(dir).sort(), ["a.json", "torn.json.tmp"]);
+	await box.flush();
+	assert.deepEqual(posted.map((b) => b.dedupeKey), ["a", "a"]);
+});
+
+test("outbox: a note the service rejects (4xx) moves to failed/ and is not retried", async () => {
+	const dir = tmp("pi-web-outbox-");
+	const lines: string[] = [];
+	let calls = 0;
+	const box = createOutbox(dir, async () => (calls++, "rejected" as const), { intervalMs: 60_000, log: (m) => lines.push(m) });
+	after(() => box.stop());
+	assert.equal(await box.add("bad/1", { dedupeKey: "bad/1", recordedAt: -5, receivedAt: NOW, transcript: "", webhook: "notes" }), "rejected");
+	assert.deepEqual(readdirSync(dir).sort(), ["failed"]);
+	assert.deepEqual(readdirSync(join(dir, "failed")), ["bad_1.json"]);
+	await box.flush();
+	assert.equal(calls, 1);
+	assert.deepEqual(lines, ["notes: bad_1.json rejected by ring-profile; moved to outbox/failed"]);
+});
+
+test("postNotes: 2xx true, 408/429/5xx retry, other 4xx rejected", async () => {
+	const statuses = [200, 400, 408, 429, 500, 413];
+	const { createServer } = await import("node:http");
+	const srv = createServer((req, res) => {
+		req.resume();
+		req.on("end", () => {
+			res.writeHead(statuses.shift() ?? 500);
+			res.end();
+		});
+	});
+	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+	after(() => srv.close());
+	const send = postNotes(`http://127.0.0.1:${(srv.address() as AddressInfo).port}`);
+	const body = { dedupeKey: "p", recordedAt: NOW, receivedAt: NOW, transcript: "", webhook: "notes" as const };
+	const got = [];
+	for (let i = 0; i < 6; i++) got.push(await send(body));
+	assert.deepEqual(got, [true, "rejected", false, false, false, "rejected"]);
 });
 
 // ---- the route ----
@@ -267,4 +312,28 @@ test("notes: tailnet identity required; wrong version 400; test event 200 and no
 	assert.equal((await post(port, { ...headers("n-p"), "content-type": "text/plain" }, b)).status, 200);
 	await sleep(20);
 	assert.equal(forwarded.length, before);
+});
+
+test("a failed audio save still forwards the note", async () => {
+	mkdirSync(join(root, "index", "n-af.m4a"), { recursive: true }); // saveAudio's target is a directory: EISDIR
+	const b = multipart({ transcription: "audio will fail", recordedAt: "1700000000003" }, Buffer.from("aud"));
+	assert.deepEqual(await post(port, headers("n-af"), b), { status: 200, body: "" });
+	await logged("notes: n-af forwarded");
+	assert.equal(forwarded.at(-1)?.transcript, "audio will fail");
+	assert.ok(logs.some((l) => l.startsWith("notes: audio: ")));
+	assert.equal(sidecar(root, "n-af").action, "forwarded");
+});
+
+test("a note sent to the notes webhook, then the agent webhook, is a duplicate there and never routed", async () => {
+	const b = multipart({ transcription: "both webhooks", recordedAt: "1700000000004" }, Buffer.from("same-audio"));
+	assert.equal((await post(port, headers(), b)).status, 200);
+	const key = forwarded.at(-1)?.dedupeKey;
+	assert.match(key ?? "", /^content-/);
+	await logged(`notes: ${key} forwarded`);
+	const before = touched.length;
+	assert.deepEqual(await post(port, headers(), b, "/api/index/webhook"), { status: 200, body: "" });
+	await sleep(20);
+	assert.ok(logs.includes("index: duplicate delivery ignored"));
+	assert.equal(touched.length, before);
+	assert.equal(sidecar(root, key!).action, "forwarded");
 });

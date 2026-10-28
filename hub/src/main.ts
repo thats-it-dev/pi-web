@@ -77,7 +77,7 @@ try {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
 // Ring notes for ring-profile, retried every minute until it takes them; none when ringProfileUrl is "".
-const notesOutbox = createNotesOutbox(cfg.ringProfileUrl, cfg.dataDir);
+const notesOutbox = createNotesOutbox(cfg.ringProfileUrl, cfg.dataDir, undefined, (m) => console.log(m));
 void notesOutbox?.flush(); // notes queued before a restart
 const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox, launchTarget: (c) => notifier.launchTarget(c) });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
