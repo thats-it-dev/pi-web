@@ -6,7 +6,7 @@ import type { TurnOutcome } from "../src/turns.ts";
 import { dialogQueryId } from "../src/watch.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
-function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; viewing?: (id: string) => boolean } = {}) {
+function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; viewing?: (id: string) => boolean; isPending?: (id: string) => boolean } = {}) {
 	const pushed: PushPayload[] = [];
 	const delivered: string[] = [];
 	const logs: string[] = [];
@@ -19,7 +19,7 @@ function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; v
 		},
 		viewing: o.viewing ?? (() => false),
 		markDelivered: (id) => delivered.push(id),
-		isPending: () => true,
+		isPending: o.isPending ?? (() => true),
 		log: (m) => logs.push(m),
 	});
 	return { n, pushed, delivered, logs };
@@ -68,23 +68,54 @@ test("a TL;DR title over 24 characters is cut to 24", async () => {
 	assert.ok(t.pushed[0].title.startsWith("tttt"));
 });
 
-test("needs_you: confirm says approve?, select says question; body is the dialog message", async () => {
+test("dialog: confirm says approve?, select says question; body is the dialog message", async () => {
 	const t = setup();
-	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
-	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [select]));
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", select, snap("s-1", "/work/x", [confirm, select]));
 	assert.deepEqual(t.pushed, [
 		{ sessionId: "s-1", title: "x · approve?", kind: "needs_you", body: "Run tests?\nnpm test" },
 		{ sessionId: "s-1", title: "x · question", kind: "needs_you", body: "Which branch?" },
 	]);
 });
 
-test("needs_you push marks the dialog delivered", async () => {
+test("a second dialog in a session already waiting is pushed and marked delivered too", async () => {
 	const t = setup();
-	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", select, snap("s-1", "/work/x", [confirm, select]));
+	assert.equal(t.pushed.length, 2);
+	assert.deepEqual(t.delivered, [dialogQueryId("s-1", confirm), dialogQueryId("s-1", select)]);
+});
+
+test("a dialog push marks the dialog delivered only when the push went out", async () => {
+	const t = setup();
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
 	assert.deepEqual(t.delivered, [dialogQueryId("s-1", confirm)]);
 	const u = setup({ pushOk: false });
-	await u.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	await u.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
 	assert.deepEqual(u.delivered, []);
+});
+
+test("a dialog raised while its session is viewed is held, then pushed when viewing ends if still pending", async () => {
+	let viewed = true;
+	const pending = new Set([dialogQueryId("s-1", confirm)]);
+	const t = setup({ viewing: (id) => viewed && id === "s-1", isPending: (id) => pending.has(id) });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", select, snap("s-1", "/work/x", [confirm, select])); // answered in the app before it left
+	await t.n.dialog("s-2", select, snap("s-2", "/work/y", [select])); // another session isn't held
+	assert.deepEqual(t.pushed.map((p) => p.sessionId), ["s-2"]);
+	viewed = false;
+	await t.n.viewingEnded("s-1");
+	assert.deepEqual(t.pushed.map((p) => p.title), ["y · question", "x · approve?"]);
+	assert.deepEqual(t.delivered, [dialogQueryId("s-2", select), dialogQueryId("s-1", confirm)]);
+	await t.n.viewingEnded("s-1"); // held ones are gone, pushed or dropped
+	assert.equal(t.pushed.length, 2);
+});
+
+test("turn with needs_you sends nothing (dialogs alert through dialog())", async () => {
+	const t = setup();
+	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	assert.deepEqual(t.pushed, []);
+	assert.deepEqual(t.delivered, []);
 });
 
 test("error: '<project> · error' with the error text", async () => {
@@ -107,7 +138,7 @@ test("a ring-profile query pushes its text and is marked delivered, whatever is 
 	assert.deepEqual(t.delivered, ["rp:1"]);
 });
 
-test("a pi-source query sends nothing (dialogs alert through turn)", async () => {
+test("a pi-source query sends nothing (dialogs alert through dialog())", async () => {
 	const t = setup();
 	await t.n.query(piQuery);
 	assert.deepEqual(t.pushed, []);
@@ -117,7 +148,8 @@ test("a pi-source query sends nothing (dialogs alert through turn)", async () =>
 test("enabled: false sends nothing at all", async () => {
 	const t = setup({ enabled: false });
 	await t.n.turn(finished("done"), snap());
-	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.viewingEnded("s-1");
 	await t.n.query(ringQuery);
 	await t.n.ringAlert({ kind: "miss", query: piQuery });
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });

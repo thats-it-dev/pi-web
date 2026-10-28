@@ -17,11 +17,16 @@ export class Viewers {
 	private count = 0;
 	private listeners = new Set<(watching: boolean) => void>();
 	private bySession = new Map<string, number>(); // viewers per session they're showing
+	private viewingFns = new Set<(sessionId: string, viewing: boolean) => void>();
 
 	// sessionId: the session this viewer is looking at, if any.
 	add(sessionId?: string | null): () => void {
 		if (++this.count === 1) this.emit(true);
-		if (sessionId) this.bySession.set(sessionId, (this.bySession.get(sessionId) ?? 0) + 1);
+		if (sessionId) {
+			const n = (this.bySession.get(sessionId) ?? 0) + 1;
+			this.bySession.set(sessionId, n);
+			if (n === 1) this.emitViewing(sessionId, true);
+		}
 		let left = false;
 		return () => {
 			if (left) return;
@@ -29,7 +34,10 @@ export class Viewers {
 			if (sessionId) {
 				const n = (this.bySession.get(sessionId) ?? 1) - 1;
 				if (n > 0) this.bySession.set(sessionId, n);
-				else this.bySession.delete(sessionId);
+				else {
+					this.bySession.delete(sessionId);
+					this.emitViewing(sessionId, false);
+				}
 			}
 			if (--this.count === 0) this.emit(false);
 		};
@@ -45,6 +53,18 @@ export class Viewers {
 
 	private emit(watching: boolean): void {
 		for (const fn of [...this.listeners]) fn(watching);
+	}
+
+	// Fired when one session's viewer count crosses zero either way.
+	onViewing(fn: (sessionId: string, viewing: boolean) => void): () => void {
+		this.viewingFns.add(fn);
+		return () => {
+			this.viewingFns.delete(fn);
+		};
+	}
+
+	private emitViewing(sessionId: string, viewing: boolean): void {
+		for (const fn of [...this.viewingFns]) fn(sessionId, viewing);
 	}
 
 	watching(): boolean {

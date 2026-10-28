@@ -173,3 +173,20 @@ test("Viewers tracks which session each viewer is on, and the global count is un
 	anon();
 	assert.deepEqual(seen, [true, false, true, false]);
 });
+
+test("Viewers.onViewing fires when one session's viewer count crosses zero either way", () => {
+	const v = new Viewers();
+	const seen: string[] = [];
+	v.onViewing((sid, on) => seen.push(`${sid}:${on}`));
+	const a1 = v.add("a");
+	const a2 = v.add("a");
+	const b = v.add("b");
+	const anon = v.add();
+	a1();
+	a1();
+	assert.deepEqual(seen, ["a:true", "b:true"]);
+	a2();
+	b();
+	anon();
+	assert.deepEqual(seen, ["a:true", "b:true", "a:false", "b:false"]);
+});

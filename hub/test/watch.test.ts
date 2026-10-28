@@ -1009,6 +1009,63 @@ test("an empty tail sends no text frame: thinking or tool-call-only partials, a 
 	svc.close();
 });
 
+test("onDialog fires once per dialog id as it appears, whatever is viewed or skipped", async () => {
+	const { registry, viewers, svc } = setup();
+	const seen: string[] = [];
+	svc.onDialog((sid, d, snap) => seen.push(`${sid}:${d.id}:${snap.sessionId}`));
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	const leave = viewers.add("s-1");
+	raise(h, push);
+	await tick();
+	assert.deepEqual(seen, ["s-1:d1:s-1"]);
+	raise(h, { id: "d2", method: "confirm", title: "Proceed?" }); // a second dialog while already needs_you
+	await tick();
+	assert.deepEqual(seen, ["s-1:d1:s-1", "s-1:d2:s-1"]);
+	svc.skip("dialog:s-1:d1");
+	leave();
+	h.fire({ type: "state_changed" }); // unrelated changes repeat nothing
+	await tick();
+	assert.equal(seen.length, 2);
+	settle(h, "d1");
+	await tick();
+	raise(h, push); // the same id again after it ended is a new dialog
+	await tick();
+	assert.deepEqual(seen.slice(2), ["s-1:d1:s-1"]);
+	svc.close();
+});
+
+test("onDialog fires for each of two dialogs raised in one change", async () => {
+	const { registry, svc } = setup();
+	const seen: string[] = [];
+	svc.onDialog((_s, d) => seen.push(d.id));
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	h.dialogs = [push, { id: "d2", method: "confirm", title: "Proceed?" }];
+	to(h, "needs_you");
+	await tick();
+	assert.deepEqual(seen, ["d1", "d2"]);
+	svc.close();
+});
+
+test("isPending: an open external query until skipped; a live dialog even while a viewer hides it", async () => {
+	const { registry, viewers, svc } = setup();
+	const q = svc.queries.raise({ source: "ring-profile", label: "ring", text: "t", options: [], timeoutMs: 60_000, onOutcome: () => {} });
+	assert.equal(svc.isPending(q.id), true);
+	svc.skip(q.id);
+	assert.equal(svc.isPending(q.id), false);
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	const leave = viewers.add("s-1");
+	raise(h, push);
+	assert.deepEqual(svc.pending().queries, []);
+	assert.equal(svc.isPending("dialog:s-1:d1"), true);
+	svc.skip("dialog:s-1:d1");
+	assert.equal(svc.isPending("dialog:s-1:d1"), true);
+	settle(h, "d1");
+	assert.equal(svc.isPending("dialog:s-1:d1"), false);
+	assert.equal(svc.isPending("dialog:s-9:x"), false);
+	leave();
+	svc.close();
+});
+
 test("onNewQuery fires once per query: external at once, a pi dialog when no app holds it back", async () => {
 	const { registry, viewers, svc } = setup();
 	const seen: string[] = [];

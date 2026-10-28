@@ -9,7 +9,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { LiveStats } from "../../shared/src/live-stats.ts";
-import type { AppCommand, Dialog, DialogMethod, SessionStatus, Showing, WatchAnswerResult, WatchPending, WatchQuery, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
+import type { AppCommand, Dialog, DialogMethod, SessionStatus, Showing, Snapshot, WatchAnswerResult, WatchPending, WatchQuery, WatchSession, WatchStreamFrame, WatchTurn } from "../../shared/src/protocol.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
@@ -92,6 +92,8 @@ export class WatchService {
 	private outcomes = new Map<string, Outcome>(); // by session id
 	private queryFns = new Set<(q: WatchQuery) => void>();
 	private ringFns = new Set<(a: RingAlert) => void>();
+	private dialogFns = new Set<(sessionId: string, dialog: Dialog, snap: Snapshot) => void>();
+	private dialogsSeen = new Set<string>(); // dialog query ids handed to dialogFns, pruned to those still live
 	private alerted = new Set<string>(); // pi dialog ids an alert reached the phone for, or the watch showed
 	private lastAppSeenAt = -Infinity; // when an app's stream, poll or showing report was last seen
 	private announced = new Set<string>(); // query ids already handed to queryFns, pruned to those still present
@@ -232,6 +234,21 @@ export class WatchService {
 			.filter((d) => shown.has(d.id) && this.alerted.has(d.id) && (d.method === "select" || d.method === "confirm") && d.options.length > 0 && d.createdAt <= recordedAt + RECORD_SKEW_MS)
 			.sort((a, b) => a.createdAt - b.createdAt)[0];
 		return q ? { id: q.id, source: q.source, sessionId: q.sessionId, label: q.label, text: q.text, options: q.options, createdAt: q.createdAt } : null;
+	}
+
+	// Called once per pi dialog (by dialogQueryId) when it first appears in a live session,
+	// whatever is viewed, skipped or shown on the watch. A throwing listener is logged.
+	onDialog(fn: (sessionId: string, dialog: Dialog, snap: Snapshot) => void): () => void {
+		this.dialogFns.add(fn);
+		return () => {
+			this.dialogFns.delete(fn);
+		};
+	}
+
+	// Still unanswered: an external query that hasn't ended, or a dialog live in some session.
+	// Watch visibility, viewers and skips don't matter.
+	isPending(queryId: string): boolean {
+		return this.queries.external().some((q) => q.id === queryId) || this.dialogQueries().some((q) => q.id === queryId);
 	}
 
 	// What a ring note did while the app was closed; the Notifier alerts.
@@ -575,6 +592,28 @@ export class WatchService {
 		return true;
 	}
 
+	private announceDialogs(): void {
+		const live = new Set<string>();
+		for (const h of this.deps.registry.all()) {
+			if (h.kind !== "rpc") continue;
+			const snap = h.snapshot();
+			for (const d of snap.dialogs) {
+				const id = dialogQueryId(h.sessionId, d);
+				live.add(id);
+				if (this.dialogsSeen.has(id)) continue;
+				this.dialogsSeen.add(id);
+				for (const fn of [...this.dialogFns]) {
+					try {
+						fn(h.sessionId, d, snap);
+					} catch (err) {
+						this.deps.log?.(`watch: dialog listener: ${(err as Error).message}`);
+					}
+				}
+			}
+		}
+		for (const id of this.dialogsSeen) if (!live.has(id)) this.dialogsSeen.delete(id);
+	}
+
 	private announceQueries(): void {
 		if (this.queryFns.size === 0) return;
 		const all = this.refresh();
@@ -601,6 +640,7 @@ export class WatchService {
 			this.scheduled = false;
 			if (this.closed) return;
 			this.cursor++;
+			this.announceDialogs();
 			this.announceQueries();
 			if (this.waiters.size + this.subscribers.size === 0) return;
 			const p = this.pending();
