@@ -603,6 +603,17 @@ test("in the grace with nothing connected, a last-shown query now held for the o
 	assert.deepEqual(alerts, []);
 });
 
+test("app closed + recordedAt in epoch seconds is read as seconds and recorded in ms", async () => {
+	fresh();
+	const { id } = await raiseOn(ask);
+	const j = await ringClosed("allow", String(clock / 1000));
+	assert.equal(j.action, "answered");
+	assert.equal(j.queryId, id);
+	assert.equal(j.recordedMs, clock);
+	assert.equal((await ringClosed("deny", new Date(clock).toISOString())).recordedMs, clock);
+	assert.equal((await ringClosed("deny", null)).recordedMs, undefined);
+});
+
 test("app closed + an alerted dialog but no usable recordedAt → new session, the dialog untouched", async () => {
 	fresh();
 	const { h } = await raiseOn(ask);

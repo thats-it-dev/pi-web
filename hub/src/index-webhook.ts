@@ -184,11 +184,13 @@ export function contentKey(recordedAt: string | undefined, transcription: string
 	return `content-${h.digest("hex").slice(0, 32)}`;
 }
 
-// The note's recording time in ms (ms since the epoch, or a date string); null when absent or unparseable.
+// The note's recording time in ms (epoch ms or seconds, or a date string); null when absent or
+// unparseable. The Index app's format is unverified: a number below 1e11 (before 1973 in ms,
+// after 5138 in seconds) is read as seconds. The sidecar records the result as recordedMs.
 function recordedTime(v: string | undefined): number | null {
 	if (!v) return null;
 	const n = Number(v);
-	if (Number.isFinite(n) && n > 0) return n;
+	if (Number.isFinite(n) && n > 0) return n < 1e11 ? Math.round(n * 1000) : n;
 	const d = Date.parse(v);
 	return Number.isFinite(d) ? d : null;
 }
@@ -248,9 +250,10 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		stage = "store";
 		if (audio) saveAudio(deps.dataDir, delivery, audio);
 		stage = "decide";
+		const recordedMs = recordedTime(text("recordedAt"));
 		let outcome: Decision;
 		try {
-			outcome = await decide(deps.watch, transcription, recordedTime(text("recordedAt")));
+			outcome = await decide(deps.watch, transcription, recordedMs);
 		} catch (e) {
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };
@@ -258,7 +261,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		log(["index:", delivery, outcome.action, outcome.queryId ?? outcome.sessionId, outcome.reason && `(${outcome.reason})`].filter(Boolean).join(" "));
 		stage = "store";
 		const { signature: _omit, ...kept } = headers;
-		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), client: text("client"), ...outcome });
+		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), recordedMs: recordedMs ?? undefined, client: text("client"), ...outcome });
 		prune(deps.dataDir, deps.keep ?? KEEP);
 	} catch (e) {
 		log(`index: ${stage}: ${(e as Error).message}`);

@@ -12,6 +12,7 @@ export interface Sidecar {
 	headers: IndexHeaders;
 	transcription: string;
 	recordedAt?: string;
+	recordedMs?: number; // recordedAt as the hub read it (epoch ms)
 	client?: string;
 	action: "answered" | "no_match" | "gone" | "prompted" | "new_session" | "kept_audio" | "error";
 	sessionId?: string;
