@@ -604,8 +604,8 @@ function createBridge(deps) {
 		});
 	}
 
-	// A launch without an alert opens the running session with the most recent
-	// activity (Home stays under it), unless a query is pending (it opens on its
+	// A launch without an alert opens the session with the most recent activity,
+	// whatever its status (Michael's call; Home stays under it), unless a query is pending (it opens on its
 	// own) or the watch already shows something. Runs once, with the first frame,
 	// after the watch reports Home (that report would close a session opened before it),
 	// and only within RESUME_MS: after that the watch no longer opens the reply.
@@ -617,7 +617,7 @@ function createBridge(deps) {
 		var best = null;
 		for (var i = 0; i < frame.sessions.length; i++) {
 			var s = frame.sessions[i];
-			if (s.status === "running" && (!best || s.updatedAt > best.updatedAt)) best = s;
+			if (!best || s.updatedAt > best.updatedAt) best = s;
 		}
 		if (best) open(str(best.id));
 	}

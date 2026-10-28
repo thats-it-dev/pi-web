@@ -818,20 +818,20 @@ test("hub error notices: HTTP message is shown clipped; no message gives Hub err
 });
 
 // A plain launch (no alert): CMD launched with CODE 0.
-test("a plain launch opens the running session with the most recent activity, without a launch-target fetch", () => {
+test("a plain launch opens the session with the most recent activity, whatever its status, without a launch-target fetch", () => {
 	const t = setup();
 	t.pend([], [sess("d1", "done", { updatedAt: NOW }), sess("r1", "running", { updatedAt: NOW - 9 * MIN }), sess("r2", "running", { updatedAt: NOW - 2 * MIN })]);
 	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
 	assert.equal(t.hub.of("get").length, 0); // until the watch says Home is up: its report would close the session
 	t.bridge.onAppMessage({ CMD: "showing" });
 	assert.equal(t.hub.of("get", "/api/watch/launch-target").length, 0);
-	assert.equal(t.hub.of("get")[0].path, "/api/watch/history?session=r2&limit=6");
-	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "on it" }], total: 1 });
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/history?session=d1&limit=6");
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "done" }], total: 1 });
 	t.drain();
-	assert.equal(t.last("reply").SESSION_ID, "r2");
+	assert.equal(t.last("reply").SESSION_ID, "d1");
 });
 
-test("a plain launch before the first frame opens the running session once the frame lands, once", () => {
+test("a plain launch before the first frame opens the latest session once the frame lands, once", () => {
 	const t = setup();
 	t.bridge.start();
 	t.drain();
@@ -844,7 +844,7 @@ test("a plain launch before the first frame opens the running session once the f
 	assert.equal(t.hub.of("get").length, 1);
 });
 
-test("a plain launch with a pending query, nothing running, or a screen already chosen opens no session", () => {
+test("a plain launch with a pending query, no sessions, or a screen already chosen opens no session", () => {
 	const a = setup();
 	a.pend([query("q1", 1)], [sess("r1", "running")]);
 	a.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
@@ -852,7 +852,7 @@ test("a plain launch with a pending query, nothing running, or a screen already 
 	assert.equal(a.hub.of("get").length, 0);
 	assert.ok(a.last("query"));
 	const b = setup();
-	b.pend([], [sess("d1", "done")]);
+	b.pend([], []);
 	b.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
 	b.bridge.onAppMessage({ CMD: "showing" });
 	assert.equal(b.hub.of("get").length, 0);
