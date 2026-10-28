@@ -201,3 +201,37 @@ describe("routed thinking level per reply", () => {
 		expect(out).not.toContain("no thinking");
 	});
 });
+
+describe("TL;DR line is hidden", () => {
+	const reply = (content: unknown[], streaming = false) => {
+		const conv = createConversation(streaming ? [] : ([{ role: "assistant", content, timestamp: 1 }] as never));
+		if (streaming) conv.partial = { role: "assistant", content, timestamp: 1 } as never;
+		return flat(renderConversation(conv));
+	};
+
+	it("strips the line from the last text block", () => {
+		const out = reply([{ type: "text", text: "All done.\n\nTL;DR [x]: y" }]);
+		expect(out).toContain("All done.");
+		expect(out).not.toContain("TL;DR");
+	});
+
+	it("strips it while streaming too", () => {
+		expect(reply([{ type: "text", text: "All done.\n\nTL;DR [x]: y" }], true)).not.toContain("TL;DR");
+	});
+
+	it("keeps a TL;DR line in an earlier block", () => {
+		const out = reply([{ type: "text", text: "TL;DR [a]: early" }, { type: "toolCall", id: "t", name: "bash", arguments: {} }, { type: "text", text: "end" }]);
+		expect(out).toContain("TL;DR");
+	});
+
+	it("strips the last text block even when a toolCall follows", () => {
+		const out = reply([{ type: "text", text: "hi\n\nTL;DR [a]: b" }, { type: "toolCall", id: "t", name: "bash", arguments: {} }]);
+		expect(out).not.toContain("TL;DR");
+	});
+
+	it("renders a reply without one as before", () => {
+		const plain = reply([{ type: "text", text: "just text" }]);
+		expect(plain).toContain("just text");
+		expect(plain).toBe(flat(renderConversation(createConversation([{ role: "assistant", content: [{ type: "text", text: "just text" }], timestamp: 1 }] as never))));
+	});
+});

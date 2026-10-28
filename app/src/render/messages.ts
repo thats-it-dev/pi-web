@@ -2,6 +2,7 @@ import { type TemplateResult, css, html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AgentMessage, ContentBlock, Conversation, ToolRun } from "../../../shared/src/protocol.ts";
 import { blocksText, formatTokens, parseArgsRaw, summarizeToolArgs, truncateOutput, wordCount } from "../lib/format.ts";
+import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import { renderMarkdown, renderMarkdownUncached } from "../lib/markdown.ts";
 
@@ -69,8 +70,10 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 	const blocks = Array.isArray(m.content) ? m.content : [];
 	// The level this reply was actually sent at (a router like flash-auto picks it per prompt); pi records it on message_end.
 	const level = typeof m.thinkingLevel === "string" ? m.thinkingLevel : null;
+	// The agent's closing TL;DR line feeds push notifications; the chat doesn't repeat it.
+	const lastText = blocks.findLastIndex((b) => b?.type === "text");
 	return html`<div class="assistant">
-		${blocks.map((b) => {
+		${blocks.map((b, i) => {
 			if (!b) return nothing;
 			if (b.type === "thinking") {
 				const thinking = String(b.thinking ?? "");
@@ -81,7 +84,8 @@ function renderAssistant(m: AgentMessage, results: Results, tools: Record<string
 				return b.redacted ? html`<div class="note">thinking (redacted)</div>` : nothing;
 			}
 			if (b.type === "text") {
-				const text = String(b.text ?? "");
+				const raw = String(b.text ?? "");
+				const text = i === lastText ? stripTldr(raw) : raw;
 				return text.trim() ? html`<div class="md">${markdown(text, streaming ? null : b)}</div>` : nothing;
 			}
 			if (b.type === "toolCall") return renderTool(b, results.get(b.id), tools[b.id], streaming, loader);
