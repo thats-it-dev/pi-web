@@ -251,6 +251,11 @@ export class WatchService {
 		return this.subscribers.size;
 	}
 
+	// An app holds the stream or a long-poll right now (no grace): the Notifier's "app open".
+	connected(): boolean {
+		return this.subscribers.size + this.waiters.size > 0;
+	}
+
 	// What the watch last reported on screen, or null.
 	onScreen(): Showing | null {
 		this.refresh();

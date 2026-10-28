@@ -367,6 +367,21 @@ test("answering or skipping an external query resolves it: option, ring-answer t
 	svc.close();
 });
 
+test("connected: a held long-poll counts as well as a stream subscriber", async () => {
+	const { svc } = setup();
+	assert.equal(svc.connected(), false);
+	const ac = new AbortController();
+	void svc.wait(svc.pending().cursor, 60_000, ac.signal);
+	assert.equal(svc.connected(), true);
+	ac.abort();
+	assert.equal(svc.connected(), false);
+	const off = svc.subscribe(() => {});
+	assert.equal(svc.connected(), true);
+	off();
+	assert.equal(svc.connected(), false);
+	svc.close();
+});
+
 test("wait resolves early on change and at maxMs without one; two waiters both wake", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);

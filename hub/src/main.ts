@@ -56,7 +56,7 @@ const notifier = new Notifier({
 	mode: cfg.watchAlert,
 	appUuid: WATCH_APP_UUID,
 	phone: () => watch.phone,
-	appOpen: () => stream.clientCount() > 0,
+	appOpen: () => watch.connected(), // the stream or a long-poll; between polls an alert may slip through
 	send: async (host, frame) => (await sendToPhone(host, frame)).ok,
 	push: (p) => push.send(p),
 	markDelivered: (id) => watch.markDelivered(id),
