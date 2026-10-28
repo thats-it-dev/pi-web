@@ -1,6 +1,6 @@
 # Push alerts with an agent-written TL;DR — design
 
-Status: draft for Michael's review (2026-10-28).
+Status: approved by Michael with short titles added (2026-10-28).
 
 ## 1. Intent
 
@@ -49,10 +49,18 @@ Anti-goals (would make it a failure even if it works):
 - **Remove** the Developer Connection notification path entirely, including the
   BlobDB frame code and the alert-mode setting.
 - A push is held back only when **the PWA is visible on that same session**.
+- Titles are short. The agent writes a 2–4 word title for a finished turn.
 
 ## 4. Events and what each push says
 
-The title stays as today (`sessionTitle`).
+**Titles are short (Michael's call).** They must not eat the watch screen.
+- A finished turn's title is written by the agent along with its TL;DR: 2–4
+  words, at most 24 characters, naming what the turn was about (for example
+  "413 fixed" or "Plan 2 merged").
+- Every other event, and a turn whose title is missing, uses project + event,
+  at most 24 characters. The project is the session's folder name, cut short.
+  The events read `done`, `approve?`, `question`, `error` and `waiting`, for
+  example "pi-web · approve?" or "ring · question" (Claude's call).
 
 | Event | Body |
 |---|---|
@@ -69,15 +77,17 @@ the closed-app ring path) also go out as pushes.
 
 - Every session pi-web runs (headless) gets a system-prompt rule. When the
   agent ends its turn with a final reply, it ends that reply with one line in a
-  fixed, machine-findable form, for example `TL;DR: <outcome>`.
+  fixed, machine-findable form that carries both the short title and the
+  outcome, for example `TL;DR [413 fixed]: <outcome>`.
 - The line states what was done or found, in at most about 100 characters.
   It contains no question and no suggestion.
 - The hub reads the line when the turn ends and uses it as the push body.
 - The PWA does not show the raw line inside the reply. It hides the line, or
   renders it as a small distinct summary. Either way Michael never reads the
   same text twice.
-- If the line is missing, the push falls back to today's clipped text (Claude's
-  call), so a push is never empty.
+- If the line is missing, the push falls back to today's clipped text and the
+  project + event title (Claude's call), so a push is never empty. An over-long
+  title is cut to 24 characters.
 
 ## 6. Delivery
 
