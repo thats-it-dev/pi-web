@@ -108,4 +108,32 @@ describe("ListStore", () => {
 		expect(open).not.toHaveBeenCalled();
 		store.stop();
 	});
+	it("reports the viewed session in the events URL, reopening only when it changes", () => {
+		const doc = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+		vi.stubGlobal("document", doc);
+		const api = { sessions: vi.fn(async () => ({ sessions: [s("a")], home: "/h" })), eventsUrl: (v?: string | null) => (v ? `events?viewing=${v}` : "events") };
+		const urls: string[] = [];
+		const closed: boolean[] = [];
+		const open = vi.fn((url: string) => {
+			urls.push(url);
+			const i = closed.push(false) - 1;
+			return { close: () => void (closed[i] = true) };
+		});
+		const store = new ListStore(api, open as never);
+		store.start();
+		store.setViewing("s1");
+		expect(urls).toEqual(["events", "events?viewing=s1"]);
+		expect(closed[0]).toBe(true);
+		store.setViewing("s1");
+		expect(urls).toHaveLength(2);
+
+		doc.visibilityState = "hidden";
+		doc.dispatchEvent(new Event("visibilitychange"));
+		store.setViewing("s2");
+		expect(urls).toHaveLength(2); // hidden: nothing opens
+		doc.visibilityState = "visible";
+		doc.dispatchEvent(new Event("visibilitychange"));
+		expect(urls[2]).toBe("events?viewing=s2");
+		store.stop();
+	});
 });

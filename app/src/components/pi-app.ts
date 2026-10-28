@@ -106,7 +106,7 @@ export class PiApp extends LitElement {
 
 	private renderMain(r: Route) {
 		if (!this.api || r.name === "settings") return html`<pi-settings @pi-hub-changed=${this.connectHub}></pi-settings>`;
-		if (r.name === "session") return html`<pi-session .api=${this.api} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
+		if (r.name === "session") return html`<pi-session .api=${this.api} .list=${this.list} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
 		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
 		// home: launch() picks the route once the sessions are in; till then, a way to the sessions.
 		return html`<div class="waiting"><button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button></div>`;

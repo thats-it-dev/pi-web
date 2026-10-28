@@ -26,6 +26,7 @@ export class ListStore extends EventTarget {
 	private api: Pick<HubApi, "sessions" | "eventsUrl">;
 	private open: typeof openStream;
 	private stream: { close(): void } | null = null;
+	private viewing: string | null = null; // the session on screen, reported to the hub
 	private refreshSeq = 0;
 	private timer: ReturnType<typeof setInterval> | undefined;
 	// The events stream is held only while the app is visible: the hub treats an
@@ -61,10 +62,19 @@ export class ListStore extends EventTarget {
 		if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
 	}
 
+	// Reopens the stream when the session on screen changes, so the hub sees it.
+	setViewing(id: string | null): void {
+		if (id === this.viewing) return;
+		this.viewing = id;
+		if (!this.stream) return; // hidden or stopped: the next open carries it
+		this.closeEvents();
+		this.openEvents();
+	}
+
 	private openEvents(): void {
 		let wasDown = false;
 		this.stream = this.open<ListMessage>(
-			this.api.eventsUrl(),
+			this.api.eventsUrl(this.viewing),
 			(m) => this.apply(m),
 			(st) => {
 				if (st === "reconnecting") wasDown = true;

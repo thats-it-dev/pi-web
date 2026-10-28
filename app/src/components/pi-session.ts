@@ -6,6 +6,7 @@ import type { HubApi } from "../lib/api.ts";
 import { takeHandoff } from "../lib/draft.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
+import type { ListStore } from "../lib/list-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
@@ -25,6 +26,7 @@ const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabi
 export class PiSession extends LitElement {
 	static properties = {
 		api: { attribute: false },
+		list: { attribute: false },
 		sessionId: { attribute: false },
 		home: { attribute: false },
 		version: { state: true },
@@ -34,6 +36,7 @@ export class PiSession extends LitElement {
 		tucked: { state: true },
 	};
 	declare api: HubApi;
+	declare list: ListStore | null;
 	declare sessionId: string;
 	declare home: string;
 	declare version: number;
@@ -68,6 +71,7 @@ export class PiSession extends LitElement {
 
 	constructor() {
 		super();
+		this.list = null;
 		this.sessionId = "";
 		this.home = "";
 		this.version = 0;
@@ -83,6 +87,7 @@ export class PiSession extends LitElement {
 
 	disconnectedCallback(): void {
 		this.teardown();
+		this.list?.setViewing(null);
 		this.stopTicker();
 		super.disconnectedCallback();
 	}
@@ -93,6 +98,7 @@ export class PiSession extends LitElement {
 		this.teardown();
 		const store = new SessionStore(id);
 		this.store = store;
+		this.list?.setViewing(id);
 		this.loader = sessionImageLoader(this.api, store);
 		this.sheet = null;
 		this.atBottom = true;

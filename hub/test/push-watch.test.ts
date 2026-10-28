@@ -166,3 +166,25 @@ test("push body is the error text for error", async () => {
 	assert.equal(sent[0].kind, "error");
 	assert.equal(sent[0].body, "model unreachable");
 });
+
+test("Viewers tracks which session each viewer is on, and the global count is unchanged", () => {
+	const v = new Viewers();
+	const seen: boolean[] = [];
+	v.onChange((w) => seen.push(w));
+	const a1 = v.add("a");
+	const a2 = v.add("a");
+	assert.equal(v.viewing("a"), true);
+	assert.equal(v.viewing("b"), false);
+	assert.equal(v.watching(), true);
+	a1();
+	a1(); // idempotent
+	assert.equal(v.viewing("a"), true);
+	a2();
+	assert.equal(v.viewing("a"), false);
+	assert.equal(v.watching(), false);
+	const anon = v.add();
+	assert.equal(v.watching(), true);
+	assert.equal(v.viewing("a"), false);
+	anon();
+	assert.deepEqual(seen, [true, false, true, false]);
+});

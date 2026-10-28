@@ -84,8 +84,9 @@ export class HubApi {
 	streamUrl(id: string) {
 		return `${this.base}/api/sessions/${encodeURIComponent(id)}/stream`;
 	}
-	eventsUrl() {
-		return `${this.base}/api/events`;
+	// viewing: the session on screen, so the hub holds back its pushes.
+	eventsUrl(viewing?: string | null) {
+		return `${this.base}/api/events${viewing ? `?viewing=${encodeURIComponent(viewing)}` : ""}`;
 	}
 
 	// Plain fetch (not req) because the body is wanted as a Blob.

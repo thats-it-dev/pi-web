@@ -344,6 +344,15 @@ test("the events stream relays session state changes, and counts as the app bein
 	assert.equal(viewers.watching(), false);
 });
 
+test("an events stream with ?viewing= marks that session as viewed until it closes", async () => {
+	const sse = await openSse(port, "/api/events?viewing=s1", GOOD);
+	assert.equal(viewers.viewing("s1"), true);
+	assert.equal(viewers.viewing("s2"), false);
+	sse.close();
+	for (let i = 0; i < 100 && viewers.viewing("s1"); i++) await new Promise((r) => setTimeout(r, 10));
+	assert.equal(viewers.viewing("s1"), false);
+});
+
 test("an unreadable export is an error response and the hub keeps serving", async () => {
 	mkdirSync(join(root, "exports", "dir.html"), { recursive: true });
 	const r = await call(port, "GET", "/api/exports/dir.html", GOOD);

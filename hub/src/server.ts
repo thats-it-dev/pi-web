@@ -262,7 +262,7 @@ export function createHubServer(deps: HubDeps): Server {
 	function listStream(req: IncomingMessage, res: ServerResponse, cors: Cors): void {
 		const sse = openSse(res, cors);
 		const stop = registry.onChange((m) => sse.send(m));
-		const leave = deps.viewers?.add();
+		const leave = deps.viewers?.add(new URL(req.url ?? "/", "http://hub").searchParams.get("viewing") || null);
 		req.on("close", () => {
 			stop();
 			leave?.();

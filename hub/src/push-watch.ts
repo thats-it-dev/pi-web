@@ -17,13 +17,21 @@ const BODY_MAX = 160;
 export class Viewers {
 	private count = 0;
 	private listeners = new Set<(watching: boolean) => void>();
+	private bySession = new Map<string, number>(); // viewers per session they're showing
 
-	add(): () => void {
+	// sessionId: the session this viewer is looking at, if any.
+	add(sessionId?: string | null): () => void {
 		if (++this.count === 1) this.emit(true);
+		if (sessionId) this.bySession.set(sessionId, (this.bySession.get(sessionId) ?? 0) + 1);
 		let left = false;
 		return () => {
 			if (left) return;
 			left = true;
+			if (sessionId) {
+				const n = (this.bySession.get(sessionId) ?? 1) - 1;
+				if (n > 0) this.bySession.set(sessionId, n);
+				else this.bySession.delete(sessionId);
+			}
 			if (--this.count === 0) this.emit(false);
 		};
 	}
@@ -42,6 +50,10 @@ export class Viewers {
 
 	watching(): boolean {
 		return this.count > 0;
+	}
+
+	viewing(sessionId: string): boolean {
+		return this.bySession.has(sessionId);
 	}
 }
 
