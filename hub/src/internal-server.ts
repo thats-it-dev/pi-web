@@ -24,6 +24,21 @@ function str(v: unknown, name: string): string {
 	return v;
 }
 
+// A JSON object body; null, a number or an array is a 400, not a TypeError.
+async function readObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+	const b = await readJson(req);
+	if (b === null || typeof b !== "object" || Array.isArray(b)) throw new HttpError(400, "Body must be a JSON object");
+	return b as Record<string, unknown>;
+}
+
+function decodeId(raw: string): string {
+	try {
+		return decodeURIComponent(raw);
+	} catch {
+		throw new HttpError(400, "Malformed query id");
+	}
+}
+
 function httpUrl(v: unknown): string {
 	const s = str(v, "callbackUrl");
 	let ok = false;
@@ -57,7 +72,7 @@ export function createInternalServer(deps: InternalDeps): http.Server {
 		const path = new URL(req.url ?? "/", "http://localhost").pathname;
 		if (req.method === "GET" && path === "/queries") return sendJson(res, 200, { queries: store.external() }, {});
 		if (req.method === "POST" && path === "/queries") {
-			const b = (await readJson(req)) as Record<string, unknown>;
+			const b = await readObject(req);
 			const label = str(b.label, "label");
 			const text = str(b.text, "text");
 			if (!Array.isArray(b.options) || !b.options.every((o) => typeof o === "string")) throw new HttpError(400, "options must be an array of strings");
@@ -76,14 +91,15 @@ export function createInternalServer(deps: InternalDeps): http.Server {
 		}
 		const m = req.method === "POST" ? /^\/queries\/([^/]+)\/clear-by-ring$/.exec(path) : null;
 		if (m) {
-			const text = str(((await readJson(req)) as Record<string, unknown>).text, "text");
-			if (!store.resolve(decodeURIComponent(m[1]), { kind: "cleared-by-ring", text })) throw new HttpError(404, "No such query");
+			const id = decodeId(m[1]);
+			const text = str((await readObject(req)).text, "text");
+			if (!store.resolve(id, { kind: "cleared-by-ring", text })) throw new HttpError(404, "No such query");
 			return sendJson(res, 200, { ok: true }, {});
 		}
 		throw new HttpError(404, "Not found");
 	}
 
-	return http.createServer((req, res) => {
+	const server = http.createServer((req, res) => {
 		handle(req, res).catch((err) => {
 			if (err instanceof HttpError) sendJson(res, err.status, { error: err.message }, {});
 			else {
@@ -92,4 +108,8 @@ export function createInternalServer(deps: InternalDeps): http.Server {
 			}
 		});
 	});
+	// A listen failure (EADDRINUSE on internalPort) must not take the hub down: the web app and
+	// the watch keep running, only ring-profile loses its API.
+	server.on("error", (err) => log(`internal API: ${err.message}`));
+	return server;
 }

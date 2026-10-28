@@ -79,6 +79,29 @@ describe("internal server", () => {
 		assert.equal((await post(port, "/queries/rp:9/clear-by-ring", {})).status, 400);
 	});
 
+	it("a JSON null body or a malformed %-escape in the id is 400, not 500", async () => {
+		const s = setup();
+		const port = await s.port;
+		assert.equal((await post(port, "/queries", null)).status, 400);
+		assert.equal((await post(port, "/queries/rp:1/clear-by-ring", null)).status, 400);
+		assert.equal((await post(port, "/queries/%E0%A4%A/clear-by-ring", { text: "x" })).status, 400);
+		assert.deepEqual(s.logs, []);
+	});
+
+	it("a busy port is logged, not thrown (the hub keeps running without the internal API)", async () => {
+		const first = setup();
+		const port = await first.port;
+		const logs: string[] = [];
+		const store = new QueryStore({ onChange: () => {} });
+		closers.push(() => store.close());
+		const second = createInternalServer({ store, log: (m) => logs.push(m) });
+		await new Promise<void>((r) => {
+			second.listen(port, "127.0.0.1");
+			second.once("error", () => setImmediate(r));
+		});
+		assert.ok(logs.some((l) => l.includes("EADDRINUSE")), logs.join(" | "));
+	});
+
 	it("clear-by-ring on an unknown id returns 404", async () => {
 		const s = setup();
 		const port = await s.port;
