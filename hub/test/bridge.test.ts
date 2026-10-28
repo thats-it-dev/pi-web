@@ -52,6 +52,7 @@ async function setup(t: TestContext) {
 		dev: false,
 		approvalMode: "manual",
 	watchAlert: "auto",
+	ringProfileUrl: "",
 		dataDir: env.root,
 	};
 	const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: env.workDir, log: () => {} });

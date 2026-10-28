@@ -41,6 +41,7 @@ const cfg: HubConfig = {
 	dev: false,
 	approvalMode: "manual",
 	watchAlert: "auto",
+	ringProfileUrl: "",
 	dataDir: root,
 };
 const GOOD = { origin: "https://pi.thatsit.app", host: "hub.test:7878", "tailscale-user-login": "me@github" };

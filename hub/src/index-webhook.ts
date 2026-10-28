@@ -69,7 +69,7 @@ export function verifyIndex(h: IndexHeaders, replays: ReplayCache): Verify {
 }
 
 const BODY_MAX = 25 * 1024 * 1024;
-const KEEP = 200;
+export const KEEP = 200;
 const TEXT_MAX = 8_000;
 
 export interface IndexDeps {
@@ -191,7 +191,7 @@ export function contentKey(recordedAt: string | undefined, transcription: string
 // The note's recording time in ms (epoch ms or seconds, or a date string); null when absent or
 // unparseable. The Index app's format is unverified: a number below 1e11 (before 1973 in ms,
 // after 5138 in seconds) is read as seconds. The sidecar records the result as recordedMs.
-function recordedTime(v: string | undefined): number | null {
+export function recordedTime(v: string | undefined): number | null {
 	if (!v) return null;
 	const n = Number(v);
 	if (Number.isFinite(n) && n > 0) return n < 1e11 ? Math.round(n * 1000) : n;
@@ -199,72 +199,122 @@ function recordedTime(v: string | undefined): number | null {
 	return Number.isFinite(d) ? d : null;
 }
 
-export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
-	const log = deps.log ?? (() => {});
-	const done = (): void => {
-		res.writeHead(200);
-		res.end();
-	};
+/** A new ring delivery, read and checked by receiveRing. */
+export interface RingNote {
+	headers: IndexHeaders;
+	delivery: string; // the header id, else the content key, else a random UUID
+	field: (name: string) => string | undefined; // a text part
+	audio: Buffer | undefined;
+	transcription: string; // trimmed, not yet cut
+	recordedMs: number | null; // recordedTime(field("recordedAt"))
+}
+
+export interface ReceiveDeps {
+	dataDir: string;
+	replays: ReplayCache;
+	log: (m: string) => void;
+}
+
+/** The ring's acknowledgement: 200 with an empty body. */
+export function ack(res: ServerResponse): void {
+	res.writeHead(200);
+	res.end();
+}
+
+/**
+ * The steps both ring webhooks share: read the body, check the headers, parse
+ * the multipart and drop repeats (the replay cache by delivery id or content
+ * key, then the stored sidecar). Everything that isn't a new note is answered
+ * here and gives null; a new note is returned unanswered. `tag` prefixes the
+ * log lines ("index", "notes").
+ */
+export async function receiveRing(req: IncomingMessage, res: ServerResponse, deps: ReceiveDeps, tag: string): Promise<RingNote | null> {
+	const { log } = deps;
 	let body: Buffer;
 	try {
 		body = await readBody(req);
 	} catch (e) {
 		req.resume(); // discard the rest; the connection closes after the answer
 		const status = e instanceof HttpError ? e.status : 400;
-		log(`index: rejected (${(e as Error).message})`);
+		log(`${tag}: rejected (${(e as Error).message})`);
 		res.setHeader("connection", "close");
-		return sendJson(res, status, { error: (e as Error).message }, {});
+		sendJson(res, status, { error: (e as Error).message }, {});
+		return null;
 	}
 	const headers = readIndexHeaders(req.headers);
 	const v = verifyIndex(headers, deps.replays);
 	if (!v.ok && v.status === 409) {
 		// Acknowledged, not processed: a non-2xx could keep the Index app re-sending it.
-		log("index: duplicate delivery ignored");
-		return done();
+		log(`${tag}: duplicate delivery ignored`);
+		ack(res);
+		return null;
 	}
 	if (!v.ok) {
-		log(`index: rejected (${v.reason})`);
-		return sendJson(res, v.status, { error: v.reason }, {});
+		log(`${tag}: rejected (${v.reason})`);
+		sendJson(res, v.status, { error: v.reason }, {});
+		return null;
 	}
 	if (v.isTest) {
-		log("index: test event ok");
-		return done();
+		log(`${tag}: test event ok`);
+		ack(res);
+		return null;
 	}
-	let stage = "parse";
 	try {
 		let parts;
 		try {
 			parts = parseMultipart(body, first(req.headers["content-type"]));
 		} catch (e) {
-			log(`index: parse: ${(e as Error).message}`);
-			return done();
+			log(`${tag}: parse: ${(e as Error).message}`);
+			ack(res);
+			return null;
 		}
-		const text = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
+		const field = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
 		const audio = parts.find((p) => p.name === "audio")?.data;
-		const raw = text("transcription") ?? "";
+		const raw = field("transcription") ?? "";
 		let delivery = headers.delivery;
 		if (!delivery) {
-			const key = contentKey(text("recordedAt"), raw, audio);
+			const key = contentKey(field("recordedAt"), raw, audio);
 			if (key && deps.replays.seen(key)) {
-				log("index: duplicate delivery ignored");
-				return done();
+				log(`${tag}: duplicate delivery ignored`);
+				ack(res);
+				return null;
 			}
 			delivery = key ?? randomUUID();
 		}
 		// The replay cache forgets after an hour and on restart; the Index app may re-send hours later.
 		if (stored(deps.dataDir, delivery)) {
-			log("index: duplicate delivery ignored");
-			return done();
+			log(`${tag}: duplicate delivery ignored`);
+			ack(res);
+			return null;
 		}
-		let transcription = raw.trim();
+		return { headers, delivery, field, audio, transcription: raw.trim(), recordedMs: recordedTime(field("recordedAt")) };
+	} catch (e) {
+		log(`${tag}: parse: ${(e as Error).message}`);
+		ack(res);
+		return null;
+	}
+}
+
+/** The sidecar fields both webhooks record; the caller adds the action. */
+export function noteSidecar(note: RingNote, transcription: string, receivedAt: number): Omit<Sidecar, "action"> {
+	const { signature: _omit, ...kept } = note.headers;
+	return { receivedAt, headers: kept, transcription, recordedAt: note.field("recordedAt"), recordedMs: note.recordedMs ?? undefined, client: note.field("client") };
+}
+
+export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
+	const log = deps.log ?? (() => {});
+	const note = await receiveRing(req, res, { dataDir: deps.dataDir, replays: deps.replays, log }, "index");
+	if (!note) return;
+	const { delivery, audio, recordedMs } = note;
+	let stage = "store";
+	try {
+		let transcription = note.transcription;
 		if (transcription.length > TEXT_MAX) {
 			transcription = transcription.slice(0, TEXT_MAX);
 			log(`index: ${delivery} transcription cut to ${TEXT_MAX} chars`);
 		}
-		stage = "store";
 		if (audio) saveAudio(deps.dataDir, delivery, audio);
 		stage = "decide";
-		const recordedMs = recordedTime(text("recordedAt"));
 		let outcome: Decision;
 		try {
 			outcome = await decide(deps.watch, transcription, recordedMs, (deps.now ?? Date.now)());
@@ -274,11 +324,10 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		}
 		log(["index:", delivery, outcome.action, outcome.queryId ?? outcome.sessionId, outcome.reason && `(${outcome.reason})`].filter(Boolean).join(" "));
 		stage = "store";
-		const { signature: _omit, ...kept } = headers;
-		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), recordedMs: recordedMs ?? undefined, client: text("client"), ...outcome });
+		saveSidecar(deps.dataDir, delivery, { ...noteSidecar(note, transcription, (deps.now ?? Date.now)()), ...outcome });
 		prune(deps.dataDir, deps.keep ?? KEEP);
 	} catch (e) {
 		log(`index: ${stage}: ${(e as Error).message}`);
 	}
-	done();
+	ack(res);
 }

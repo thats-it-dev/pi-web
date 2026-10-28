@@ -1,4 +1,4 @@
-// Where Index 01 deliveries are kept: <dataDir>/index/<delivery>.m4a (when there
+// Where Index 01 deliveries (both webhooks) are kept: <dataDir>/index/<delivery>.m4a (when there
 // was audio) and <delivery>.json (always). Only the newest `keep` survive.
 // <delivery> is X-Index-Delivery when sent, else the note's content key
 // ("content-<32 hex>", index-webhook.ts contentKey), else a random UUID.
@@ -14,7 +14,9 @@ export interface Sidecar {
 	recordedAt?: string;
 	recordedMs?: number; // recordedAt as the hub read it (epoch ms)
 	client?: string;
-	action: "answered" | "no_match" | "gone" | "prompted" | "new_session" | "kept_audio" | "error";
+	// The agent webhook's outcomes, then the notes webhook's: "forwarded" (sent to ring-profile, or
+	// queued in its outbox) and "stored" (ring-profile forwarding is switched off).
+	action: "answered" | "no_match" | "gone" | "prompted" | "new_session" | "kept_audio" | "error" | "forwarded" | "stored";
 	sessionId?: string;
 	queryId?: string;
 	reason?: string;

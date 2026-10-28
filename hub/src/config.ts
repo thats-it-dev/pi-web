@@ -17,6 +17,7 @@ export interface HubConfig {
 	piBin: string;
 	watchAlert: WatchAlert; // how a closed watch app is alerted (notifier.ts)
 	approvalMode: ApprovalMode; // the default for app-started sessions (see auto-approve.ts)
+	ringProfileUrl: string; // the ring-profile service ring notes are forwarded to; "" turns forwarding off
 	dev: boolean;
 	dataDir: string;
 }
@@ -32,6 +33,7 @@ export const DEFAULTS = {
 	piBin: "pi",
 	approvalMode: "auto" as ApprovalMode,
 	watchAlert: "auto" as WatchAlert,
+	ringProfileUrl: "http://127.0.0.1:7880",
 	dev: false,
 };
 

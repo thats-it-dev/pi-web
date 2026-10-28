@@ -9,6 +9,7 @@ import { ConfigError, type HubConfig, loadConfig } from "./config.ts";
 import { createInternalServer } from "./internal-server.ts";
 import { LastModelStore } from "./last-model.ts";
 import { ModelCatalog } from "./model-catalog.ts";
+import { createNotesOutbox } from "./notes-outbox.ts";
 import { Notifier } from "./notifier.ts";
 import { PushStore } from "./push.ts";
 import { Viewers, watchPush } from "./push-watch.ts";
@@ -75,7 +76,10 @@ try {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const updater = gitUpdater(repoRoot, version);
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, launchTarget: (c) => notifier.launchTarget(c) });
+// Ring notes for ring-profile, retried every minute until it takes them; none when ringProfileUrl is "".
+const notesOutbox = createNotesOutbox(cfg.ringProfileUrl, cfg.dataDir);
+void notesOutbox?.flush(); // notes queued before a restart
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox, launchTarget: (c) => notifier.launchTarget(c) });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
@@ -85,6 +89,7 @@ const internal = createInternalServer({ store: watch.queries, log: (m) => consol
 internal.listen(cfg.internalPort, "127.0.0.1", () => console.log(`internal API on http://127.0.0.1:${cfg.internalPort}`));
 
 const shutdown = () => {
+	notesOutbox?.stop();
 	internal.close();
 	stream.close();
 	watch.close();

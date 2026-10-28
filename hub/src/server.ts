@@ -14,6 +14,8 @@ import { ImageStore } from "./images.ts";
 import { HttpError } from "./errors.ts";
 import { FileLister } from "./files.ts";
 import { ReplayCache, handleIndexWebhook } from "./index-webhook.ts";
+import type { Outbox } from "./notes-outbox.ts";
+import { handleNotesWebhook } from "./notes-webhook.ts";
 import { type Cors, readJson, sendJson } from "./http.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { Registry } from "./registry.ts";
@@ -42,6 +44,7 @@ export interface HubDeps {
 	launchTarget?: (code: number) => { queryId: string } | { sessionId: string } | null; // what a notification's launch code meant (Notifier)
 	catalog?: Pick<ModelCatalog, "get">; // models for /api/defaults and new sessions; absent means none known
 	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
+	notesOutbox?: Outbox; // forwards ring notes to ring-profile; absent (ringProfileUrl "") means notes are only stored
 	now?: () => number;
 }
 
@@ -300,6 +303,16 @@ export function createHubServer(deps: HubDeps): Server {
 				}
 				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
 				await handleIndexWebhook(req, res, { watch: deps.watch, dataDir: cfg.dataDir, replays, now: deps.now, log });
+				return;
+			}
+			if (req.method === "POST" && path === "/api/index/notes") {
+				// The ring's notes webhook: same identity rule; it never touches pi, so no watch is needed.
+				const identity = checkHostAndLogin(cfg, req.headers);
+				if (!identity.ok) {
+					log(`rejected ${req.method} ${req.url}: ${identity.reason}`);
+					throw new HttpError(403, "Forbidden");
+				}
+				await handleNotesWebhook(req, res, { dataDir: cfg.dataDir, replays, outbox: deps.notesOutbox, now: deps.now, log });
 				return;
 			}
 			const auth = checkRequest(cfg, req.headers);

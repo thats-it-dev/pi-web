@@ -158,6 +158,26 @@ Each delivery is stored in `<dataDir>/index/` as `<delivery>.m4a` (when there wa
 
 `<delivery>` is the header id, else the content key, else a random UUID. The log line is `index: <delivery> <outcome> <query or session id> (<reason>)`, leaving out the parts that are empty. The newest 200 deliveries are kept.
 
+### Notes webhook
+
+`POST /api/index/notes` is the ring's second webhook, for notes about you rather than for pi. Point a second Index webhook at it. It takes the same headers and multipart parts as `/api/index/webhook`, with the same tailnet identity rule, the same `400` and `413` answers, and the same test-event handling. It shares the same de-duplication: the replay cache by `X-Index-Delivery` or content key, then the stored sidecar. A repeat is acknowledged with `200` and nothing is forwarded. The watch API need not be set up for this route.
+
+A note never answers a query, prompts a session or starts one. The hub stores it in `<dataDir>/index/` like an agent delivery: the audio, and a sidecar with `action: "forwarded"`. When forwarding is off, the action is `"stored"`. The newest-200 pruning counts both webhooks' deliveries together. The hub then forwards the note to the ring-profile service at `POST {ringProfileUrl}/notes` with this JSON:
+
+| Field | Value |
+| --- | --- |
+| `dedupeKey` | the delivery name (header id, else content key, else a random UUID) |
+| `deliveryId` | `X-Index-Delivery`, when sent |
+| `recordedAt` | the parsed `recordedAt` in epoch ms, else the hub's receive time |
+| `receivedAt` | the hub's receive time, epoch ms |
+| `transcript` | the transcription, trimmed (not cut) |
+| `audioBase64` | the audio, when there was any |
+| `webhook` | `"notes"` |
+
+Once the headers pass, the ring gets `200` without waiting for the forward. The note is first written to `<dataDir>/index/outbox/<delivery>.json` and tried at once, with a 10 s timeout. A `2xx` deletes the file. Anything else leaves it there, and the hub retries every queued note every 60 s and at startup. The log line is `notes: <delivery> forwarded`, or `queued` when the first try failed, or `stored` when forwarding is off.
+
+`ringProfileUrl` in `config.json` sets the service, and defaults to `http://127.0.0.1:7880`. Set it to `""` to turn forwarding off: notes are then only stored, and no outbox is created.
+
 ## Examples
 
 Set the host once. Every call needs the tailnet identity, so run these from a device on the tailnet that `tailscale serve` recognises as you.
