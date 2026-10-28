@@ -37,6 +37,7 @@ export function shortTitle(project: string, event: "done" | "approve?" | "questi
 
 export class Notifier {
 	private deps: NotifierDeps;
+	private scheduled = new Set<string>(); // query ids that already have a reminder timer
 	private held = new Map<string, { sessionId: string; dialog: Dialog; snap: Snapshot }>(); // by dialog query id
 
 	constructor(deps: NotifierDeps) {
@@ -92,15 +93,42 @@ export class Notifier {
 
 	// The closed-app ring path answers only dialogs that were alerted, so a pushed one is marked.
 	private async pushDialog(sessionId: string, dialog: Dialog, snap: Snapshot): Promise<void> {
-		const title = shortTitle(basename(snap.cwd), dialog.method === "confirm" ? "approve?" : "question");
-		if (await this.send({ sessionId, title, kind: "needs_you" }, dialogMessage(dialog))) this.deps.markDelivered(dialogQueryId(sessionId, dialog));
+		const project = basename(snap.cwd);
+		const body = dialogMessage(dialog);
+		const id = dialogQueryId(sessionId, dialog);
+		if (await this.send({ sessionId, title: shortTitle(project, dialog.method === "confirm" ? "approve?" : "question"), kind: "needs_you" }, body)) {
+			this.deps.markDelivered(id);
+			this.scheduleStuck(id, { sessionId, title: shortTitle(project, "waiting"), kind: "needs_you" }, body, true);
+		}
+	}
+
+	// One reminder per query id, stuckMs after its push, if it is still unanswered. A dialog whose
+	// session is being viewed at that point gets none (the app shows it) and is not rescheduled.
+	private scheduleStuck(id: string, p: PushPayload, body: string, dialog: boolean): void {
+		if (this.scheduled.has(id)) return;
+		this.scheduled.add(id);
+		const fire = () => {
+			try {
+				if (!this.deps.enabled || !this.deps.isPending(id) || (dialog && this.deps.viewing(p.sessionId))) return;
+				const b = clipText(body, BODY_MAX);
+				this.send(p, b ? `Still waiting: ${b}` : "Still waiting").catch((err) => this.log(`notifier: waiting ${id}: ${(err as Error).message}`));
+			} catch (err) {
+				this.log(`notifier: waiting ${id}: ${(err as Error).message}`);
+			}
+		};
+		const timer = (this.deps.setTimer ?? setTimeout)(fire, this.deps.stuckMs ?? 900_000) as { unref?: () => void } | undefined;
+		timer?.unref?.();
 	}
 
 	// A ring-profile question. pi dialogs alert through dialog(), so they're ignored here.
 	async query(q: WatchQuery): Promise<void> {
 		try {
 			if (!this.deps.enabled || q.source !== "ring-profile") return;
-			if (await this.send({ sessionId: q.sessionId ?? "", title: shortTitle("ring", "question"), kind: "query" }, q.text)) this.deps.markDelivered(q.id);
+			const sessionId = q.sessionId ?? "";
+			if (await this.send({ sessionId, title: shortTitle("ring", "question"), kind: "query" }, q.text)) {
+				this.deps.markDelivered(q.id);
+				this.scheduleStuck(q.id, { sessionId, title: shortTitle("ring", "waiting"), kind: "query" }, q.text, false);
+			}
 		} catch (err) {
 			this.log(`notifier: query ${q.id}: ${(err as Error).message}`);
 		}

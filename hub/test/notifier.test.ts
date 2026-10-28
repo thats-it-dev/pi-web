@@ -10,6 +10,7 @@ function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; v
 	const pushed: PushPayload[] = [];
 	const delivered: string[] = [];
 	const logs: string[] = [];
+	const timers: { fn: () => void; ms: number }[] = [];
 	const n = new Notifier({
 		enabled: o.enabled ?? true,
 		push: async (p) => {
@@ -21,8 +22,12 @@ function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; v
 		markDelivered: (id) => delivered.push(id),
 		isPending: o.isPending ?? (() => true),
 		log: (m) => logs.push(m),
+		setTimer: (fn, ms) => {
+			timers.push({ fn, ms });
+			return {};
+		},
 	});
-	return { n, pushed, delivered, logs };
+	return { n, pushed, delivered, logs, timers };
 }
 
 function snap(sessionId = "s-1", cwd = "/work/x", dialogs: Dialog[] = []): Snapshot {
@@ -177,4 +182,59 @@ test("a throwing push never throws out", async () => {
 	await t.n.ringAlert({ kind: "miss", query: piQuery });
 	assert.ok(t.logs.length >= 3);
 	assert.deepEqual(t.delivered, []);
+});
+
+test("a pending dialog gets one 'waiting' push after 15 minutes", async () => {
+	const t = setup();
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	assert.equal(t.timers.length, 1);
+	assert.equal(t.timers[0].ms, 900_000);
+	t.timers[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.equal(t.pushed.length, 2);
+	assert.deepEqual(t.pushed[1], { sessionId: "s-1", title: "x · waiting", kind: "needs_you", body: "Still waiting: Run tests?\nnpm test" });
+});
+
+test("a dialog resolved before the timer sends no reminder", async () => {
+	let pending = true;
+	const t = setup({ isPending: () => pending });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	pending = false;
+	t.timers[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.equal(t.pushed.length, 1);
+});
+
+test("a session viewed when the timer fires gets no reminder", async () => {
+	let viewing = false;
+	const t = setup({ viewing: () => viewing });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	viewing = true;
+	t.timers[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.equal(t.pushed.length, 1);
+	assert.equal(t.timers.length, 1);
+});
+
+test("the same dialog pushed again schedules no second timer", async () => {
+	const t = setup();
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	assert.equal(t.timers.length, 1);
+});
+
+test("a ring-profile query gets 'ring · waiting' too", async () => {
+	const t = setup();
+	await t.n.query(ringQuery);
+	assert.equal(t.timers.length, 1);
+	t.timers[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual(t.pushed[1], { sessionId: "", title: "ring · waiting", kind: "query", body: "Still waiting: How did you sleep?" });
+});
+
+test("no timer when the push did not go out", async () => {
+	const t = setup({ pushOk: false });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	await t.n.query(ringQuery);
+	assert.equal(t.timers.length, 0);
 });
