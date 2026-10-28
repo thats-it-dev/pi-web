@@ -26,6 +26,7 @@ export class ListStore extends EventTarget {
 	private api: Pick<HubApi, "sessions" | "eventsUrl">;
 	private open: typeof openStream;
 	private stream: { close(): void } | null = null;
+	private pending: { close(): void } | null = null; // a replacement stream not yet open
 	private viewing: string | null = null; // the session on screen, reported to the hub
 	private refreshSeq = 0;
 	private timer: ReturnType<typeof setInterval> | undefined;
@@ -62,31 +63,52 @@ export class ListStore extends EventTarget {
 		if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
 	}
 
-	// Reopens the stream when the session on screen changes, so the hub sees it.
+	// Switches the stream to report the new session. Make-before-break: the old
+	// stream stays until the new one is open, so the hub's viewer count never
+	// drops to zero mid-switch (it would treat the app as closed).
 	setViewing(id: string | null): void {
 		if (id === this.viewing) return;
 		this.viewing = id;
 		if (!this.stream) return; // hidden or stopped: the next open carries it
-		this.closeEvents();
-		this.openEvents();
+		this.pending?.close(); // a switch still in flight is superseded
+		this.pending = null;
+		this.openEvents(true);
 	}
 
-	private openEvents(): void {
+	private openEvents(swap = false): void {
 		let wasDown = false;
-		this.stream = this.open<ListMessage>(
+		let handle: { close(): void } | null = null;
+		let opened = false;
+		const promote = () => {
+			if (!handle || this.pending !== handle) return;
+			this.pending = null;
+			this.stream?.close();
+			this.stream = handle;
+		};
+		handle = this.open<ListMessage>(
 			this.api.eventsUrl(this.viewing),
 			(m) => this.apply(m),
 			(st) => {
 				if (st === "reconnecting") wasDown = true;
-				else if (st === "open" && wasDown) {
-					wasDown = false;
-					void this.refresh(); // events were missed while the stream was down
+				else if (st === "open") {
+					opened = true;
+					if (swap) promote();
+					if (wasDown) {
+						wasDown = false;
+						void this.refresh(); // events were missed while the stream was down
+					}
 				}
 			},
 		);
+		if (swap) {
+			this.pending = handle;
+			if (opened) promote(); // opened before open() returned
+		} else this.stream = handle;
 	}
 
 	private closeEvents(): void {
+		this.pending?.close();
+		this.pending = null;
 		this.stream?.close();
 		this.stream = null;
 	}

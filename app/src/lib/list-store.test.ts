@@ -108,32 +108,60 @@ describe("ListStore", () => {
 		expect(open).not.toHaveBeenCalled();
 		store.stop();
 	});
-	it("reports the viewed session in the events URL, reopening only when it changes", () => {
+	it("keeps the old events stream until the replacement opens, and a second switch leaves only the latest", () => {
 		const doc = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
 		vi.stubGlobal("document", doc);
 		const api = { sessions: vi.fn(async () => ({ sessions: [s("a")], home: "/h" })), eventsUrl: (v?: string | null) => (v ? `events?viewing=${v}` : "events") };
 		const urls: string[] = [];
 		const closed: boolean[] = [];
-		const open = vi.fn((url: string) => {
+		const status: Array<(st: string) => void> = [];
+		const open = vi.fn((url: string, _m: unknown, onStatus: (st: string) => void) => {
 			urls.push(url);
+			status.push(onStatus);
 			const i = closed.push(false) - 1;
 			return { close: () => void (closed[i] = true) };
 		});
 		const store = new ListStore(api, open as never);
 		store.start();
+		status[0]("open");
 		store.setViewing("s1");
 		expect(urls).toEqual(["events", "events?viewing=s1"]);
-		expect(closed[0]).toBe(true);
-		store.setViewing("s1");
+		expect(closed).toEqual([false, false]); // old one still counted by the hub
+		status[1]("open");
+		expect(closed).toEqual([true, false]);
+
+		store.setViewing("s1"); // same id: nothing
 		expect(urls).toHaveLength(2);
 
+		store.setViewing("s2");
+		store.setViewing("s3"); // supersedes s2 before it opened
+		expect(urls).toHaveLength(4);
+		expect(closed).toEqual([true, false, true, false]);
+		status[2]("open"); // late open from the superseded stream changes nothing
+		expect(closed).toEqual([true, false, true, false]);
+		status[3]("open");
+		expect(closed).toEqual([true, true, true, false]);
+		store.stop();
+		expect(closed[3]).toBe(true);
+	});
+	it("opens nothing for setViewing while hidden, and the next visible open carries it", () => {
+		const doc = Object.assign(new EventTarget(), { visibilityState: "visible" as DocumentVisibilityState });
+		vi.stubGlobal("document", doc);
+		const api = { sessions: vi.fn(async () => ({ sessions: [s("a")], home: "/h" })), eventsUrl: (v?: string | null) => (v ? `events?viewing=${v}` : "events") };
+		const urls: string[] = [];
+		const open = vi.fn((url: string) => {
+			urls.push(url);
+			return { close() {} };
+		});
+		const store = new ListStore(api, open as never);
+		store.start();
 		doc.visibilityState = "hidden";
 		doc.dispatchEvent(new Event("visibilitychange"));
 		store.setViewing("s2");
-		expect(urls).toHaveLength(2); // hidden: nothing opens
+		expect(urls).toEqual(["events"]);
 		doc.visibilityState = "visible";
 		doc.dispatchEvent(new Event("visibilitychange"));
-		expect(urls[2]).toBe("events?viewing=s2");
+		expect(urls[1]).toBe("events?viewing=s2");
 		store.stop();
 	});
 });
