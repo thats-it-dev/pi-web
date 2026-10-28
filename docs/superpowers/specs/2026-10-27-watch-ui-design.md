@@ -159,19 +159,31 @@ needed. The theme reaches the watch as today and persists there.
 The Index ring has two webhooks, both received by the hub:
 - **Agent webhook** (existing `POST /api/index/webhook`):
   - if a query is **on screen in the app**, the note answers it (and clears it
-    if it matches; §4.3). This includes one opened from a notification. A query
-    that is merely pending, but not being looked at, is never answered by the
-    agent gesture (Michael's call: "query on screen");
+    if it matches; §4.3). This includes one opened from a notification;
   - otherwise, **if a session is open on the watch, the note is sent to that
     session as a prompt**;
+  - otherwise, **if the app is closed** (no stream or long-poll, nothing shown)
+    **and a pi dialog is pending, the note answers the oldest one** (Michael's
+    call, 2026-10-27: the ring answers approvals with the app closed). "Oldest"
+    is the queue head, the pi dialog the watch would show first (Claude's
+    call). The matching is the same as on screen. On a match it is answered
+    (`answered`). On no match nothing is approved or denied (`no_match`) and
+    the hub sends **one** alert through the Notifier (Developer Connection
+    notification, else PWA push) reading "Didn't catch that" with the option
+    names (Claude's call). Ring-profile queries are never answered this way,
+    only pi dialogs;
   - otherwise it starts a new pi session (`startRingSession`).
+
+  While the app is open, a query that is pending but not on screen (the app
+  shows Home or a session) is still never answered by the agent gesture
+  (Michael's call: "query on screen").
 - **Notes webhook** (new): goes to ring-profile. It can answer and clear a
   *ring-profile* query only; ring-profile decides whether it was really an
   answer.
 
 The watch app has to tell the hub what is on screen: a query id, a session
 id, or Home. The existing `/api/watch/showing` endpoint is the natural place.
-When the app closes or disconnects, the hub treats nothing as shown.
+When the app closes or disconnects (its stream closes), the hub treats nothing as shown.
 
 ## 6. Hub: the query contract
 
@@ -281,6 +293,8 @@ After the first on-watch test:
 - **Bigger Home text:** title Gothic 24 Bold, status line Gothic 18 Bold, row height about 56 px. Nothing under 18 px on Home.
 - **No live streaming** (Michael, after a second on-watch test). While a session runs, the session screen keeps the last finished agent reply and shows a "…" typing indicator. The new reply replaces it once the turn has finished. The phone doesn't relay streamed text to the watch.
 - **Home memory:** each row is one drawn Port, not four contents. This fixes "memory full" with 12 rows (headroom: 17 rows).
+- **A pending query opens first** (Michael's call). When the app opens without a launch code and a query is pending, the query screen opens straight away, without a buzz (the alert already buzzed; the same 10 s quiet as an alert launch).
+- **The app launches onto the active session** (Michael's call). With no launch code and no pending query, the app opens the running session with the most recent activity (Claude's call), with Home under it so Back goes to Home; with no session running it opens on Home. Priority: the launch code's target, then a pending query, then the active running session, then Home. The phone picks the session once the first frame has arrived and the watch has reported Home; the session slides in once over Home (pebble-ui has no unanimated push). Verified in the emulator with twenty sessions (scene `many`): no "memory full".
 - **"+ New session" row** (Michael's call). Home's first row is "+ New session", drawn by the same one-Port row (title only, no status line or dot); it isn't a session and counts in nothing. Select creates an **empty** pi session in `~/pebble` (no prompt; the same folder and model choice as `startRingSession`, via `POST /api/watch/new`) and opens it, with "New session — send a ring note" in place of a reply. The watch reports it as shown, so §5's routing sends the next ring note to it as its first prompt. Home's cursor still starts on the first session (a waiting one first), so "+" is one Up away; with no sessions the list is just that row. A new session the hub reaps while idle (`idleMinutes`) before any note was sent has nothing to reopen, so the next note starts a fresh ring session instead.
 
 ## 9. Decided vs. left to the builder

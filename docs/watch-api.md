@@ -95,17 +95,19 @@ The ring posts a `multipart/form-data` body to `POST /api/index/webhook` (up to 
 
 Leave "Sign requests" off in the Index app; a signature is ignored if sent.
 
-The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. The transcription is trimmed and cut to 8000 characters. The hub then picks an outcome:
+The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. The transcription is trimmed and cut to 8000 characters. The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/2026-10-27-watch-ui-design.md) §5). The app counts as closed when no stream or long-poll is connected and nothing is shown; a closing stream clears what it showed. Ring-profile queries are answered only on screen. While the app is open, a query that is pending but not on screen is never answered.
 
 | Outcome | When |
 | --- | --- |
-| `answered` | the transcription answered the request the watch is showing |
-| `no_match` | it did not fit that request (the sidecar `reason` lists the options) |
-| `new_session` | the watch is showing nothing, so a session started in `~/pebble` with the text as its prompt |
+| `answered` | the transcription answered the query the watch is showing, or, with the app closed, the oldest pending pi dialog |
+| `no_match` | it did not fit that query (the sidecar `reason` lists the options). Nothing is approved or denied. On screen the watch flashes "Didn't catch that"; with the app closed the hub sends one alert (notification, else push) reading "Didn't catch that" with the options |
+| `gone` | the query had already been answered; the watch flashes "Already answered" |
+| `prompted` | no query on screen and a session open on the watch: the text went to that session as a prompt |
+| `new_session` | no session open and nothing to answer (no query on screen, and no pending pi dialog while the app is closed), so a session started in `~/pebble` with the text as its prompt |
 | `kept_audio` | the transcription was empty, so only the audio is kept |
 | `error` | deciding failed; `reason` holds the message |
 
-Once the headers pass, the hub answers `200` whatever the outcome. Each delivery is stored in `<dataDir>/index/` as `<delivery>.m4a` (when there was audio) and `<delivery>.json` (headers without the signature, transcription, `recordedAt`, `client`, `action`, and `sessionId`, `requestId` or `reason` where they apply). The newest 200 are kept.
+Once the headers pass, the hub answers `200` whatever the outcome. Each delivery is stored in `<dataDir>/index/` as `<delivery>.m4a` (when there was audio) and `<delivery>.json` (headers without the signature, transcription, `recordedAt`, `client`, `action`, and `sessionId`, `queryId` or `reason` where they apply). The log line is `index: <delivery> <outcome> <query or session id> (<reason>)`, leaving out the parts that are empty. The newest 200 are kept.
 
 ## Examples
 
