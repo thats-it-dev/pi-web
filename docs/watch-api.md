@@ -119,7 +119,7 @@ Leave "Sign requests" off in the Index app; a signature is ignored if sent.
 
 The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. `recordedAt` can be epoch milliseconds, epoch seconds (any number below 1e11) or a date string. The transcription is trimmed and cut to 8000 characters.
 
-**Re-uploads.** The real Index app sends no `X-Index-Delivery`. Without one, the hub keys the delivery by its content: `sha256(recordedAt, transcription, audio bytes)`, named `content-<32 hex>`. The same note uploaded again within an hour gets `200` and does nothing (a non-2xx could keep the app re-sending it), so a retried upload can never answer a second dialog. Two notes differ in `recordedAt` or audio. A note with neither `recordedAt` nor audio can't be told apart from another saying the same words, so it is not de-duplicated, and it gets a random name.
+**Re-uploads.** The real Index app sends no `X-Index-Delivery`. Without one, the hub keys the delivery by its content: `sha256(recordedAt, transcription, audio bytes)`, named `content-<32 hex>`. The same note uploaded again gets `200` and does nothing (a non-2xx could keep the app re-sending it): within an hour the replay cache catches it, and after that, or after a restart, its stored sidecar does (until the newest-200 pruning drops it). The closed-app path also ignores any note recorded more than 10 minutes before it arrives, so a late retry can't answer a second dialog. Two notes differ in `recordedAt` or audio. A note with neither `recordedAt` nor audio can't be told apart from another saying the same words, so it is not de-duplicated, and it gets a random name.
 
 The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/2026-10-27-watch-ui-design.md) §5).
 

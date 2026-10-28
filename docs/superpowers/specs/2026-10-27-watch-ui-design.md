@@ -192,7 +192,9 @@ The Index ring has two webhooks, both received by the hub:
     `editor`: a stray note must not become free text for pi);
   - was **alerted**: a notification or push for it reached the phone, or the
     watch showed it;
-  - existed when the note was recorded (`createdAt <= recordedAt + 2 s`).
+  - existed when the note was recorded (`createdAt <= recordedAt + 2 s`), and the
+    note arrived within 10 minutes of being recorded (a late re-upload never
+    answers blind; Claude's call after the final review).
     Without a usable `recordedAt` (missing or unparseable) the closed path is
     skipped and the note starts a new session (controller's ruling);
   - is not skipped on the watch, and not held back because the pi-web app is

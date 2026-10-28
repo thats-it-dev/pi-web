@@ -3,7 +3,7 @@
 // <delivery> is X-Index-Delivery when sent, else the note's content key
 // ("content-<32 hex>", index-webhook.ts contentKey), else a random UUID.
 
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IndexHeaders } from "./index-webhook.ts";
 
@@ -32,6 +32,11 @@ export function indexDir(dataDir: string): string {
 
 export function saveAudio(dataDir: string, delivery: string, audio: Buffer): void {
 	writeFileSync(join(indexDir(dataDir), `${storeName(delivery)}.m4a`), audio);
+}
+
+// A delivery already stored (its sidecar exists): survives restarts, unlike the replay cache.
+export function stored(dataDir: string, delivery: string): boolean {
+	return existsSync(join(indexDir(dataDir), `${storeName(delivery)}.json`));
 }
 
 export function saveSidecar(dataDir: string, delivery: string, sidecar: Sidecar): void {

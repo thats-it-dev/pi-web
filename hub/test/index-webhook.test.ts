@@ -493,6 +493,36 @@ test("app closed + a dialog never alerted → new session, the dialog untouched"
 	assert.equal(j.action, "new_session");
 });
 
+test("app closed + the same note re-uploaded after a hub restart (fresh replay cache) answers nothing more", async () => {
+	fresh();
+	const a = await raiseOn(ask);
+	clock += 1000;
+	const b2 = await raiseOn(ask);
+	const body = multipart({ transcription: "allow", recordedAt: String(clock) }, Buffer.from("restart audio"));
+	const { "x-index-delivery": _drop, ...headers } = signed(body).headers;
+	assert.equal((await post(cport, headers, body)).status, 200);
+	const srv2 = createServer((req, res) => void handleIndexWebhook(req, res, { watch: cw, dataDir: root, replays: new ReplayCache(), now: () => clock, log: (m) => logs.push(m) }));
+	await new Promise<void>((r) => srv2.listen(0, "127.0.0.1", r));
+	try {
+		assert.equal((await post((srv2.address() as AddressInfo).port, headers, body)).status, 200);
+	} finally {
+		srv2.close();
+	}
+	assert.equal(a.h.received.filter((c) => c.type === "dialog_response").length, 1);
+	assert.equal(b2.h.received.length, 0);
+	assert.ok(logs.includes("index: duplicate delivery ignored"));
+});
+
+test("app closed + a note recorded more than 10 min before it arrived → new session, the dialog untouched", async () => {
+	fresh();
+	const recordedAt = clock;
+	const d = await raiseOn(ask);
+	clock += 11 * 60_000;
+	const j = await ringClosed("allow", recordedAt);
+	assert.equal(d.h.received.length, 0);
+	assert.equal(j.action, "new_session");
+});
+
 test("app closed + a dialog created after the note was recorded (past the skew) → not answered", async () => {
 	fresh();
 	const recordedAt = clock;

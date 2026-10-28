@@ -3,7 +3,7 @@ import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
 import { sendJson } from "./http.ts";
-import { type Sidecar, prune, saveAudio, saveSidecar } from "./index-store.ts";
+import { type Sidecar, prune, saveAudio, saveSidecar, stored } from "./index-store.ts";
 import { parseMultipart } from "./multipart.ts";
 import type { WatchQuery } from "../../shared/src/protocol.ts";
 import type { WatchService } from "./watch.ts";
@@ -114,7 +114,9 @@ interface Handlers {
 // existed when the note was recorded. Otherwise start a session in ~/pebble.
 // While the app is open, a query that is pending but not on screen is never
 // answered, and a ring-profile query only ever on screen.
-async function decide(watch: WatchService, text: string, recordedAt: number | null): Promise<Decision> {
+const FRESH_MS = 10 * 60_000; // the closed-app path only answers a note recorded this recently
+
+async function decide(watch: WatchService, text: string, recordedAt: number | null, now: number): Promise<Decision> {
 	if (!text) return { action: "kept_audio" };
 	const open = watch.appOpen();
 	const shown = open ? watch.onScreen() : null;
@@ -130,8 +132,10 @@ async function decide(watch: WatchService, text: string, recordedAt: number | nu
 		const r = await watch.prompt(shown.sessionId, text);
 		if (r.ok) return { action: "prompted", sessionId: shown.sessionId };
 	}
-	// Without a usable recordedAt nothing is known to have existed when the note was spoken.
-	const head = open || recordedAt === null ? null : watch.oldestDialog(recordedAt);
+	// Without a usable recordedAt nothing is known to have existed when the note was spoken; a note
+	// recorded long before it arrived (a late re-upload) never answers blind either.
+	const fresh = recordedAt !== null && now - recordedAt <= FRESH_MS;
+	const head = open || !fresh ? null : watch.oldestDialog(recordedAt);
 	if (head) return answer(watch, head.id, text, closedHandlers(watch, head, text));
 	return { action: "new_session", sessionId: await watch.startRingSession(text) };
 }
@@ -247,6 +251,11 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 			}
 			delivery = key ?? randomUUID();
 		}
+		// The replay cache forgets after an hour and on restart; the Index app may re-send hours later.
+		if (stored(deps.dataDir, delivery)) {
+			log("index: duplicate delivery ignored");
+			return done();
+		}
 		let transcription = raw.trim();
 		if (transcription.length > TEXT_MAX) {
 			transcription = transcription.slice(0, TEXT_MAX);
@@ -258,7 +267,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		const recordedMs = recordedTime(text("recordedAt"));
 		let outcome: Decision;
 		try {
-			outcome = await decide(deps.watch, transcription, recordedMs);
+			outcome = await decide(deps.watch, transcription, recordedMs, (deps.now ?? Date.now)());
 		} catch (e) {
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };
