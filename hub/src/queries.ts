@@ -52,7 +52,9 @@ export class QueryStore {
 		return [...this.entries.values()].map((e) => e.query);
 	}
 
-	// False when the query has already ended.
+	// False when the query has already ended. onOutcome and onChange run synchronously, in that
+	// order; a throwing onOutcome would skip onChange, but the only raiser (internal-server's
+	// callback) starts a fetch and cannot throw synchronously.
 	resolve(id: string, o: QueryOutcome): boolean {
 		const e = this.entries.get(id);
 		if (!e) return false;
