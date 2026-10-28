@@ -253,3 +253,23 @@ test("non-2xx without a usable JSON error leaves hubError unset", () => {
 	assert.deepEqual(errs.map((e) => e.status), [404, 502, 500]);
 	assert.deepEqual(errs.map((e) => e.hubError), [undefined, undefined, undefined]);
 });
+
+test("network and timeout errors carry no status, so they read as unreachable", () => {
+	const t = setup();
+	const errs = [];
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().fail();
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().expire();
+	assert.deepEqual(errs.map((e) => e.message), ["network error", "timeout"]);
+	assert.deepEqual(errs.map((e) => e.status), [undefined, undefined]);
+});
+
+test("a 2xx with an unparsable body is a hub error, not unreachable", () => {
+	const t = setup();
+	const errs = [];
+	t.hub.post("/api/watch/x", {}, (err) => errs.push(err));
+	xhr().respond(200, "<html>proxy page</html>");
+	assert.equal(errs[0].status, 200);
+	assert.equal(errs[0].hubError, "Bad hub reply");
+});

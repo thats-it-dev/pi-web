@@ -78,8 +78,8 @@ function createHubClient(opts) {
 				var e = new Error("hub answered " + x.status);
 				e.status = x.status;
 				try {
-					var body = JSON.parse(x.responseText);
-					if (body && typeof body.error === "string" && body.error) e.hubError = body.error;
+					var errBody = JSON.parse(x.responseText);
+					if (errBody && typeof errBody.error === "string" && errBody.error) e.hubError = errBody.error;
 				} catch (ignored) {}
 				finish(e);
 				return;
@@ -87,6 +87,9 @@ function createHubClient(opts) {
 			try {
 				json = JSON.parse(x.responseText);
 			} catch (err) {
+				// The hub (or a proxy in front of it) answered, so this is not "unreachable".
+				err.status = x.status;
+				err.hubError = "Bad hub reply";
 				finish(err);
 				return;
 			}
