@@ -33,6 +33,7 @@ import type { HandleEvent, SessionHandle } from "./handle.ts";
 import { lineSplitter } from "../../shared/src/jsonl.ts";
 import type { ModelChoice } from "./last-model.ts";
 import { type RpcCommand, toRpc } from "./translate.ts";
+import { TLDR_PROMPT } from "./tldr-prompt.ts";
 
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => s.replace(ANSI, "");
@@ -244,6 +245,7 @@ export class RpcHandle implements SessionHandle {
 			args.push("--model", `${this.opts.model.provider}/${this.opts.model.modelId}`);
 			if (this.opts.model.thinking) args.push("--thinking", this.opts.model.thinking);
 		}
+		args.push("--append-system-prompt", TLDR_PROMPT); // both new and resumed sessions end replies with the TL;DR line
 		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env: { ...process.env, ...this.opts.env, PI_WEB: "1" } });
 		this.proc = proc;
 		proc.stdout.setEncoding("utf8");

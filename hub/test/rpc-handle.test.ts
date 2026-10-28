@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test, type TestContext } from "node:test";
 import type { AgentMessage, ApprovalMode, StreamMessage } from "../../shared/src/protocol.ts";
@@ -7,6 +7,7 @@ import { HttpError } from "../src/errors.ts";
 import type { HandleEvent } from "../src/handle.ts";
 import type { ModelChoice } from "../src/last-model.ts";
 import { RpcHandle } from "../src/rpc-handle.ts";
+import { TLDR_PROMPT } from "../src/tldr-prompt.ts";
 import { type FakeModel, type FakeScript, HELLO, startFakeModel } from "./support/fake-model.ts";
 import { makePiEnv } from "./support/pi-env.ts";
 
@@ -413,4 +414,34 @@ test("compact summarizes older turns and resyncs subscribers with a snapshot", a
 	assert.ok(!msgs.some((m) => m.role === "user" && textOf(m) === "one"), "summarized turns are gone");
 	assert.equal(snap.snapshot.conv.compacting, false);
 	assert.equal(h.isBusy(), false);
+});
+
+// A pi stand-in that records its argv (one arg per line) and exits, so the spawn args can be inspected.
+async function spawnArgv(opts: { sessionFile?: string; model?: ModelChoice }): Promise<string[]> {
+	const env = makePiEnv({ modelUrl: model.url });
+	const log = join(env.root, "argv.log");
+	const fake = join(env.root, "argv-pi.sh");
+	writeFileSync(fake, `#!/bin/sh\nprintf '%s\\n' "$@" > '${log}'\nexit 3\n`, { mode: 0o755 });
+	try {
+		await RpcHandle.start({ piBin: fake, cwd: env.workDir, exportDir: env.root, env: env.env, ...opts }).catch(() => {});
+		return readFileSync(log, "utf8").split("\n");
+	} finally {
+		env.cleanup();
+	}
+}
+
+test("a new session spawn carries the TL;DR system-prompt rule", async () => {
+	const argv = await spawnArgv({ model: { provider: "fake", modelId: "fake-a", thinking: "high" } });
+	assert.ok(argv.includes("--model"));
+	const i = argv.indexOf("--append-system-prompt");
+	assert.ok(i >= 0);
+	assert.equal(argv[i + 1], TLDR_PROMPT);
+});
+
+test("a resumed session spawn carries the TL;DR system-prompt rule", async () => {
+	const argv = await spawnArgv({ sessionFile: "/tmp/some-session.jsonl" });
+	assert.ok(argv.includes("--session"));
+	const i = argv.indexOf("--append-system-prompt");
+	assert.ok(i >= 0);
+	assert.equal(argv[i + 1], TLDR_PROMPT);
 });
