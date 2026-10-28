@@ -366,7 +366,8 @@ test("app open on Home + pending query not on screen → new session, query unto
 
 // A second service on its own clock: "closed" needs no app seen for the grace period.
 let clock = 1_800_000_000_000;
-const cw = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root, now: () => clock });
+const cviewers = new Viewers();
+const cw = new WatchService({ registry, index: idx, viewers: cviewers, home: root, now: () => clock });
 const alerts: RingAlert[] = [];
 cw.onRingAlert((a) => alerts.push(a));
 const creplays = new ReplayCache(); // one cache for the server, as in createHubServer
@@ -404,6 +405,7 @@ const confirmD: Dialog = { id: "c1", method: "confirm", title: "Run the migratio
 const inputD: Dialog = { id: "i1", method: "input", title: "Commit message?" };
 const fresh = () => {
 	settleAll();
+	cw.showing({ queryId: null, sessionId: null }); // forget the last report; the clock jump below closes the app
 	alerts.length = 0;
 	clock += 10 * GRACE;
 };
@@ -569,6 +571,36 @@ test("a blip on a query: a miss gets the miss alert; with the stream still conne
 	off();
 	assert.deepEqual(alerts, []);
 	assert.equal(h.received.length, 1);
+});
+
+test("a query answered elsewhere just before the note, still on the watch: gone and \"Already answered\", no new session", async () => {
+	fresh();
+	const { h, id } = await raiseOn(ask);
+	const frames: unknown[] = [];
+	const off = cw.subscribe((f) => frames.push(f));
+	cw.showing({ queryId: id, sessionId: null });
+	settle(h); // answered in the web app; the watch hasn't reported its next screen yet
+	const before = created.length;
+	const j = await ringClosed("allow");
+	off();
+	assert.equal(j.action, "gone");
+	assert.equal(j.queryId, id);
+	assert.equal(created.length, before);
+	assert.deepEqual(frames.filter((f) => (f as { type: string }).type === "notice"), [{ type: "notice", text: "Already answered" }]);
+});
+
+test("in the grace with nothing connected, a last-shown query now held for the open web app is not answered", async () => {
+	fresh();
+	const { h, id } = await raiseOn(ask);
+	const off = cw.subscribe(() => {});
+	cw.showing({ queryId: id, sessionId: null });
+	off();
+	const leave = cviewers.add();
+	const j = await ringClosed("allow");
+	leave();
+	assert.equal(j.action, "gone");
+	assert.equal(h.received.length, 0);
+	assert.deepEqual(alerts, []);
 });
 
 test("app closed + an alerted dialog but no usable recordedAt → new session, the dialog untouched", async () => {

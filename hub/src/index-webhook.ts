@@ -121,8 +121,10 @@ async function decide(watch: WatchService, text: string, recordedAt: number | nu
 	if (shown?.queryId) {
 		// Within the grace (nothing connected) the watch may be closed already: alert as when closed.
 		if (watch.subscriberCount() + watch.waiterCount() > 0) return answer(watch, shown.queryId, text, { miss: () => watch.notice("Didn't catch that"), gone: () => watch.notice("Already answered") });
+		// Not offered to the watch any more (ended, or held for the open web app): never answer it blind.
 		const q = watch.pending().queries.find((x) => x.id === shown.queryId);
-		return answer(watch, shown.queryId, text, q ? closedHandlers(watch, q, text) : { miss: () => {}, gone: () => {} });
+		if (!q) return { action: "gone", queryId: shown.queryId };
+		return answer(watch, shown.queryId, text, closedHandlers(watch, q, text));
 	}
 	if (shown?.sessionId) {
 		const r = await watch.prompt(shown.sessionId, text);

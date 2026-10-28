@@ -92,6 +92,7 @@ export class WatchService {
 	private announced = new Set<string>(); // query ids already handed to queryFns, pruned to those still present
 	private created = new Map<string, number>(); // query id → first seen
 	private showingState: ShowingState | null = null;
+	private reportedQueryId: string | null = null; // the query the watch last reported, kept after it ends
 	private offs: (() => void)[];
 	private tracked = new Map<SessionHandle, Tracked>();
 	private closedFiles: FileSummary[] = []; // the index as last read, newest first
@@ -171,6 +172,7 @@ export class WatchService {
 		const prev = this.showingState;
 		this.lastAppSeenAt = this.now();
 		this.showingState = queryId || sid ? { queryId, sessionId: sid, at: this.now() } : null;
+		this.reportedQueryId = queryId ?? null;
 		if (queryId) this.markDelivered(queryId);
 		if (prev?.queryId !== this.showingState?.queryId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
 		const next = this.showingState?.sessionId ?? null;
@@ -252,7 +254,10 @@ export class WatchService {
 	// What the watch last reported on screen, or null.
 	onScreen(): Showing | null {
 		this.refresh();
-		return this.showingState ? { queryId: this.showingState.queryId, sessionId: this.showingState.sessionId } : null;
+		if (this.showingState) return { queryId: this.showingState.queryId, sessionId: this.showingState.sessionId };
+		// A query that ended (answered elsewhere) before the watch reported its next screen is still
+		// what a ring note was meant for: answering it finds it gone, never a prompt or a new session.
+		return this.reportedQueryId ? { queryId: this.reportedQueryId, sessionId: null } : null;
 	}
 
 	// A pi query is only hidden from the watch (the dialog stays pending in its handle); an external one ends.
