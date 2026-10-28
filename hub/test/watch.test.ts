@@ -213,29 +213,27 @@ test("a dialog answered elsewhere: pending drops it and answer returns gone", as
 	svc.close();
 });
 
-test("a finished turn with nobody watching becomes a turn alert, not a query; a new run clears it", async () => {
+const statusOf = (svc: WatchService, id = "s-1") => svc.pending().sessions.find((x) => x.id === id)?.status;
+const err = (): AgentMessage => ({ role: "assistant", content: [{ type: "text", text: "x" }], stopReason: "error", errorMessage: "overloaded" }) as AgentMessage;
+
+test("a finished turn with nobody watching is no query, and the session shows done", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
-	const heard: unknown[] = [];
-	svc.onTurnAlert((a) => heard.push(a));
 	await run(h);
-	assert.deepEqual(svc.turnAlerts(), [{ sessionId: "s-1", kind: "finished", title: "fix the parser", text: "done" }]);
-	assert.deepEqual(heard, svc.turnAlerts());
 	assert.deepEqual(svc.pending().queries, []);
-	to(h, "running");
-	assert.deepEqual(svc.turnAlerts(), []);
+	assert.equal(statusOf(svc), "done");
 	svc.close();
 });
 
-test("an errored turn becomes an error alert; a long reply is clipped", async () => {
+test("an errored turn shows the session as error on Home until it runs again", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
-	await run(h, { role: "assistant", content: [{ type: "text", text: "x".repeat(1000) }], stopReason: "error", errorMessage: "overloaded" });
-	assert.deepEqual(svc.turnAlerts().map((a) => [a.kind, a.text]), [["error", "overloaded"]]);
-	await run(h, { role: "assistant", content: [{ type: "text", text: "y".repeat(1000) }], stopReason: "stop" });
-	const [f] = svc.turnAlerts();
-	assert.equal(f!.kind, "finished");
-	assert.ok(f!.text.length <= 240 && f!.text.endsWith("…"));
+	await run(h, err());
+	assert.equal(statusOf(svc), "error");
+	to(h, "running");
+	assert.equal(statusOf(svc), "running");
+	await run(h);
+	assert.equal(statusOf(svc), "done");
 	svc.close();
 });
 
@@ -243,12 +241,13 @@ test("viewer gate: while an app is open, pi queries are held; a dialog comes bac
 	const { registry, svc, viewers } = setup();
 	const a = await session(registry);
 	const b = await session(registry);
-	await run(a);
+	await run(a, err());
 	raise(b, push);
 	assert.equal(svc.pending().queries.length, 1);
+	assert.equal(statusOf(svc), "error");
 	const leave = viewers.add();
 	assert.deepEqual(svc.pending().queries, []);
-	assert.deepEqual(svc.turnAlerts(), []);
+	assert.equal(statusOf(svc), "done");
 	leave();
 	assert.deepEqual(
 		svc.pending().queries.map((r) => r.id),
@@ -440,14 +439,14 @@ test("a handle exit with a dialog showing ends the request and clears showing", 
 	svc.close();
 });
 
-test("prompt on a finished session sends prompt {text, mode:'send'} and ends its alert", async () => {
+test("prompt on an errored session sends prompt {text, mode:'send'} and ends its error", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
-	await run(h);
+	await run(h, err());
 	assert.deepEqual(await svc.answer("finished:s-1:1", { text: "now the docs" }), { ok: false, reason: "gone" });
 	assert.deepEqual(await svc.prompt("s-1", "now the docs"), { ok: true });
 	assert.deepEqual(h.received, [{ type: "prompt", text: "now the docs", mode: "send" }]);
-	assert.deepEqual(svc.turnAlerts(), []);
+	assert.equal(statusOf(svc), "done");
 	svc.close();
 });
 
@@ -744,17 +743,17 @@ test("prompt or answer on a session nobody can find returns gone; other failures
 test("prompt keeps an outcome that lands while the prompt is being sent", async () => {
 	const { registry, svc } = setup();
 	const h = await session(registry);
-	await run(h);
-	assert.equal(svc.turnAlerts().length, 1);
+	await run(h, err());
+	assert.equal(statusOf(svc), "error");
 	const send = h.command.bind(h);
 	h.command = async (cmd) => {
 		const res = await send(cmd);
-		// A fast reply: the turn runs and finishes before the send resolves.
-		await run(h, { role: "assistant", content: [{ type: "text", text: "second" }], stopReason: "stop" });
+		// A fast reply: the turn runs and errors again before the send resolves.
+		await run(h, err());
 		return res;
 	};
 	await svc.prompt("s-1", "again");
-	assert.deepEqual(svc.turnAlerts().map((a) => a.text), ["second"]);
+	assert.equal(statusOf(svc), "error");
 	svc.close();
 });
 

@@ -23,7 +23,6 @@ import { type FileSummary, readHistory, type SessionIndex } from "./sessions.ts"
 import { watchTurns } from "./turns.ts";
 import { closedSession, liveSession, turnsFrom } from "./watch-sessions.ts";
 
-const MESSAGE_MAX = 240;
 const WAIT_MS = 25_000;
 const CLOSED_MAX = 20;
 const HISTORY_LIMIT = 12;
@@ -47,22 +46,13 @@ export interface WatchDeps {
 	log?: (m: string) => void;
 }
 
+// How a session's last turn ended, while nobody watched; only Home's status reads it.
 interface Outcome {
 	kind: "finished" | "error";
-	messageIndex: number;
-	text: string;
-	title: string;
 }
 
 // What a ring note did to a pi dialog while the app was closed, for the Notifier (spec §5).
 export type RingAlert = { kind: "miss"; query: WatchQuery } | { kind: "answered"; query: WatchQuery; option: string };
-
-export interface TurnAlert {
-	sessionId: string;
-	kind: "finished" | "error";
-	title: string;
-	text: string;
-}
 
 interface ShowingState extends Showing {
 	at: number;
@@ -95,7 +85,6 @@ export class WatchService {
 	private subscribers = new Set<(f: WatchStreamFrame) => void>();
 	private dismissed = new Set<string>();
 	private outcomes = new Map<string, Outcome>(); // by session id
-	private alertFns = new Set<(a: TurnAlert) => void>();
 	private queryFns = new Set<(q: WatchQuery) => void>();
 	private ringFns = new Set<(a: RingAlert) => void>();
 	private alerted = new Set<string>(); // pi dialog ids an alert reached the phone for, or the watch showed
@@ -134,12 +123,10 @@ export class WatchService {
 				// A session that closed or appeared may move between the live and closed lists.
 				if (m.type === "session_list_changed" || !m.live) void this.loadClosed();
 			}),
-			watchTurns(registry, (o, snap) => {
+			watchTurns(registry, (o) => {
 				if (o.kind === "needs_you" || viewers.watching()) return;
-				this.outcomes.set(o.sessionId, { kind: o.kind, messageIndex: o.messageIndex, text: clip(o.text), title: sessionTitle(snap) });
+				this.outcomes.set(o.sessionId, { kind: o.kind });
 				this.changed();
-				const alert = this.alertOf(o.sessionId);
-				if (alert) for (const fn of [...this.alertFns]) fn(alert);
 			}),
 			viewers.onChange((watching) => {
 				if (watching) this.outcomes.clear();
@@ -153,18 +140,6 @@ export class WatchService {
 		const queries = this.visible();
 		const showing = this.showingState ? { queryId: this.showingState.queryId, sessionId: this.showingState.sessionId } : null;
 		return { cursor: this.cursor, queries, showing, sessions: this.sessionList(queries) };
-	}
-
-	// Turns that finished or errored while no app was open, for the Notifier.
-	turnAlerts(): TurnAlert[] {
-		return [...this.outcomes.keys()].map((id) => this.alertOf(id)!);
-	}
-
-	onTurnAlert(fn: (a: TurnAlert) => void): () => void {
-		this.alertFns.add(fn);
-		return () => {
-			this.alertFns.delete(fn);
-		};
 	}
 
 	// An aborted signal drops the waiter and leaves the promise pending, so only abort for a caller that has gone.
@@ -443,7 +418,6 @@ export class WatchService {
 		for (const t of this.tracked.values()) t.off();
 		this.tracked.clear();
 		this.subscribers.clear();
-		this.alertFns.clear();
 		this.queries.close();
 		const p = this.pending();
 		for (const w of [...this.waiters]) w(p);
@@ -474,11 +448,6 @@ export class WatchService {
 			.filter((q) => q.source !== "pi" || (!watching && !this.dismissed.has(q.id)))
 			.sort((a, b) => a.createdAt - b.createdAt)
 			.map(({ id, source, sessionId, label, text, options, createdAt }) => ({ id, source, sessionId, label, text, options, createdAt }));
-	}
-
-	private alertOf(sessionId: string): TurnAlert | null {
-		const o = this.outcomes.get(sessionId);
-		return o ? { sessionId, kind: o.kind, title: o.title, text: o.text } : null;
 	}
 
 	// Waiting sessions first, then most recently active; closed ones are capped.
@@ -648,9 +617,4 @@ function dialogAnswer(req: DialogQuery, a: { option?: string; text?: string }): 
 function sessionOf(queryId: string): string | null {
 	const [kind, sid] = queryId.split(":");
 	return kind === "dialog" ? sid || null : null;
-}
-
-function clip(s: string): string {
-	const t = s.trim();
-	return t.length > MESSAGE_MAX ? `${t.slice(0, MESSAGE_MAX - 1)}…` : t;
 }
