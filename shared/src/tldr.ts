@@ -1,21 +1,25 @@
-// Agent-written TL;DR line: the last non-empty line of a reply, outside code fences,
-// shaped `TL;DR [title]: summary` (case-insensitive, optional ** around TL;DR).
+// Agent-written TL;DR line: the last non-empty line of a reply, which must be outside code fences,
+// shaped `TL;DR [title]: summary` (case-insensitive, optional ** around TL;DR or around the colon).
 export type Tldr = { title: string | null; summary: string };
 
-const TLDR_LINE = /^(?:\*\*)?tl;dr(?:\*\*)?\s*(?:\[([^\]]*)\])?\s*:\s*(.*)$/i;
+const TLDR_LINE = /^(?:\*\*)?tl;dr(?:\*\*)?\s*(?:\[([^\]]*)\])?\s*(?:\*\*)?:(?:\*\*)?\s*(.*)$/i;
 
-// Index of the last non-empty line that is not inside a code fence, or -1.
+// Index of the last non-empty line of the text when that line is prose outside a code fence, or -1.
+// A fence line (opening or closing) or a line inside an unclosed fence as the last line means -1.
 const lastProseLine = (lines: string[]): number => {
 	let inFence = false;
 	let last = -1;
+	let lastIsProse = false;
 	for (let i = 0; i < lines.length; i++) {
-		if (lines[i].trim().startsWith("```")) {
+		const trimmed = lines[i].trim();
+		if (trimmed.startsWith("```")) {
 			inFence = !inFence;
+			if (trimmed !== "") { last = i; lastIsProse = false; }
 			continue;
 		}
-		if (!inFence && lines[i].trim() !== "") last = i;
+		if (trimmed !== "") { last = i; lastIsProse = !inFence; }
 	}
-	return last;
+	return lastIsProse ? last : -1;
 };
 
 export function parseTldr(text: string): Tldr | null {
