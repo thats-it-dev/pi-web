@@ -170,14 +170,21 @@ The Index ring has two webhooks, both received by the hub:
   **Closed** means no app has held the watch stream or a long-poll, or sent a
   `showing` report, for **45 s** (Claude's call, after review: a reconnect
   blip, the phone's backoff tops out at 30 s, or the gap between polls is not
-  a closed app). Within those 45 s the note is routed as if the app were
-  still open, by the last-known `showing`: on-screen query → answer it, open
-  session → prompt it, Home → new session (controller's ruling). The last-known
-  `showing` is kept until the next report, and it is ignored once the app
-  counts as closed. A half-open socket after the app really closed keeps the
-  app "open" until two pings are missed (about 60–90 s, `pingMs` 30 s); the
-  note then fails safe, going to the last session as a prompt or starting a
-  new session, and never approving anything.
+  a closed app). The hub also starts inside this grace period, so a restart
+  isn't a closed app while the phone reconnects. Within those 45 s the note
+  is routed as if the app were still open, by the last-known `showing`:
+  on-screen query → answer it, open session → prompt it, Home → new session
+  (controller's ruling). The last-known `showing` is kept until the next
+  report, and it is ignored once the app counts as closed. A half-open socket
+  after the app really closed keeps the app "open" until two pings are missed
+  (about 60–90 s, `pingMs` 30 s). In both windows the note goes to the
+  last-shown query or session, or starts a new session: it can answer (and
+  so approve) the query that was last on screen, but it never picks a dialog
+  that was not on screen. When nothing is connected (the grace period), an
+  answer to that last-shown query gets the same receipt or miss alert as the
+  closed path below, since the watch may be gone (Claude's call); a half-open
+  socket still counts as connected, so there it gets only the on-watch
+  notice.
 
   **Eligible** (Claude's calls; the matching is the same as on screen): the
   oldest pi dialog the watch would show, by `createdAt`, that
@@ -185,8 +192,9 @@ The Index ring has two webhooks, both received by the hub:
     `editor`: a stray note must not become free text for pi);
   - was **alerted**: a notification or push for it reached the phone, or the
     watch showed it;
-  - existed when the note was recorded (`createdAt <= recordedAt + 2 s`; the
-    hub's receive time when the ring sends no `recordedAt`);
+  - existed when the note was recorded (`createdAt <= recordedAt + 2 s`).
+    Without a usable `recordedAt` (missing or unparseable) the closed path is
+    skipped and the note starts a new session (controller's ruling);
   - is not skipped on the watch, and not held back because the pi-web app is
     open in a browser (§6).
 
@@ -319,7 +327,7 @@ After the first on-watch test:
 - **No live streaming** (Michael, after a second on-watch test). While a session runs, the session screen keeps the last finished agent reply and shows a "…" typing indicator. The new reply replaces it once the turn has finished. The phone doesn't relay streamed text to the watch.
 - **Home memory:** each row is one drawn Port, not four contents. This fixes "memory full" with 12 rows (headroom: 17 rows).
 - **A pending query opens first** (Michael's call). When the app opens without a launch code and a query is pending, the query screen opens straight away, without a buzz (the alert already buzzed; the same 10 s quiet as an alert launch).
-- **The app launches onto the active session** (Michael's call). With no launch code and no pending query, the app opens the running session with the most recent activity (Claude's call), with Home under it so Back goes to Home; with no session running it opens on Home. Priority: the launch code's target, then a pending query, then the active running session, then Home. The phone picks the session once the first frame has arrived and the watch has reported Home, and only within 9 s of the launch (after that it opens nothing; Claude's call, after review); once a query or session screen is up, a late reply no longer opens a session over it; the session slides in once over Home (pebble-ui has no unanimated push). Verified in the emulator with twenty sessions (scene `many`): no "memory full".
+- **The app launches onto the active session** (Michael's call). With no launch code and no pending query, the app opens the running session with the most recent activity (Claude's call), with Home under it so Back goes to Home; with no session running it opens on Home. Priority: the launch code's target, then a pending query, then the active running session, then Home. "Query first" also covers a session alert's launch: when a pending query pops up over it, the session it named no longer opens afterwards (showing a query clears `sessionUntil`). The phone picks the session once the first frame has arrived and the watch has reported Home, and only within 9 s of the launch (after that it opens nothing; Claude's call, after review); once a query or session screen is up, a late reply no longer opens a session over it; the session slides in once over Home (pebble-ui has no unanimated push). Verified in the emulator with twenty sessions (scene `many`): no "memory full".
 - **"+ New session" row** (Michael's call). Home's first row is "+ New session", drawn by the same one-Port row (title only, no status line or dot); it isn't a session and counts in nothing. Select creates an **empty** pi session in `~/pebble` (no prompt; the same folder and model choice as `startRingSession`, via `POST /api/watch/new`) and opens it, with "New session — send a ring note" in place of a reply. The watch reports it as shown, so §5's routing sends the next ring note to it as its first prompt. Home's cursor still starts on the first session (a waiting one first), so "+" is one Up away; with no sessions the list is just that row. A new session the hub reaps while idle (`idleMinutes`) before any note was sent has nothing to reopen, so the next note starts a fresh ring session instead.
 
 ## 9. Decided vs. left to the builder
