@@ -323,7 +323,7 @@ coredevices/mobileapp `test-apps/plugins.md` and `PKJSInterface.kt` /
 After the first on-watch test:
 - **Header line: no time.** It shows only the label (session name or source) in the source colour, clipped with "…" to fit, over the 1 px theme-text-colour bottom border.
 - **Status dots only for running and waiting sessions.** Done and error rows have no dot; their status line still says "Done · HH:MM" or "Error".
-- **Bigger Home text:** title Gothic 24 Bold, status line Gothic 18 Bold, row height about 56 px. Nothing under 18 px on Home.
+- **Bigger Home text:** title Gothic 24 Bold, status line Gothic 18 Bold, row height about 56 px. Nothing under 18 px on Home. The status line's digits ("Running · 4:12", "Done · 13:40") are Gothic too, not LECO: an accepted deviation from §3 (final review).
 - **No live streaming** (Michael, after a second on-watch test). While a session runs, the session screen keeps the last finished agent reply and shows a "…" typing indicator. The new reply replaces it once the turn has finished. The phone doesn't relay streamed text to the watch.
 - **Home memory:** each row is one drawn Port, not four contents. This fixes "memory full" with 12 rows (headroom: 17 rows).
 - **A pending query opens first** (Michael's call). When the app opens without a launch code and a query is pending, the query screen opens straight away, without a buzz (the alert already buzzed; the same 10 s quiet as an alert launch).
