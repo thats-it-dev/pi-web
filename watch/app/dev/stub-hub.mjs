@@ -18,7 +18,8 @@
 // POST /api/watch/new (Home's "+ New session") adds an empty session "pebble" (id n1, n2, …) whose
 // history has no turns until it is prompted. POST /stub/ring {text} stands in for a ring note and
 // routes it as the hub does (spec §5): it answers the query on screen, else prompts the session on
-// screen (which then streams a short reply), else starts a new session with it.
+// screen (which then streams a short reply), else, with the app closed (no stream or poll), answers
+// the oldest pi query (a miss is logged as the alert the hub would send), else starts a new session.
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -245,14 +246,18 @@ function prompt(s, text) {
 	}
 }
 
-// Spec §5, as hub/src/index-webhook.ts decide(): the query on screen, else the session on screen, else a new session.
+// Spec §5, as hub/src/index-webhook.ts decide(): the query on screen, else the session on screen,
+// else (app closed) the oldest pi query, else a new session.
 function ring(text) {
-	if (showing && showing.queryId) {
-		const qy = queries.find((x) => x.id === showing.queryId);
+	const closed = sockets.size + waiters.size === 0 && !showing;
+	const head = closed ? queries.filter((x) => x.source === "pi").sort((a, b) => a.createdAt - b.createdAt)[0] : null;
+	if ((showing && showing.queryId) || head) {
+		const qy = head || queries.find((x) => x.id === showing.queryId);
 		const option = qy && qy.options.find((o) => o.toLowerCase() === text.trim().toLowerCase());
 		if (!option) {
-			broadcast({ type: "notice", text: qy ? "Didn't catch that" : "Already answered" });
-			return { action: qy ? "no_match" : "gone" };
+			if (head) console.log(`alert: Didn't catch that · ${head.options.join(", ")}`);
+			else broadcast({ type: "notice", text: qy ? "Didn't catch that" : "Already answered" });
+			return { action: qy ? "no_match" : "gone", queryId: qy && qy.id };
 		}
 		removeQuery(qy.id);
 		return { action: "answered", queryId: qy.id };

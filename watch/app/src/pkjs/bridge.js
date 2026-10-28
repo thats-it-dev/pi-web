@@ -250,7 +250,9 @@ function createBridge(deps) {
 	var fetching = null; // the session whose reply is being fetched from the history
 	var gotFrame = false; // a real pending frame has arrived
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
+	var reported = false; // the watch has said what it shows (Home, at launch)
 	var creating = false; // a "+ New session" on its way to the hub
+	var plainLaunch = false; // opened without an alert: resume() is still to run
 
 	var queue = [];
 	var inFlight = null;
@@ -601,8 +603,29 @@ function createBridge(deps) {
 		});
 	}
 
+	// A launch without an alert opens the running session with the most recent
+	// activity (Home stays under it), unless a query is pending (it opens on its
+	// own) or the watch already shows something. Runs once, with the first frame,
+	// after the watch reports Home (that report would close a session opened before it).
+	function resume() {
+		if (!plainLaunch || !gotFrame || !reported) return;
+		plainLaunch = false;
+		if (target() || showing.id !== null || showing.sessionId !== null) return;
+		var best = null;
+		for (var i = 0; i < frame.sessions.length; i++) {
+			var s = frame.sessions[i];
+			if (s.status === "running" && (!best || s.updatedAt > best.updatedAt)) best = s;
+		}
+		if (best) open(str(best.id));
+	}
+
 	function launched(p) {
 		var code = typeof p.CODE === "number" ? p.CODE : -1;
+		if (code === 0) {
+			plainLaunch = true;
+			resume();
+			return;
+		}
 		// The code is a 32-bit pattern; the AppMessage int may arrive signed.
 		if (code < 0) code = code >>> 0;
 		hub.get("/api/watch/launch-target?code=" + code, function (err, json) {
@@ -627,6 +650,8 @@ function createBridge(deps) {
 		openSession = id === null && sid !== null ? sid : null;
 		if (openSession !== was) finalText = null;
 		hub.showing(id, sid);
+		reported = true;
+		resume();
 	}
 
 	function onAppMessage(p) {
@@ -667,6 +692,7 @@ function createBridge(deps) {
 			gotFrame = true;
 			frame = { queries: f.queries || [], sessions: f.sessions || [], showing: f.showing === undefined ? null : f.showing };
 			update(force);
+			resume();
 		},
 		// Only finished messages (streaming false), and while the session runs only kept
 		// for the run's end: one turn can finish several messages around its tool calls.

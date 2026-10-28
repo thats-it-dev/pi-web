@@ -816,3 +816,49 @@ test("hub error notices: HTTP message is shown clipped; no message gives Hub err
 	assert.deepEqual(failNotice(new Error("network error")), ["Hub unreachable"]);
 	assert.deepEqual(failNotice(new Error("timeout")), ["Hub unreachable"]);
 });
+
+// A plain launch (no alert): CMD launched with CODE 0.
+test("a plain launch opens the running session with the most recent activity, without a launch-target fetch", () => {
+	const t = setup();
+	t.pend([], [sess("d1", "done", { updatedAt: NOW }), sess("r1", "running", { updatedAt: NOW - 9 * MIN }), sess("r2", "running", { updatedAt: NOW - 2 * MIN })]);
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	assert.equal(t.hub.of("get").length, 0); // until the watch says Home is up: its report would close the session
+	t.bridge.onAppMessage({ CMD: "showing" });
+	assert.equal(t.hub.of("get", "/api/watch/launch-target").length, 0);
+	assert.equal(t.hub.of("get")[0].path, "/api/watch/history?session=r2&limit=6");
+	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "on it" }], total: 1 });
+	t.drain();
+	assert.equal(t.last("reply").SESSION_ID, "r2");
+});
+
+test("a plain launch before the first frame opens the running session once the frame lands, once", () => {
+	const t = setup();
+	t.bridge.start();
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	t.bridge.onAppMessage({ CMD: "showing" });
+	assert.equal(t.hub.of("get").length, 0);
+	t.pend([], [sess("r1", "running")]);
+	assert.deepEqual(t.hub.of("get").map((c) => c.path), ["/api/watch/history?session=r1&limit=6"]);
+	t.pend([], [sess("r1", "running"), sess("r3", "running", { updatedAt: NOW })]);
+	assert.equal(t.hub.of("get").length, 1);
+});
+
+test("a plain launch with a pending query, nothing running, or a screen already chosen opens no session", () => {
+	const a = setup();
+	a.pend([query("q1", 1)], [sess("r1", "running")]);
+	a.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	a.bridge.onAppMessage({ CMD: "showing" });
+	assert.equal(a.hub.of("get").length, 0);
+	assert.ok(a.last("query"));
+	const b = setup();
+	b.pend([], [sess("d1", "done")]);
+	b.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	b.bridge.onAppMessage({ CMD: "showing" });
+	assert.equal(b.hub.of("get").length, 0);
+	const c = setup();
+	c.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	c.bridge.onAppMessage({ CMD: "showing", SESSION_ID: "d1" });
+	c.pend([], [sess("d1", "done"), sess("r1", "running")]);
+	assert.equal(c.hub.of("get").length, 0);
+});

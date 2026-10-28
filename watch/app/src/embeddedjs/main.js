@@ -108,21 +108,20 @@ class PiStack extends WindowStack {
 				this.changed("net");
 			}, CONNECTING_MS);
 	}
-	// Opened from an alert: the phone resolves the launch code to a query
-	// (sent as query; the alert has buzzed already, so for 10 s a new query
-	// doesn't) or a session (sent as reply: the first reply in 10 s opens it,
-	// unless a session window is up already). The reason and arguments are
-	// logged to check them on the watch (emulator: 6 and the unsigned code).
+	// The phone resolves an alert's launch code to a query (sent as query; the
+	// alert has buzzed already, so for 10 s a new query doesn't) or a session
+	// (sent as reply: the first reply in 10 s opens it, unless a session window
+	// is up already). Code 0, a plain launch, does both: a pending query opens
+	// without a buzz, else the phone sends the running session's reply. The
+	// reason and arguments are logged (emulator: 6 and the unsigned code).
 	launch() {
 		const launch = watch.launch ?? {};
 		console.log("pi-web: launch reason " + launch.reason + " arguments " + launch.arguments);
-		const code = Number(launch.arguments) >>> 0;
-		if (!code)
-			return;
-		if (code >= SESSION_BIT)
-			this.sessionUntil = Date.now() + LAUNCH_MS;
-		else
-			this.quietUntil = Date.now() + LAUNCH_MS;
+		const code = Number(launch.arguments) >>> 0, until = Date.now() + LAUNCH_MS;
+		if (code < SESSION_BIT)
+			this.quietUntil = until;
+		if (!code || code >= SESSION_BIT)
+			this.sessionUntil = until;
 		this.link.send("launched", { CODE: code | 0 });
 	}
 	onModelChanged(application) {
