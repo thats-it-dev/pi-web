@@ -30,6 +30,10 @@ const HISTORY_LIMIT = 12;
 const SPEED_TICK_MS = 1000;
 const TEXT_TICK_MS = 250;
 const TEXT_TAIL = 240;
+// The app counts as open this long after its stream or last poll left (a reconnect blip, the gap between polls).
+const APP_GRACE_MS = 45_000;
+// A ring note may answer a dialog that appeared up to this long after the note was recorded (clock skew).
+const RECORD_SKEW_MS = 2_000;
 
 export interface WatchDeps {
 	registry: Registry;
@@ -49,6 +53,9 @@ interface Outcome {
 	text: string;
 	title: string;
 }
+
+// What a ring note did to a pi dialog while the app was closed, for the Notifier (spec §5).
+export type RingAlert = { kind: "miss"; query: WatchQuery } | { kind: "answered"; query: WatchQuery; option: string };
 
 export interface TurnAlert {
 	sessionId: string;
@@ -90,7 +97,9 @@ export class WatchService {
 	private outcomes = new Map<string, Outcome>(); // by session id
 	private alertFns = new Set<(a: TurnAlert) => void>();
 	private queryFns = new Set<(q: WatchQuery) => void>();
-	private missFns = new Set<(q: WatchQuery) => void>();
+	private ringFns = new Set<(a: RingAlert) => void>();
+	private alerted = new Set<string>(); // pi dialog ids an alert reached the phone for, or the watch showed
+	private lastAppSeenAt = -Infinity; // when an app's stream, poll or showing report was last seen
 	private announced = new Set<string>(); // query ids already handed to queryFns, pruned to those still present
 	private created = new Map<string, number>(); // query id → first seen
 	private showingState: ShowingState | null = null;
@@ -163,12 +172,14 @@ export class WatchService {
 		if (signal?.aborted) return new Promise(() => {});
 		return new Promise((resolve) => {
 			const done = (p: WatchPending) => {
+				this.lastAppSeenAt = this.now();
 				clearTimeout(timer);
 				this.waiters.delete(done);
 				signal?.removeEventListener("abort", drop);
 				resolve(p);
 			};
 			const drop = () => {
+				this.lastAppSeenAt = this.now();
 				clearTimeout(timer);
 				this.waiters.delete(done);
 			};
@@ -182,10 +193,9 @@ export class WatchService {
 		const { queryId } = w;
 		const sid = w.sessionId ?? (queryId ? sessionOf(queryId) : null);
 		const prev = this.showingState;
+		this.lastAppSeenAt = this.now();
 		this.showingState = queryId || sid ? { queryId, sessionId: sid, at: this.now() } : null;
-		if (queryId) {
-			this.queries.markDelivered(queryId);
-		}
+		if (queryId) this.markDelivered(queryId);
 		if (prev?.queryId !== this.showingState?.queryId || prev?.sessionId !== this.showingState?.sessionId) this.changed();
 		const next = this.showingState?.sessionId ?? null;
 		if (next && next !== (prev?.sessionId ?? null)) {
@@ -209,42 +219,53 @@ export class WatchService {
 		};
 	}
 
-	// Nothing is sent on subscribe; the caller sends pending() itself. When the
-	// last subscriber (the app's stream) leaves, nothing counts as shown (spec §5).
+	// Nothing is sent on subscribe; the caller sends pending() itself.
 	subscribe(fn: (f: WatchStreamFrame) => void): () => void {
 		this.subscribers.add(fn);
 		return () => {
-			if (!this.subscribers.delete(fn) || this.subscribers.size > 0 || !this.showingState) return;
-			this.showingState = null;
-			this.changed();
+			if (this.subscribers.delete(fn)) this.lastAppSeenAt = this.now();
 		};
 	}
 
-	// An app holds the stream or a long-poll.
+	// An app holds the stream or a long-poll, or held one in the last APP_GRACE_MS
+	// (a reconnect blip or the gap between polls is not a closed app).
 	appOpen(): boolean {
-		return this.subscribers.size + this.waiters.size > 0;
+		return this.subscribers.size + this.waiters.size > 0 || this.now() - this.lastAppSeenAt < APP_GRACE_MS;
 	}
 
-	// The pi dialog the watch would show first (spec §5: a ring note answers it while the app is closed).
-	oldestDialog(): WatchQuery | null {
-		return this.visible().find((q) => q.source === "pi") ?? null;
+	// An alert for the query reached the phone (Notifier), or the watch showed it.
+	markDelivered(queryId: string): void {
+		this.queries.markDelivered(queryId);
+		if (queryId.startsWith("dialog:")) this.alerted.add(queryId);
 	}
 
-	// A ring note that fit none of q's options while the app was closed; the Notifier alerts.
-	ringMiss(q: WatchQuery): void {
-		for (const fn of [...this.missFns]) {
+	// The pi dialog a ring note may answer while the app is closed (spec §5): the oldest
+	// the watch would show (not skipped, not held for an open web app) that offers fixed
+	// options (select or confirm, never input or editor), was alerted, and existed when
+	// the note was recorded.
+	oldestDialog(recordedAt: number): WatchQuery | null {
+		const shown = new Set(this.visible().map((q) => q.id));
+		const q = this.dialogQueries()
+			.filter((d) => shown.has(d.id) && this.alerted.has(d.id) && (d.method === "select" || d.method === "confirm") && d.options.length > 0 && d.createdAt <= recordedAt + RECORD_SKEW_MS)
+			.sort((a, b) => a.createdAt - b.createdAt)[0];
+		return q ? { id: q.id, source: q.source, sessionId: q.sessionId, label: q.label, text: q.text, options: q.options, createdAt: q.createdAt } : null;
+	}
+
+	// What a ring note did while the app was closed; the Notifier alerts.
+	ringAlert(a: RingAlert): void {
+		for (const fn of [...this.ringFns]) {
 			try {
-				fn(q);
+				fn(a);
 			} catch (err) {
-				this.deps.log?.(`watch: ring miss listener: ${(err as Error).message}`);
+				this.deps.log?.(`watch: ring alert listener: ${(err as Error).message}`);
 			}
 		}
 	}
 
-	onRingMiss(fn: (q: WatchQuery) => void): () => void {
-		this.missFns.add(fn);
+	onRingAlert(fn: (a: RingAlert) => void): () => void {
+		this.ringFns.add(fn);
 		return () => {
-			this.missFns.delete(fn);
+			this.ringFns.delete(fn);
 		};
 	}
 
@@ -439,6 +460,7 @@ export class WatchService {
 		const present = [...this.dialogQueries(), ...this.queries.external()];
 		const ids = new Set(present.map((r) => r.id));
 		for (const id of this.dismissed) if (!ids.has(id)) this.dismissed.delete(id);
+		for (const id of this.alerted) if (!ids.has(id)) this.alerted.delete(id);
 		for (const id of this.created.keys()) if (!ids.has(id)) this.created.delete(id);
 		if (this.showingState?.queryId && !ids.has(this.showingState.queryId)) this.showingState = null;
 		return present;

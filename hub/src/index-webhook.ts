@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
+import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
 import { sendJson } from "./http.ts";
 import { type Sidecar, prune, saveAudio, saveSidecar } from "./index-store.ts";
@@ -98,37 +99,67 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
 
 type Decision = Pick<Sidecar, "action" | "sessionId" | "queryId" | "reason">;
 
+interface Handlers {
+	miss: () => void;
+	gone: () => void;
+	answered?: () => void;
+}
+
 // Spec §5: answer the query the watch is showing, else prompt the session it
-// has open. With the app closed (no stream or poll, nothing shown), answer the
-// oldest pending pi dialog. Otherwise start a session in ~/pebble. A query that
-// is pending but not on screen is never answered while the app is open, and a
-// ring-profile query only ever on screen.
-async function decide(watch: WatchService, text: string): Promise<Decision> {
+// has open. With the app closed (WatchService.appOpen: no stream or poll for
+// its grace period), answer the oldest alerted select/confirm pi dialog that
+// existed when the note was recorded. Otherwise start a session in ~/pebble.
+// While the app is open, a query that is pending but not on screen is never
+// answered, and a ring-profile query only ever on screen.
+async function decide(watch: WatchService, text: string, recordedAt: number): Promise<Decision> {
 	if (!text) return { action: "kept_audio" };
-	const shown = watch.onScreen();
-	if (shown?.queryId) return answer(watch, shown.queryId, text, () => watch.notice("Didn't catch that"));
+	const open = watch.appOpen();
+	const shown = open ? watch.onScreen() : null;
+	if (shown?.queryId) return answer(watch, shown.queryId, text, { miss: () => watch.notice("Didn't catch that"), gone: () => watch.notice("Already answered") });
 	if (shown?.sessionId) {
 		const r = await watch.prompt(shown.sessionId, text);
 		if (r.ok) return { action: "prompted", sessionId: shown.sessionId };
 	}
-	const head = shown || watch.appOpen() ? null : watch.oldestDialog();
-	if (head) return answer(watch, head.id, text, () => watch.ringMiss(head));
+	const head = open ? null : watch.oldestDialog(recordedAt);
+	if (head) {
+		return answer(watch, head.id, text, {
+			miss: () => watch.ringAlert({ kind: "miss", query: head }),
+			gone: () => {}, // nobody to tell: the app is closed
+			// Select and confirm map text through matchOption, so this is the option sent.
+			answered: () => {
+				const m = matchOption(text, head.options);
+				if (m.kind === "match") watch.ringAlert({ kind: "answered", query: head, option: m.option });
+			},
+		});
+	}
 	return { action: "new_session", sessionId: await watch.startRingSession(text) };
 }
 
 // The note was meant for this query, so it never becomes a prompt or a new session.
-async function answer(watch: WatchService, queryId: string, text: string, miss: () => void): Promise<Decision> {
+async function answer(watch: WatchService, queryId: string, text: string, on: Handlers): Promise<Decision> {
 	const r = await watch.answer(queryId, { text });
-	if (r.ok) return { action: "answered", queryId };
+	if (r.ok) {
+		on.answered?.();
+		return { action: "answered", queryId };
+	}
 	if (r.reason === "no_match") {
-		miss();
+		on.miss();
 		return { action: "no_match", queryId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
 	}
 	if (r.reason === "gone") {
-		watch.notice("Already answered");
+		on.gone();
 		return { action: "gone", queryId };
 	}
 	return { action: "error", queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
+}
+
+// The note's recording time in ms: the ring's recordedAt (ms or a date string), else now.
+function recordedTime(v: string | undefined, now: number): number {
+	if (!v) return now;
+	const n = Number(v);
+	if (Number.isFinite(n) && n > 0) return n;
+	const d = Date.parse(v);
+	return Number.isFinite(d) ? d : now;
 }
 
 export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
@@ -179,7 +210,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		stage = "decide";
 		let outcome: Decision;
 		try {
-			outcome = await decide(deps.watch, transcription);
+			outcome = await decide(deps.watch, transcription, recordedTime(text("recordedAt"), (deps.now ?? Date.now)()));
 		} catch (e) {
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };

@@ -59,11 +59,11 @@ const notifier = new Notifier({
 	appOpen: () => stream.clientCount() > 0,
 	send: async (host, frame) => (await sendToPhone(host, frame)).ok,
 	push: (p) => push.send(p),
-	markDelivered: (id) => watch.queries.markDelivered(id),
+	markDelivered: (id) => watch.markDelivered(id),
 	log: (m) => console.log(m),
 });
 watch.onNewQuery((q) => void notifier.query(q));
-watch.onRingMiss((q) => void notifier.ringMiss(q));
+watch.onRingAlert((a) => void notifier.ringAlert(a));
 watchPush(registry, (p) => void notifier.turnPush(p), viewers);
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {

@@ -12,6 +12,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { PushPayload, WatchQuery } from "../../shared/src/protocol.ts";
 import { notificationFrame } from "./notification-frame.ts";
 import { clipText as clip } from "./push-watch.ts";
+import type { RingAlert } from "./watch.ts";
 
 export type AlertMode = "auto" | "notification" | "push" | "off";
 
@@ -73,18 +74,22 @@ export class Notifier {
 		}
 	}
 
-	// A ring note that fit none of a pi dialog's options while the app was closed (spec §5):
-	// one alert naming the options, whose Open shows the query.
-	async ringMiss(q: WatchQuery): Promise<void> {
+	// What a ring note did to a pi dialog while the app was closed (spec §5): one alert.
+	// A miss names the dialog and its options, and Open shows the query; an answer is
+	// the receipt for an approval given blind, and Open shows its session.
+	async ringAlert(a: RingAlert): Promise<void> {
 		try {
 			const { mode } = this.deps;
 			if (mode === "off" || this.deps.appOpen()) return;
-			const body = q.options.join(", ");
+			const q = a.query;
+			const title = a.kind === "miss" ? MISS_TITLE : `Answered: ${a.option}`;
+			const body = a.kind === "miss" ? `${q.label}: ${q.options.join(", ")}` : q.label;
+			const target = a.kind === "miss" || !q.sessionId ? this.code({ queryId: q.id }, false) : this.code({ sessionId: q.sessionId }, true);
 			let sent = false;
-			if (mode !== "push") sent = await this.frame(MISS_TITLE, body, this.code({ queryId: q.id }, false));
-			if (!sent && mode !== "notification") await this.deps.push({ sessionId: q.sessionId ?? "", title: MISS_TITLE, kind: "query", body: clip(body, PUSH_BODY_MAX) });
+			if (mode !== "push") sent = await this.frame(title, body, target);
+			if (!sent && mode !== "notification") await this.deps.push({ sessionId: q.sessionId ?? "", title: clip(title, FRAME_TITLE_MAX), kind: "query", body: clip(body, PUSH_BODY_MAX) });
 		} catch (err) {
-			this.log(`notifier: ring miss ${q.id}: ${(err as Error).message}`);
+			this.log(`notifier: ring ${a.kind} ${a.query.id}: ${(err as Error).message}`);
 		}
 	}
 

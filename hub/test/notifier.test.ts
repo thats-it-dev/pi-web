@@ -177,26 +177,40 @@ test("the launch table keeps the last 32 entries", async () => {
 	assert.deepEqual([...t.n.launchCodes()].at(-1)![1], { queryId: "q39" });
 });
 
-test("ringMiss: a frame titled \"Didn't catch that\" with the option names, launching the query", async () => {
+test("ring miss: a frame titled \"Didn't catch that\" naming the dialog and its options, launching the query", async () => {
 	const t = setup({ mode: "notification" });
-	await t.n.ringMiss(piQuery);
+	await t.n.ringAlert({ kind: "miss", query: piQuery });
 	assert.equal(t.sent.length, 1);
-	const text = Buffer.from(t.sent[0][1]).toString("latin1");
+	const text = Buffer.from(t.sent[0][1]).toString("utf8");
 	assert.ok(text.includes("Didn't catch that"));
-	assert.ok(text.includes("yes, no"));
+	assert.ok(text.includes("pi · fix: yes, no"));
 	const code = [...t.n.launchCodes()].find(([, v]) => "queryId" in v && v.queryId === piQuery.id);
 	assert.ok(code && code[0] < 0x80000000);
 	assert.equal(t.pushed.length, 0);
 	assert.deepEqual(t.delivered, []);
 });
 
-test("ringMiss: auto with the phone unreachable → one push; off or app open → nothing", async () => {
+test("ring miss: auto with the phone unreachable → one push; off or app open → nothing", async () => {
 	const t = setup({ phone: null });
-	await t.n.ringMiss(piQuery);
-	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "yes, no" }]);
+	await t.n.ringAlert({ kind: "miss", query: piQuery });
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "pi · fix: yes, no" }]);
 	for (const o of [{ mode: "off" as const }, { appOpen: true }]) {
 		const u = setup(o);
-		await u.n.ringMiss(piQuery);
+		await u.n.ringAlert({ kind: "miss", query: piQuery });
+		await u.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
 		assert.equal(u.sent.length + u.pushed.length, 0);
 	}
+});
+
+test("ring answered: one receipt naming the option and the dialog, launching its session", async () => {
+	const t = setup({ mode: "notification" });
+	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
+	assert.equal(t.sent.length, 1);
+	const text = Buffer.from(t.sent[0][1]).toString("utf8");
+	assert.ok(text.includes("Answered: yes"));
+	assert.ok(text.includes("pi · fix"));
+	assert.ok([...t.n.launchCodes()].some(([c, v]) => "sessionId" in v && v.sessionId === "s-1" && c >= 0x80000000));
+	const u = setup({ phone: null });
+	await u.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
+	assert.deepEqual(u.pushed, [{ sessionId: "s-1", title: "Answered: yes", kind: "query", body: "pi · fix" }]);
 });

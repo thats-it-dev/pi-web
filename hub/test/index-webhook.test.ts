@@ -5,14 +5,14 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import type { Dialog, WatchQuery } from "../../shared/src/protocol.ts";
+import type { Dialog } from "../../shared/src/protocol.ts";
 import type { HubConfig } from "../src/config.ts";
 import { type IndexHeaders, ReplayCache, handleIndexWebhook, readIndexHeaders, verifyIndex } from "../src/index-webhook.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { createHubServer } from "../src/server.ts";
 import { SessionIndex } from "../src/sessions.ts";
-import { WatchService } from "../src/watch.ts";
+import { type RingAlert, WatchService } from "../src/watch.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
 const now = () => 1_700_000_000_000;
@@ -78,7 +78,7 @@ const idx = new SessionIndex(join(root, "sessions"));
 const registry = new Registry({
 	factory: { startRpc: async (o) => { const h = new FakeHandle(`s-${++n}`, o.cwd, o.sessionFile ?? null); created.push(h); return h; } },
 	lookup: idx,
-	maxHeadless: 6,
+	maxHeadless: 50, // the closed-app tests make many sessions
 	idleMs: 60_000,
 });
 const watch = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root });
@@ -327,82 +327,188 @@ test("app open on Home + pending query not on screen → new session, query unto
 	settle(h);
 });
 
-// ---- app closed (spec §5): the note answers the oldest pending pi dialog ----
+// ---- app closed (spec §5): the note answers the oldest alerted select/confirm pi dialog ----
 
-const misses: WatchQuery[] = [];
-watch.onRingMiss((q) => misses.push(q));
+// A second service on its own clock: "closed" needs no app seen for the grace period.
+let clock = 1_800_000_000_000;
+const cw = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root, now: () => clock });
+const alerts: RingAlert[] = [];
+cw.onRingAlert((a) => alerts.push(a));
+const csrv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: cw, dataDir: root, replays: new ReplayCache(), now: () => clock, log: (m) => logs.push(m) }));
+await new Promise<void>((r) => csrv.listen(0, "127.0.0.1", r));
+const cport = (csrv.address() as AddressInfo).port;
+after(() => {
+	cw.close();
+	csrv.close();
+});
+const GRACE = 45_000;
 const settleAll = () => {
-	for (const h of created) if (h.dialogs.length) settle(h);
 	for (const h of registry.all()) if ((h as FakeHandle).dialogs?.length) settle(h as FakeHandle);
 };
-
-test("app closed + two pending pi dialogs + a matching note → answers the oldest only", async () => {
-	settleAll();
-	const a = await raise();
-	await sleep(5);
-	const b2 = await raise();
-	const before = created.length;
-	const b = multipart({ transcription: "deny" });
+// A dialog on a new handle, seen by cw at the current clock; alerted unless told otherwise.
+async function raiseOn(d: Dialog, o: { alert?: boolean } = {}): Promise<{ h: FakeHandle; id: string }> {
+	const h = (await registry.create("/work/closed")) as FakeHandle;
+	h.dialogs = [{ ...d }];
+	h.state = "needs_you";
+	h.busy = true;
+	h.fire({ type: "state_changed" });
+	const id = `dialog:${h.sessionId}:${d.id}`;
+	assert.ok(cw.pending().queries.some((q) => q.id === id));
+	if (o.alert !== false) cw.markDelivered(id);
+	return { h, id };
+}
+async function ringClosed(transcription: string, recordedAt?: number) {
+	const b = multipart(recordedAt === undefined ? { transcription } : { transcription, recordedAt: String(recordedAt) });
 	const s = signed(b);
-	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal((await post(cport, s.headers, b)).status, 200);
+	return sidecar(s.delivery);
+}
+const confirmD: Dialog = { id: "c1", method: "confirm", title: "Run the migration?" };
+const inputD: Dialog = { id: "i1", method: "input", title: "Commit message?" };
+const fresh = () => {
+	settleAll();
+	alerts.length = 0;
+	clock += 10 * GRACE;
+};
+
+test("app closed + two alerted pi dialogs + a matching note → the oldest is answered, with one receipt", async () => {
+	fresh();
+	const a = await raiseOn(ask);
+	clock += 1000;
+	const b2 = await raiseOn(ask);
+	const before = created.length;
+	const j = await ringClosed("deny");
 	assert.equal(created.length, before);
 	assert.deepEqual(a.h.received.filter((c) => c.type === "dialog_response"), [{ type: "dialog_response", id: "d1", value: "deny" }]);
 	assert.equal(b2.h.received.length, 0);
-	const j = sidecar(s.delivery);
 	assert.equal(j.action, "answered");
-	assert.equal(j.queryId, a.requestId);
-	assert.ok(logs.includes(`index: ${s.delivery} answered ${a.requestId}`));
-	settle(b2.h);
+	assert.equal(j.queryId, a.id);
+	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id, x.kind === "answered" ? x.option : null]), [["answered", a.id, "deny"]]);
+	assert.ok(logs.includes(`index: ${j.headers.delivery} answered ${a.id}`));
 });
 
-test("app closed + pending pi dialog + unmatched note → no_match, nothing answered, one alert with the options", async () => {
-	settleAll();
-	misses.length = 0;
-	const { h, requestId } = await raise();
+test("app closed + unmatched note → no_match, nothing answered, one miss alert", async () => {
+	fresh();
+	const { h, id } = await raiseOn(ask);
 	const before = created.length;
-	const b = multipart({ transcription: "banana" });
-	const s = signed(b);
-	assert.equal((await post(port, s.headers, b)).status, 200);
+	const j = await ringClosed("banana");
 	assert.equal(created.length, before);
 	assert.equal(h.received.length, 0);
-	assert.ok(watch.pending().queries.some((q) => q.id === requestId));
-	assert.deepEqual(misses.map((q) => [q.id, q.options]), [[requestId, ["allow", "deny"]]]);
-	const j = sidecar(s.delivery);
+	assert.ok(cw.pending().queries.some((q) => q.id === id));
+	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id, x.query.options]), [["miss", id, ["allow", "deny"]]]);
 	assert.equal(j.action, "no_match");
-	assert.equal(j.queryId, requestId);
-	settle(h);
+	assert.equal(j.queryId, id);
 });
 
-test("app closed + only a ring-profile query pending → new session, the ring query untouched", async () => {
-	settleAll();
-	misses.length = 0;
+test("app closed + only a ring-profile query → new session, the ring query untouched", async () => {
+	fresh();
 	const outcomes: unknown[] = [];
-	const q = watch.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: (o) => outcomes.push(o) });
-	const before = created.length;
-	const b = multipart({ transcription: "yes" });
-	const s = signed(b);
-	assert.equal((await post(port, s.headers, b)).status, 200);
-	assert.equal(created.length, before + 1);
+	const q = cw.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: (o) => outcomes.push(o) });
+	cw.markDelivered(q.id);
+	const j = await ringClosed("yes");
 	assert.deepEqual(outcomes, []);
-	assert.deepEqual(misses, []);
-	assert.equal(sidecar(s.delivery).action, "new_session");
-	watch.skip(q.id);
+	assert.deepEqual(alerts, []);
+	assert.equal(j.action, "new_session");
+	cw.skip(q.id);
 });
 
-test("the app's stream closing clears what it showed: the next note doesn't prompt that session", async () => {
-	settleAll();
-	const h = (await registry.create("/work/left")) as FakeHandle;
-	const off = watch.subscribe(() => {});
-	watch.showing({ queryId: null, sessionId: h.sessionId });
+test("app closed + only an input dialog → new session, the dialog untouched", async () => {
+	fresh();
+	const { h } = await raiseOn(inputD);
+	const j = await ringClosed("remind me to buy milk");
+	assert.equal(h.received.length, 0);
+	assert.equal(j.action, "new_session");
+});
+
+test("app closed + an older input dialog and a newer confirm → the confirm is answered", async () => {
+	fresh();
+	const i = await raiseOn(inputD);
+	clock += 1000;
+	const c = await raiseOn(confirmD);
+	const j = await ringClosed("yes");
+	assert.equal(i.h.received.length, 0);
+	assert.deepEqual(c.h.received, [{ type: "dialog_response", id: "c1", confirmed: true }]);
+	assert.equal(j.action, "answered");
+	assert.equal(j.queryId, c.id);
+});
+
+test("app closed + a dialog never alerted → new session, the dialog untouched", async () => {
+	fresh();
+	const { h } = await raiseOn(ask, { alert: false });
+	const j = await ringClosed("allow");
+	assert.equal(h.received.length, 0);
+	assert.equal(j.action, "new_session");
+});
+
+test("app closed + a dialog created after the note was recorded (past the skew) → not answered", async () => {
+	fresh();
+	const recordedAt = clock;
+	clock += 5000;
+	const late = await raiseOn(ask);
+	const j = await ringClosed("allow", recordedAt);
+	assert.equal(late.h.received.length, 0);
+	assert.equal(j.action, "new_session");
+	// Within the skew it is answered.
+	fresh();
+	const near = await raiseOn(ask);
+	const j2 = await ringClosed("allow", clock - 1500);
+	assert.equal(j2.action, "answered");
+	assert.equal(j2.queryId, near.id);
+});
+
+test("a stream blip on a session: a note at once prompts that session; after the grace period it answers the dialog", async () => {
+	fresh();
+	const { h, id } = await raiseOn(ask);
+	const s = (await registry.create("/work/blip")) as FakeHandle;
+	const off = cw.subscribe(() => {});
+	cw.showing({ queryId: null, sessionId: s.sessionId });
+	off(); // the socket drops
+	clock += 2000;
+	assert.equal(cw.appOpen(), true);
+	const j = await ringClosed("yes do it");
+	assert.equal(j.action, "prompted");
+	assert.equal(j.sessionId, s.sessionId);
+	assert.equal(h.received.length, 0);
+	clock += GRACE;
+	assert.equal(cw.appOpen(), false);
+	const j2 = await ringClosed("allow");
+	assert.equal(j2.action, "answered");
+	assert.equal(j2.queryId, id);
+});
+
+test("a stream blip on a query answers that query; on Home the note starts a session", async () => {
+	fresh();
+	const a = await raiseOn(ask);
+	clock += 1000;
+	const b2 = await raiseOn(confirmD);
+	let off = cw.subscribe(() => {});
+	cw.showing({ queryId: b2.id, sessionId: null });
 	off();
-	assert.equal(watch.onScreen(), null);
-	const before = created.length;
-	const b = multipart({ transcription: "still there?" });
-	const s = signed(b);
-	assert.equal((await post(port, s.headers, b)).status, 200);
-	assert.deepEqual(h.received, []);
-	assert.equal(created.length, before + 1);
-	assert.equal(sidecar(s.delivery).action, "new_session");
+	const j = await ringClosed("yes");
+	assert.equal(j.action, "answered");
+	assert.equal(j.queryId, b2.id);
+	assert.equal(a.h.received.length, 0);
+	off = cw.subscribe(() => {});
+	cw.showing({ queryId: null, sessionId: null });
+	off();
+	clock += 1000;
+	const j2 = await ringClosed("allow");
+	assert.equal(j2.action, "new_session");
+	assert.equal(a.h.received.length, 0);
+	assert.deepEqual(alerts, []);
+});
+
+test("between long-polls the app still counts as open", async () => {
+	fresh();
+	const { h } = await raiseOn(ask);
+	await cw.wait(-1); // a poll answered at once
+	const ac = new AbortController();
+	void cw.wait(cw.pending().cursor, 60_000, ac.signal);
+	ac.abort(); // the poll's client went away
+	clock += 3000;
+	const j = await ringClosed("allow");
+	assert.equal(j.action, "new_session");
+	assert.equal(h.received.length, 0);
 });
 
 test("empty transcription keeps the audio and does nothing else", async () => {
