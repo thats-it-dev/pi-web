@@ -862,3 +862,21 @@ test("a plain launch with a pending query, nothing running, or a screen already 
 	c.pend([], [sess("d1", "done"), sess("r1", "running")]);
 	assert.equal(c.hub.of("get").length, 0);
 });
+
+test("a plain launch whose first frame comes more than 9 s late opens no session", () => {
+	const t = setup();
+	t.bridge.start();
+	t.drain();
+	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	t.bridge.onAppMessage({ CMD: "showing" });
+	t.clock.t += 9500;
+	t.pend([], [sess("r1", "running")]);
+	assert.equal(t.hub.of("get").length, 0);
+	// Within 9 s it does.
+	const u = setup();
+	u.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	u.bridge.onAppMessage({ CMD: "showing" });
+	u.clock.t += 8000;
+	u.pend([], [sess("r1", "running")]);
+	assert.equal(u.hub.of("get").length, 1);
+});

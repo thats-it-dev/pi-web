@@ -18,8 +18,10 @@
 // POST /api/watch/new (Home's "+ New session") adds an empty session "pebble" (id n1, n2, …) whose
 // history has no turns until it is prompted. POST /stub/ring {text} stands in for a ring note and
 // routes it as the hub does (spec §5): it answers the query on screen, else prompts the session on
-// screen (which then streams a short reply), else, with the app closed (no stream or poll), answers
-// the oldest pi query (a miss is logged as the alert the hub would send), else starts a new session.
+// screen (which then streams a short reply), else, with the app closed (no stream or poll for 45 s),
+// answers the oldest pi query that has options (one with none stands for an input dialog, never
+// answered); the alert the hub would send, a miss or a receipt, is logged. Else a new session.
+// The stub doesn't model recordedAt or which queries were alerted.
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -143,6 +145,8 @@ if (!SCENES[SCENE]) {
 let [sessions, queries] = SCENES[SCENE]().map((list) => list.map((x) => ({ ...x })));
 let cursor = 1;
 let showing = null;
+let lastAppAt = -Infinity; // when the app's stream or poll last left: it counts as open for APP_GRACE_MS more
+const APP_GRACE_MS = 45_000;
 let nextQuery = 3;
 let nextNew = 1;
 const fresh = new Set(); // sessions from /api/watch/new not prompted yet: no turns
@@ -161,6 +165,7 @@ function broadcast(frame) {
 function changed() {
 	cursor++;
 	const p = pendingNow();
+	if (waiters.size) lastAppAt = Date.now();
 	for (const w of waiters) w(p);
 	waiters.clear();
 	broadcast({ type: "pending", ...p });
@@ -249,20 +254,22 @@ function prompt(s, text) {
 // Spec §5, as hub/src/index-webhook.ts decide(): the query on screen, else the session on screen,
 // else (app closed) the oldest pi query, else a new session.
 function ring(text) {
-	const closed = sockets.size + waiters.size === 0 && !showing;
-	const head = closed ? queries.filter((x) => x.source === "pi").sort((a, b) => a.createdAt - b.createdAt)[0] : null;
-	if ((showing && showing.queryId) || head) {
-		const qy = head || queries.find((x) => x.id === showing.queryId);
+	const closed = sockets.size + waiters.size === 0 && Date.now() - lastAppAt >= APP_GRACE_MS;
+	const shown = closed ? null : showing;
+	const head = closed ? queries.filter((x) => x.source === "pi" && x.options.length).sort((a, b) => a.createdAt - b.createdAt)[0] : null;
+	if ((shown && shown.queryId) || head) {
+		const qy = head || queries.find((x) => x.id === shown.queryId);
 		const option = qy && qy.options.find((o) => o.toLowerCase() === text.trim().toLowerCase());
 		if (!option) {
-			if (head) console.log(`alert: Didn't catch that · ${head.options.join(", ")}`);
+			if (head) console.log(`alert: Didn't catch that · ${head.label}: ${head.options.join(", ")}`);
 			else broadcast({ type: "notice", text: qy ? "Didn't catch that" : "Already answered" });
 			return { action: qy ? "no_match" : "gone", queryId: qy && qy.id };
 		}
+		if (head) console.log(`alert: Answered: ${option} · ${head.label}`);
 		removeQuery(qy.id);
 		return { action: "answered", queryId: qy.id };
 	}
-	const open = showing && sessions.find((x) => x.id === showing.sessionId);
+	const open = shown && sessions.find((x) => x.id === shown.sessionId);
 	if (open) {
 		prompt(open, text);
 		return { action: "prompted", sessionId: open.id };
@@ -310,10 +317,13 @@ async function handle(req, res) {
 			};
 			const timer = setTimeout(() => {
 				waiters.delete(done);
+				lastAppAt = Date.now();
 				json(res, 200, pendingNow());
 			}, 25000);
 			waiters.add(done);
-			req.on("close", () => waiters.delete(done));
+			req.on("close", () => {
+				if (waiters.delete(done)) lastAppAt = Date.now();
+			});
 			return;
 		}
 		if (path === "/api/watch/history") {
@@ -441,7 +451,7 @@ wss.on("connection", (ws) => {
 	ws.on("close", () => {
 		console.log("ws close");
 		sockets.delete(ws);
-		showing = null;
+		lastAppAt = Date.now();
 	});
 });
 

@@ -172,11 +172,14 @@ class PiStack extends WindowStack {
 		}
 	}
 	// Tells the phone (and the hub) what is on screen: the topmost query or
-	// session window under any action menu, else Home.
+	// session window under any action menu, else Home. Once a query or session
+	// is up, a late launch or "+" reply no longer opens one over it.
 	onScreenDisplayed(container) {
 		super.onScreenDisplayed(container);
 		const shown = this.windows.findLast(view => view.data.mode);
 		const data = shown && shown.data;
+		if (data)
+			this.sessionUntil = 0;
 		this.link.send("showing", data && (data.mode === "query" ? { ID: data.id } : { SESSION_ID: data.id }));
 	}
 }

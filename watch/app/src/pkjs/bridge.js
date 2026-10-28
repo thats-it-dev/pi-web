@@ -13,6 +13,7 @@ var OPTION_MAX = 24;
 var NOTICE_MAX = 120;
 var HUB_ERROR_MAX = 40; // the notice box fits about this many characters
 var RETRY_MS = 500;
+var RESUME_MS = 9000; // a plain launch opens the running session only this soon (the watch waits 10 s: main.js LAUNCH_MS)
 var NOTICE_FAIL = "Hub unreachable";
 var EMPTY_TEXT = "New session — send a ring note"; // a session with no turns yet (Home's "+ New session")
 var DARK_KEY = "pi-web.dark";
@@ -252,7 +253,7 @@ function createBridge(deps) {
 	var showing = { id: null, sessionId: null }; // what the watch last said is on screen
 	var reported = false; // the watch has said what it shows (Home, at launch)
 	var creating = false; // a "+ New session" on its way to the hub
-	var plainLaunch = false; // opened without an alert: resume() is still to run
+	var plainLaunch = 0; // when the app opened without an alert, while resume() is still to run
 
 	var queue = [];
 	var inFlight = null;
@@ -606,11 +607,13 @@ function createBridge(deps) {
 	// A launch without an alert opens the running session with the most recent
 	// activity (Home stays under it), unless a query is pending (it opens on its
 	// own) or the watch already shows something. Runs once, with the first frame,
-	// after the watch reports Home (that report would close a session opened before it).
+	// after the watch reports Home (that report would close a session opened before it),
+	// and only within RESUME_MS: after that the watch no longer opens the reply.
 	function resume() {
 		if (!plainLaunch || !gotFrame || !reported) return;
-		plainLaunch = false;
-		if (target() || showing.id !== null || showing.sessionId !== null) return;
+		var late = deps.now() - plainLaunch > RESUME_MS;
+		plainLaunch = 0;
+		if (late || target() || showing.id !== null || showing.sessionId !== null) return;
 		var best = null;
 		for (var i = 0; i < frame.sessions.length; i++) {
 			var s = frame.sessions[i];
@@ -622,7 +625,7 @@ function createBridge(deps) {
 	function launched(p) {
 		var code = typeof p.CODE === "number" ? p.CODE : -1;
 		if (code === 0) {
-			plainLaunch = true;
+			plainLaunch = deps.now();
 			resume();
 			return;
 		}
