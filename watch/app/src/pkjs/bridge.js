@@ -1,6 +1,6 @@
 // The phone-side model: turns hub frames into AppMessage dicts for the watch
 // and watch commands into hub calls. ES5 only; all dependencies are injected.
-// The dict shapes are the contract with the watch (see the task 7 report).
+// The dict shapes are the contract with the watch (see watch/PROTOCOL.md).
 
 var MSG_BYTES = 1000; // spec §6.4: one AppMessage, whole dict
 var ROW_SEP = "\x1e"; // between rows of a list
