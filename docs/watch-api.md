@@ -95,15 +95,19 @@ The ring posts a `multipart/form-data` body to `POST /api/index/webhook` (up to 
 
 Leave "Sign requests" off in the Index app; a signature is ignored if sent.
 
-The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. The transcription is trimmed and cut to 8000 characters. The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/2026-10-27-watch-ui-design.md) §5). The app counts as closed when no stream or long-poll is connected and nothing is shown; a closing stream clears what it showed. Ring-profile queries are answered only on screen. While the app is open, a query that is pending but not on screen is never answered.
+The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. The transcription is trimmed and cut to 8000 characters. The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/2026-10-27-watch-ui-design.md) §5).
+
+The app counts as **closed** when no app has held the stream or a long-poll, or posted `showing`, for 45 s. Within those 45 s (a reconnect blip, the gap between polls) the note is routed by the last-known `showing` as if the app were open. A half-open socket after the app closed counts as open until it misses two pings (about 60–90 s); such a note goes to the last session or a new one, never to a dialog.
+
+With the app closed, the note may answer only the oldest pi dialog that is a select or confirm dialog with options (never input or editor), was alerted (a notification or push reached the phone, or the watch showed it), existed at `recordedAt` (+2 s), and is neither skipped on the watch nor held back while pi-web is open in a browser. Ring-profile queries are answered only on screen. While the app is open, a query that is pending but not on screen is never answered.
 
 | Outcome | When |
 | --- | --- |
-| `answered` | the transcription answered the query the watch is showing, or, with the app closed, the oldest pending pi dialog |
-| `no_match` | it did not fit that query (the sidecar `reason` lists the options). Nothing is approved or denied. On screen the watch flashes "Didn't catch that"; with the app closed the hub sends one alert (notification, else push) reading "Didn't catch that" with the options |
-| `gone` | the query had already been answered; the watch flashes "Already answered" |
+| `answered` | the transcription answered the query the watch is showing, or, with the app closed, the eligible pi dialog; in the closed case the hub sends one receipt (notification, else push) "Answered: <option>" with the dialog's label |
+| `no_match` | it did not fit that query (the sidecar `reason` lists the options). Nothing is approved or denied. On screen the watch flashes "Didn't catch that"; with the app closed the hub sends one alert (notification, else push) "Didn't catch that" with the dialog's label and options |
+| `gone` | the query had already been answered. On screen the watch flashes "Already answered"; with the app closed nothing is sent |
 | `prompted` | no query on screen and a session open on the watch: the text went to that session as a prompt |
-| `new_session` | no session open and nothing to answer (no query on screen, and no pending pi dialog while the app is closed), so a session started in `~/pebble` with the text as its prompt |
+| `new_session` | no session open and nothing to answer (no query on screen, and, with the app closed, no eligible pi dialog), so a session started in `~/pebble` with the text as its prompt |
 | `kept_audio` | the transcription was empty, so only the audio is kept |
 | `error` | deciding failed; `reason` holds the message |
 
