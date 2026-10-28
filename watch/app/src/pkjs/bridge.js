@@ -573,13 +573,15 @@ function createBridge(deps) {
 	}
 
 	// Home's "+ New session": an empty session in ~/pebble, opened like a session
-	// alert's (the watch opens the reply that follows). Its next ring note is the prompt.
+	// alert's (the watch opens the reply that follows), but only while the watch
+	// is still on Home: opening it over a session or query the user moved to
+	// would take over that window's replies. Its next ring note is the prompt.
 	function create() {
 		if (creating) return;
 		creating = true;
 		post("/api/watch/new", {}, function (err, json) {
 			creating = false;
-			if (!err && json && json.sessionId) open(str(json.sessionId));
+			if (!err && json && json.sessionId && showing.id === null && showing.sessionId === null) open(str(json.sessionId));
 		});
 	}
 

@@ -134,6 +134,8 @@ class PiStack extends WindowStack {
 		const kinds = this.kinds;
 		this.kinds = null;
 		this.syncQuery(kinds.includes("query"));
+		if (kinds.includes("notice"))
+			this.sessionUntil = 0; // e.g. "+ New session" refused: no later reply opens
 		if (Date.now() < this.sessionUntil && kinds.includes("reply")) {
 			this.sessionUntil = 0;
 			if (!this.windows.some(view => view.data.mode === "session"))

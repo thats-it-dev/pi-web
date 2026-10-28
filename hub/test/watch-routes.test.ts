@@ -300,6 +300,28 @@ test("new starts an empty session in ~/pebble and answers its id; it takes no pr
 	assert.deepEqual(h.received, []);
 });
 
+test("new answers 503 with the hub's message when every pi slot is busy; GET on it is 404", async () => {
+	let k = 0;
+	const reg = new Registry({ factory: { startRpc: async (o) => new FakeHandle(`c-${++k}`, o.cwd, null) }, lookup: index, maxHeadless: 1, idleMs: 60_000 });
+	const w = new WatchService({ registry: reg, index, viewers: new Viewers(), home: root });
+	const s = createHubServer({ cfg, registry: reg, index, version: "0.1.0-test", home: root, log: () => {}, watch: w });
+	await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+	const p = (s.address() as AddressInfo).port;
+	try {
+		const first = await call(p, "POST", "/api/watch/new", WATCH, {});
+		assert.equal(first.status, 200);
+		(reg.get(first.body.sessionId) as FakeHandle).busy = true;
+		const full = await call(p, "POST", "/api/watch/new", WATCH, {});
+		assert.equal(full.status, 503);
+		assert.match(full.body.error, /already running/);
+		assert.equal(reg.all().length, 1);
+		assert.equal((await call(p, "GET", "/api/watch/new", WATCH)).status, 404);
+	} finally {
+		w.close();
+		s.close();
+	}
+});
+
 test("archive hides a session until it is active again, and persists across restarts", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pi-web-archive-"));
 	let t = 5_000;

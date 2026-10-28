@@ -16,7 +16,7 @@ const DOT = 10;
 const DOT_RIGHT = 12; // from the screen's edge
 const RUNNING = "#0055AA"; // dots are the same in both themes
 const STATUS = { w: "Waiting · approval", r: "Running", d: "Done", e: "Error" };
-const NEW = { id: "", title: "+ New session" }; // the first row (spec §8a); not a session
+const NEW = { id: "+", title: "+ New session" }; // the first row (spec §8a); not a session, never sent
 
 const stack = () => WindowStack.current;
 
@@ -66,7 +66,7 @@ class RowBehavior extends Behavior {
 	}
 	onDraw(port) {
 		const state = this.state, menu = this.menu, styles = menu.styles, row = this.row;
-		port.drawStyle(row.title, styles[0], TITLE_INSET, row.id ? 2 : 14, TEXT_W, 28, false, state);
+		port.drawStyle(row.title, styles[0], TITLE_INSET, row === NEW ? 14 : 2, TEXT_W, 28, false, state);
 		port.drawStyle(subLine(row), styles[1], TITLE_INSET, 30, TEXT_W, 22, false, state);
 		if (row.status !== "r" && row.status !== "w")
 			return; // done and error rows have no dot
@@ -157,8 +157,9 @@ class HomeBehavior extends View.Behavior {
 	}
 	addMenu(screen, view, m, p) {
 		// The cursor starts on the first session (a waiting one, if any: the phone
-		// sends those first), or on the session last selected; "+" is one Up away.
-		const items = [NEW].concat(m.home), index = view.selected ? items.findIndex(row => row.id === view.selected) : -1;
+		// sends those first), or on the row last selected, "+" included (a rebuild,
+		// one a second while a session runs, keeps it there); "+" is one Up away.
+		const items = [NEW].concat(m.home), index = items.findIndex(row => row.id === view.selected);
 		const menu = view.menu = new Menu({
 			items, Item: Row, cellHeight: CELL, fixed: true, selection: index < 0 ? Math.min(1, m.home.length) : index,
 			normal: [p.bg, p.fg], highlight: [AMBER, BLACK], onSelect: open,
@@ -170,12 +171,13 @@ class HomeBehavior extends View.Behavior {
 	}
 }
 
-// Select: "+" asks the phone for a new session, which it opens as a session
-// alert's (main.js launch); the session's pending query when it is the current
+// Select: "+" asks the phone for a new session; the first reply within 15 s
+// opens it (main.js sessionUntil, as for a session alert; a notice, e.g. the
+// hub refusing, disarms it). A session's pending query when it is the current
 // one; else the session.
 function open(index, row) {
 	const s = stack(), query = s.model.query;
-	if (!row.id) {
+	if (row === NEW) {
 		s.sessionUntil = Date.now() + 15000;
 		s.link.send("new");
 	}

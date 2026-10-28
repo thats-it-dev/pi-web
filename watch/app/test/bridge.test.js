@@ -487,6 +487,20 @@ test("new posts /api/watch/new once, then opens the new session with a placehold
 	assert.equal(t.hub.of("post", "/api/watch/new").length, 2);
 });
 
+test("a new session is not opened once the watch has moved off Home", () => {
+	const t = setup();
+	t.pend([], [sess("s1", "done")]);
+	t.bridge.onAppMessage({ CMD: "showing" }); // Home
+	t.bridge.onAppMessage({ CMD: "new" });
+	t.bridge.onAppMessage({ CMD: "showing", SESSION_ID: "s1" }); // opened s1 during the spawn
+	t.bridge.onAppMessage({ CMD: "open", SESSION_ID: "s1" });
+	t.hub.reply(null, { ok: true, sessionId: "n1" }, "/api/watch/new");
+	assert.equal(t.hub.of("get", "/api/watch/history?session=n1").length, 0);
+	t.hub.reply(null, { turns: [{ i: 1, role: "agent", text: "s1 reply" }], total: 2 }, "/api/watch/history?session=s1");
+	t.drain();
+	assert.deepEqual(t.all("reply").map((r) => [r.SESSION_ID, r.TEXT]), [["s1", "s1 reply"]]);
+});
+
 test("a failed new posts a notice and opens nothing; the next press tries again", () => {
 	const t = setup();
 	t.bridge.onAppMessage({ CMD: "new" });
