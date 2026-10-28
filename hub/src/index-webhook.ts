@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { matchOption } from "./answer-match.ts";
 import { HttpError } from "./errors.ts";
@@ -209,7 +210,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		}
 		const text = (name: string) => parts.find((p) => p.name === name)?.data.toString("utf8");
 		const audio = parts.find((p) => p.name === "audio")?.data;
-		const delivery = headers.delivery ?? "";
+		const delivery = headers.delivery || randomUUID(); // the Index app may send none; files are named by it
 		let transcription = (text("transcription") ?? "").trim();
 		if (transcription.length > TEXT_MAX) {
 			transcription = transcription.slice(0, TEXT_MAX);

@@ -253,13 +253,16 @@ test("open session, no query on screen → prompt to that session", async () => 
 	watch.showing({ queryId: null, sessionId: null });
 });
 
-test("a delivery without an id logs the outcome and its session with no empty field", async () => {
+test("a delivery without an id gets a generated one for its log line and files", async () => {
 	const h = (await registry.create("/work/noid")) as FakeHandle;
 	watch.showing({ queryId: null, sessionId: h.sessionId });
 	const b = multipart({ transcription: "go on" });
 	const { "x-index-delivery": _drop, ...headers } = signed(b).headers;
 	assert.equal((await post(port, headers, b)).status, 200);
-	assert.ok(logs.includes(`index: prompted ${h.sessionId}`), logs.slice(-3).join(" | "));
+	const line = logs.find((l) => l.endsWith(`prompted ${h.sessionId}`));
+	const id = line?.match(/^index: ([0-9a-f-]{36}) prompted /)?.[1];
+	assert.ok(id, logs.slice(-3).join(" | "));
+	assert.equal(sidecar(id).action, "prompted");
 	watch.showing({ queryId: null, sessionId: null });
 });
 
