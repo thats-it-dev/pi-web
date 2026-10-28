@@ -170,6 +170,17 @@ test("turn alert uses a session launch code (high bit set); queries do not", asy
 	assert.equal(t.n.launchTarget(12345), null);
 });
 
+test("launch codes start at a random point, so a restarted hub doesn't reuse an old notification's code", async () => {
+	const a = setup();
+	const b = setup();
+	await a.n.query(piQuery);
+	await b.n.query(piQuery);
+	const [ca] = [...a.n.launchCodes()][0]!;
+	const [cb] = [...b.n.launchCodes()][0]!;
+	assert.notEqual(ca, cb);
+	assert.ok(ca > 0 && cb > 0);
+});
+
 test("the launch table keeps the last 32 entries", async () => {
 	const t = setup();
 	for (let i = 0; i < 40; i++) await t.n.query({ ...piQuery, id: `q${i}` });

@@ -42,7 +42,9 @@ const MISS_TITLE = "Didn't catch that";
 export class Notifier {
 	private deps: NotifierDeps;
 	private targets = new Map<number, LaunchTarget>(); // oldest first
-	private seq = 0;
+	// The table lives in memory only. A random start keeps a restarted hub from handing an old
+	// notification's code to a new alert: an old Open then finds nothing and opens the app as usual.
+	private seq = randomInt(1, CODE_MASK);
 
 	constructor(deps: NotifierDeps) {
 		this.deps = deps;
@@ -128,9 +130,9 @@ export class Notifier {
 		}
 	}
 
-	// Session alerts have the high bit set; the low 31 bits count up.
+	// Session alerts have the high bit set; the low 31 bits count up, skipping 0 ("no code").
 	private code(target: LaunchTarget, session: boolean): number {
-		this.seq = (this.seq + 1) & CODE_MASK;
+		this.seq = (this.seq + 1) & CODE_MASK || 1;
 		const code = ((session ? SESSION_BIT : 0) | this.seq) >>> 0;
 		this.targets.delete(code);
 		this.targets.set(code, target);
