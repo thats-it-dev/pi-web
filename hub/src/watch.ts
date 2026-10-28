@@ -75,6 +75,11 @@ interface Tracked {
 type DialogAnswer = { value: string } | { confirmed: boolean };
 type ModelRow = { provider: string; id: string; name: string };
 
+// The query id a pi dialog is shown and answered under (and marked delivered by the Notifier).
+export function dialogQueryId(sessionId: string, dialog: Dialog): string {
+	return `dialog:${sessionId}:${dialog.id}`;
+}
+
 export class WatchService {
 	private deps: WatchDeps;
 	private now: () => number;
@@ -251,7 +256,7 @@ export class WatchService {
 		return this.subscribers.size;
 	}
 
-	// An app holds the stream or a long-poll right now (no grace): the Notifier's "app open".
+	// An app holds the stream or a long-poll right now (no grace).
 	connected(): boolean {
 		return this.subscribers.size + this.waiters.size > 0;
 	}
@@ -544,7 +549,7 @@ export class WatchService {
 			if (snap.dialogs.length === 0) continue;
 			const label = `pi · ${sessionTitle(snap)}`;
 			for (const d of snap.dialogs) {
-				const id = `dialog:${h.sessionId}:${d.id}`;
+				const id = dialogQueryId(h.sessionId, d);
 				out.push({ id, source: "pi", sessionId: h.sessionId, label, text: dialogMessage(d), options: dialogOptions(d), createdAt: this.createdAt(id), method: d.method });
 			}
 		}

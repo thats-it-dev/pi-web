@@ -51,7 +51,7 @@ async function setup(t: TestContext) {
 		piBin: env.piBin,
 		dev: false,
 		approvalMode: "manual",
-	watchAlert: "auto",
+	push: true,
 	ringProfileUrl: "",
 		dataDir: env.root,
 	};

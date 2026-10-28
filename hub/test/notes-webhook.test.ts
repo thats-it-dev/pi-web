@@ -146,7 +146,7 @@ test("postNotes: 2xx true, 408/429/5xx retry, other 4xx rejected", async () => {
 const root = tmp("pi-web-notes-");
 mkdirSync(join(root, "sessions"));
 const cfg: HubConfig = { port: 0, internalPort: 0, hostname: "hub.test:7878", allowedLogin: "me@github", allowedOrigins: ["https://pi.thatsit.app"], idleMinutes: 20, maxHeadless: 6, piBin: "pi", dev: false, approvalMode: "manual",
-	watchAlert: "auto", ringProfileUrl: "http://127.0.0.1:7880", dataDir: root };
+	push: true, ringProfileUrl: "http://127.0.0.1:7880", dataDir: root };
 const RING = { host: "hub.test:7878", "tailscale-user-login": "me@github" };
 const logs: string[] = [];
 const idx = new SessionIndex(join(root, "sessions"));

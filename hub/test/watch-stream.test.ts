@@ -29,7 +29,7 @@ const cfg: HubConfig = {
 	piBin: "pi",
 	dev: false,
 	approvalMode: "manual",
-	watchAlert: "auto",
+	push: true,
 	ringProfileUrl: "",
 	dataDir: root,
 };

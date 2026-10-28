@@ -1,16 +1,15 @@
-// Decides when a session deserves a push (spec §5.5): a run finished, a dialog
-// is waiting, or a run ended in an error, and no app is open anywhere to see
-// it. Headless sessions only: someone running a terminal session is at the terminal.
+// Turn outcomes for push (spec §5.5): a run finished, a dialog is waiting, or a
+// run ended in an error. Headless sessions only: someone running a terminal
+// session is at the terminal. Also tracks which apps are open and on which session.
 
 import { basename } from "node:path";
-import type { Dialog, PushPayload, Snapshot } from "../../shared/src/protocol.ts";
+import type { Dialog, Snapshot } from "../../shared/src/protocol.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import type { Registry } from "./registry.ts";
-import { watchTurns } from "./turns.ts";
+import { type TurnOutcome, watchTurns } from "./turns.ts";
 
 const TITLE_MAX = 60;
 const MESSAGE_MAX = 240;
-const BODY_MAX = 160;
 
 // Apps currently open and in front of someone. Each holds the events stream
 // only while it's visible, so a stream counts as a viewer.
@@ -57,16 +56,9 @@ export class Viewers {
 	}
 }
 
-export function watchPush(registry: Pick<Registry, "onChange" | "get">, send: (p: PushPayload) => void, viewers?: Pick<Viewers, "watching">): () => void {
-	return watchTurns(registry, (o, snap) => {
-		if (viewers?.watching()) return;
-		const p: PushPayload = { sessionId: o.sessionId, title: sessionTitle(snap), kind: o.kind };
-		// needs_you: what the dialog asks; finished: the start of the reply; error: the error text.
-		const detail = o.kind === "needs_you" ? (snap.dialogs[0] ? dialogMessage(snap.dialogs[0]) : "") : o.text;
-		const body = clipText(detail, BODY_MAX);
-		if (body) p.body = body;
-		send(p);
-	});
+// Forwards each turn outcome with its snapshot; who gets told, and what, is the Notifier's call.
+export function watchPush(registry: Pick<Registry, "onChange" | "get">, onOutcome: (o: TurnOutcome, snap: Snapshot) => void): () => void {
+	return watchTurns(registry, onOutcome);
 }
 
 // A pi dialog as one block of text: its title, then its message.

@@ -26,7 +26,7 @@ export function launchOnPhone(host: string, uuid: string, opts: PhoneOpts = {}):
 }
 
 // Opens the Developer Connection, sends one frame and closes. ok means the frame went out.
-export function sendToPhone(host: string, frame: Uint8Array, opts: PhoneOpts = {}): Promise<LaunchResult> {
+function sendToPhone(host: string, frame: Uint8Array, opts: PhoneOpts = {}): Promise<LaunchResult> {
 	const WS = opts.WebSocketCtor ?? globalThis.WebSocket;
 	return new Promise((resolve) => {
 		let ws: WebSocket | undefined;

@@ -1,227 +1,148 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PushPayload, WatchQuery } from "../../shared/src/protocol.ts";
-import { Notifier } from "../src/notifier.ts";
+import type { Dialog, PushPayload, Snapshot, WatchQuery } from "../../shared/src/protocol.ts";
+import { Notifier, shortTitle } from "../src/notifier.ts";
+import type { TurnOutcome } from "../src/turns.ts";
+import { dialogQueryId } from "../src/watch.ts";
+import { FakeHandle } from "./support/fake-handle.ts";
 
-const APP = "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b";
-
-function setup(o: { mode?: "auto" | "notification" | "push" | "off"; phone?: string | null; appOpen?: boolean; sendOk?: boolean; pushOk?: boolean; sendThrows?: boolean; pushThrows?: boolean } = {}) {
-	const sent: [string, Uint8Array][] = [];
+function setup(o: { enabled?: boolean; pushOk?: boolean; pushThrows?: boolean; viewing?: (id: string) => boolean } = {}) {
 	const pushed: PushPayload[] = [];
 	const delivered: string[] = [];
 	const logs: string[] = [];
 	const n = new Notifier({
-		mode: o.mode ?? "auto",
-		appUuid: APP,
-		phone: () => (o.phone === undefined ? "100.64.0.9" : o.phone),
-		appOpen: () => o.appOpen ?? false,
-		send: async (h, f) => {
-			sent.push([h, f]);
-			if (o.sendThrows) throw new Error("boom");
-			return o.sendOk ?? true;
-		},
+		enabled: o.enabled ?? true,
 		push: async (p) => {
 			pushed.push(p);
 			if (o.pushThrows) throw new Error("push boom");
 			return o.pushOk ?? true;
 		},
+		viewing: o.viewing ?? (() => false),
 		markDelivered: (id) => delivered.push(id),
+		isPending: () => true,
 		log: (m) => logs.push(m),
 	});
-	return { n, sent, pushed, delivered, logs };
+	return { n, pushed, delivered, logs };
 }
 
+function snap(sessionId = "s-1", cwd = "/work/x", dialogs: Dialog[] = []): Snapshot {
+	const h = new FakeHandle(sessionId, cwd);
+	h.dialogs = dialogs;
+	return h.snapshot();
+}
+
+const finished = (text: string, sessionId = "s-1"): TurnOutcome => ({ sessionId, kind: "finished", messageIndex: 1, text });
+const confirm: Dialog = { id: "d1", method: "confirm", title: "Run tests?", message: "npm test" };
+const select: Dialog = { id: "d2", method: "select", title: "Which branch?", options: ["main", "dev"] };
 const piQuery: WatchQuery = { id: "dialog:s-1:d1", source: "pi", sessionId: "s-1", label: "pi · fix", text: "Run tests?", options: ["yes", "no"], createdAt: 1 };
-const ringQuery: WatchQuery = { id: "rp:1", source: "ring-profile", sessionId: null, label: "ring · follow-up", text: "Secret question text", options: [], createdAt: 1 };
-const alert: PushPayload = { sessionId: "s-1", kind: "finished", title: "fix", body: "All done" };
+const ringQuery: WatchQuery = { id: "rp:1", source: "ring-profile", sessionId: null, label: "ring · follow-up", text: "How did you sleep?", options: [], createdAt: 1 };
 
-test("app open → no alert, query is delivered by showing only", async () => {
-	const t = setup({ appOpen: true });
-	await t.n.query(piQuery);
-	await t.n.turnPush(alert);
-	assert.equal(t.sent.length, 0);
-	assert.equal(t.pushed.length, 0);
-	assert.deepEqual(t.delivered, []);
+test("shortTitle joins project and event, cutting the project to fit 24 characters", () => {
+	assert.equal(shortTitle("pi-web", "approve?"), "pi-web · approve?");
+	const long = shortTitle("ring-profile-experiments-2026", "done");
+	assert.ok(long.length <= 24, long);
+	assert.ok(long.endsWith(" · done"), long);
+	assert.ok(long.includes("…"), long);
+	assert.equal(shortTitle("", "error"), "pi · error");
 });
 
-test("app closed, mode notification → one frame sent to phone and markDelivered called", async () => {
-	const t = setup({ mode: "notification" });
-	await t.n.query(piQuery);
-	assert.equal(t.sent.length, 1);
-	assert.equal(t.sent[0][0], "100.64.0.9");
-	assert.equal(t.sent[0][1][0], 0x01);
-	assert.equal(t.pushed.length, 0);
-	assert.deepEqual(t.delivered, [piQuery.id]);
+test("finished with a TL;DR: the agent's title and summary", async () => {
+	const t = setup();
+	await t.n.turn(finished("Fixed the upload limit.\n\nTL;DR [413 fixed]: Notes 413 fixed."), snap());
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "413 fixed", kind: "finished", body: "Notes 413 fixed." }]);
 });
 
-test("notification mode, phone unreachable → no push, not delivered", async () => {
-	const t = setup({ mode: "notification", sendOk: false });
-	await t.n.query(piQuery);
-	assert.equal(t.pushed.length, 0);
-	assert.deepEqual(t.delivered, []);
-});
-
-test("auto, phone unreachable → one Web Push with kind query, delivered when push returns true", async () => {
-	for (const phone of [null, "100.64.0.9"]) {
-		const t = setup({ phone, sendOk: false });
-		await t.n.query(piQuery);
-		assert.equal(t.pushed.length, 1);
-		assert.deepEqual(t.pushed[0], { sessionId: "s-1", title: "pi · fix", kind: "query", body: "Run tests?" });
-		assert.deepEqual(t.delivered, [piQuery.id]);
-	}
-});
-
-test("auto, ring-profile query → push payload has no query text", async () => {
-	const t = setup({ phone: null });
-	await t.n.query(ringQuery);
-	assert.deepEqual(t.pushed, [{ sessionId: "", title: "ring · follow-up", kind: "query", body: "Question waiting" }]);
-	assert.ok(!JSON.stringify(t.pushed).includes("Secret"));
-});
-
-test("auto, phone unreachable and push fails → no throw, not delivered, no retry", async () => {
-	for (const pushThrows of [false, true]) {
-		const t = setup({ phone: null, pushOk: false, pushThrows });
-		await t.n.query(piQuery);
-		assert.equal(t.pushed.length, 1);
-		assert.deepEqual(t.delivered, []);
-	}
-});
-
-test("a throwing send or push never throws out", async () => {
-	const t = setup({ sendThrows: true, pushThrows: true });
-	await t.n.query(piQuery);
-	await t.n.turnPush(alert);
-	assert.ok(t.logs.length > 0);
-	const p = setup({ mode: "push", pushThrows: true });
-	await p.n.query(ringQuery);
-});
-
-test("mode push → push only, no frame", async () => {
-	const t = setup({ mode: "push" });
-	await t.n.query(piQuery);
-	assert.equal(t.sent.length, 0);
+test("finished without a TL;DR: '<project> · done' and the clipped reply", async () => {
+	const t = setup();
+	await t.n.turn(finished("y".repeat(300)), snap("s-1", "/work/proj"));
 	assert.equal(t.pushed.length, 1);
-	assert.deepEqual(t.delivered, [piQuery.id]);
+	assert.equal(t.pushed[0].title, "proj · done");
+	assert.equal(t.pushed[0].kind, "finished");
+	assert.equal(t.pushed[0].body, `${"y".repeat(159)}…`);
 });
 
-test("finished turn, phone reachable → one frame, zero pushes", async () => {
+test("a TL;DR title over 24 characters is cut to 24", async () => {
 	const t = setup();
-	await t.n.turnPush(alert);
-	assert.equal(t.sent.length, 1);
-	assert.equal(t.pushed.length, 0);
+	await t.n.turn(finished(`TL;DR [${"t".repeat(40)}]: short.`), snap());
+	assert.ok(t.pushed[0].title.length <= 24);
+	assert.ok(t.pushed[0].title.startsWith("tttt"));
 });
 
-test("finished turn, phone unreachable → one push with the reply excerpt body", async () => {
-	for (const o of [{ phone: null }, { sendOk: false }, { mode: "push" as const }]) {
-		const t = setup(o);
-		await t.n.turnPush(alert);
-		assert.deepEqual(t.pushed, [alert]);
-	}
-	const n = setup({ mode: "notification", phone: null });
-	await n.n.turnPush(alert);
-	assert.equal(n.pushed.length, 0);
-});
-
-test("turn with the watch app open → nothing; needs_you is the query path's job", async () => {
-	const t = setup({ appOpen: true });
-	await t.n.turnPush(alert);
-	const u = setup();
-	await u.n.turnPush({ sessionId: "s-1", title: "fix", kind: "needs_you", body: "Allow?" });
-	for (const x of [t, u]) assert.equal(x.sent.length + x.pushed.length, 0);
-});
-
-test("pi dialog, app closed: phone unreachable → exactly one push; reachable → one frame, no push", async () => {
-	const a = setup({ phone: null });
-	await a.n.query(piQuery);
-	assert.equal(a.pushed.length, 1);
-	const b = setup();
-	await b.n.query(piQuery);
-	assert.equal(b.sent.length, 1);
-	assert.equal(b.pushed.length, 0);
-});
-
-test("the frame title is clipped to 64 characters", async () => {
+test("needs_you: confirm says approve?, select says question; body is the dialog message", async () => {
 	const t = setup();
-	await t.n.query({ ...piQuery, label: "L".repeat(100) });
-	assert.ok(!Buffer.from(t.sent[0][1]).includes("L".repeat(65)));
-	assert.ok(Buffer.from(t.sent[0][1]).includes(`${"L".repeat(63)}…`));
+	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [select]));
+	assert.deepEqual(t.pushed, [
+		{ sessionId: "s-1", title: "x · approve?", kind: "needs_you", body: "Run tests?\nnpm test" },
+		{ sessionId: "s-1", title: "x · question", kind: "needs_you", body: "Which branch?" },
+	]);
 });
 
-test("mode off → nothing sent", async () => {
-	const t = setup({ mode: "off" });
-	await t.n.query(piQuery);
-	await t.n.turnPush(alert);
-	assert.equal(t.sent.length, 0);
-	assert.equal(t.pushed.length, 0);
+test("needs_you push marks the dialog delivered", async () => {
+	const t = setup();
+	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	assert.deepEqual(t.delivered, [dialogQueryId("s-1", confirm)]);
+	const u = setup({ pushOk: false });
+	await u.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	assert.deepEqual(u.delivered, []);
 });
 
-test("turn alert uses a session launch code (high bit set); queries do not", async () => {
+test("error: '<project> · error' with the error text", async () => {
+	const t = setup();
+	await t.n.turn({ sessionId: "s-1", kind: "error", messageIndex: 1, text: "model unreachable" }, snap());
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "x · error", kind: "error", body: "model unreachable" }]);
+});
+
+test("a session being viewed gets no push; another session still does", async () => {
+	const t = setup({ viewing: (id) => id === "s-1" });
+	await t.n.turn(finished("done", "s-1"), snap("s-1"));
+	await t.n.turn(finished("done", "s-2"), snap("s-2"));
+	assert.deepEqual(t.pushed.map((p) => p.sessionId), ["s-2"]);
+});
+
+test("a ring-profile query pushes its text and is marked delivered, whatever is being viewed", async () => {
+	const t = setup({ viewing: () => true });
+	await t.n.query(ringQuery);
+	assert.deepEqual(t.pushed, [{ sessionId: "", title: "ring · question", kind: "query", body: "How did you sleep?" }]);
+	assert.deepEqual(t.delivered, ["rp:1"]);
+});
+
+test("a pi-source query sends nothing (dialogs alert through turn)", async () => {
 	const t = setup();
 	await t.n.query(piQuery);
-	await t.n.turnPush(alert);
-	assert.equal(t.sent.length, 2);
-	const codes = [...t.n.launchCodes()];
-	const q = codes.find(([, v]) => "queryId" in v)!;
-	const s = codes.find(([, v]) => "sessionId" in v)!;
-	assert.ok(q[0] < 0x80000000);
-	assert.ok(s[0] >= 0x80000000 && s[0] <= 0xffffffff);
-	assert.deepEqual(t.n.launchTarget(q[0]), { queryId: piQuery.id });
-	assert.deepEqual(t.n.launchTarget(s[0]), { sessionId: "s-1" });
-	assert.equal(t.n.launchTarget(12345), null);
-});
-
-test("launch codes start at a random point, so a restarted hub doesn't reuse an old notification's code", async () => {
-	const a = setup();
-	const b = setup();
-	await a.n.query(piQuery);
-	await b.n.query(piQuery);
-	const [ca] = [...a.n.launchCodes()][0]!;
-	const [cb] = [...b.n.launchCodes()][0]!;
-	assert.notEqual(ca, cb);
-	assert.ok(ca > 0 && cb > 0);
-});
-
-test("the launch table keeps the last 32 entries", async () => {
-	const t = setup();
-	for (let i = 0; i < 40; i++) await t.n.query({ ...piQuery, id: `q${i}` });
-	assert.equal([...t.n.launchCodes()].length, 32);
-	assert.deepEqual([...t.n.launchCodes()].at(-1)![1], { queryId: "q39" });
-});
-
-test("ring miss: a frame titled \"Didn't catch that\" naming the dialog and its options, launching the query", async () => {
-	const t = setup({ mode: "notification" });
-	await t.n.ringAlert({ kind: "miss", query: piQuery });
-	assert.equal(t.sent.length, 1);
-	const text = Buffer.from(t.sent[0][1]).toString("utf8");
-	assert.ok(text.includes("Didn't catch that"));
-	assert.ok(text.includes("pi · fix: yes, no"));
-	const code = [...t.n.launchCodes()].find(([, v]) => "queryId" in v && v.queryId === piQuery.id);
-	assert.ok(code && code[0] < 0x80000000);
-	assert.equal(t.pushed.length, 0);
+	assert.deepEqual(t.pushed, []);
 	assert.deepEqual(t.delivered, []);
 });
 
-test("ring miss: auto with the phone unreachable → one push; off or app open → nothing", async () => {
-	const t = setup({ phone: null });
+test("enabled: false sends nothing at all", async () => {
+	const t = setup({ enabled: false });
+	await t.n.turn(finished("done"), snap());
+	await t.n.turn({ sessionId: "s-1", kind: "needs_you" }, snap("s-1", "/work/x", [confirm]));
+	await t.n.query(ringQuery);
 	await t.n.ringAlert({ kind: "miss", query: piQuery });
-	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "pi · fix: yes, no" }]);
-	for (const o of [{ mode: "off" as const }, { appOpen: true }]) {
-		const u = setup(o);
-		await u.n.ringAlert({ kind: "miss", query: piQuery });
-		await u.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
-		assert.equal(u.sent.length + u.pushed.length, 0);
-	}
+	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
+	assert.deepEqual(t.pushed, []);
+	assert.deepEqual(t.delivered, []);
 });
 
-test("ring answered: one receipt naming the option and the dialog, launching its session", async () => {
-	const t = setup({ mode: "notification" });
+test("ring miss and answered receipts", async () => {
+	const t = setup();
+	await t.n.ringAlert({ kind: "miss", query: piQuery });
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
-	assert.equal(t.sent.length, 1);
-	const text = Buffer.from(t.sent[0][1]).toString("utf8");
-	assert.ok(text.includes("Answered: yes"));
-	assert.ok(text.includes("pi · fix"));
-	assert.ok([...t.n.launchCodes()].some(([c, v]) => "sessionId" in v && v.sessionId === "s-1" && c >= 0x80000000));
-	const u = setup({ phone: null });
-	await u.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
-	assert.deepEqual(u.pushed, [{ sessionId: "s-1", title: "Answered: yes", kind: "query", body: "pi · fix" }]);
+	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "a very long option text indeed" });
+	assert.deepEqual(t.pushed.slice(0, 2), [
+		{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "pi · fix: yes, no" },
+		{ sessionId: "s-1", title: "Answered: yes", kind: "query", body: "pi · fix" },
+	]);
+	assert.ok(t.pushed[2].title.length <= 24);
+	assert.ok(t.pushed[2].title.startsWith("Answered: a very"));
+});
+
+test("a throwing push never throws out", async () => {
+	const t = setup({ pushThrows: true });
+	await t.n.turn(finished("done"), snap());
+	await t.n.query(ringQuery);
+	await t.n.ringAlert({ kind: "miss", query: piQuery });
+	assert.ok(t.logs.length >= 3);
+	assert.deepEqual(t.delivered, []);
 });

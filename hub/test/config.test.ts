@@ -31,12 +31,18 @@ test("dev mode adds the Vite dev origin", () => {
 	assert.ok(loadConfig(dir).allowedOrigins.includes("http://localhost:5173"));
 });
 
-test("watchAlert defaults to auto and rejects an unknown mode", () => {
+test("push defaults to true; a legacy watchAlert of off turns it off, any other legacy value on", () => {
 	const dir = tmp();
-	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github" }));
-	assert.equal(loadConfig(dir).watchAlert, "auto");
-	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github", watchAlert: "push" }));
-	assert.equal(loadConfig(dir).watchAlert, "push");
-	writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github", watchAlert: "sms" }));
-	assert.throws(() => loadConfig(dir), ConfigError);
+	const write = (extra: Record<string, unknown>) => writeFileSync(join(dir, "config.json"), JSON.stringify({ hostname: "h:1", allowedLogin: "me@github", ...extra }));
+	write({});
+	assert.equal(loadConfig(dir).push, true);
+	write({ watchAlert: "off" });
+	assert.equal(loadConfig(dir).push, false);
+	write({ push: true });
+	assert.equal(loadConfig(dir).push, true);
+	write({ watchAlert: "off", push: true });
+	assert.equal(loadConfig(dir).push, true);
+	write({ push: false });
+	assert.equal(loadConfig(dir).push, false);
+	assert.equal("watchAlert" in loadConfig(dir), false);
 });

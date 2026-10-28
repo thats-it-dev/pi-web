@@ -3,9 +3,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL_MODES, type ApprovalMode } from "../../shared/src/protocol.ts";
 
-export const WATCH_ALERTS = ["auto", "notification", "push", "off"] as const;
-export type WatchAlert = (typeof WATCH_ALERTS)[number];
-
 export interface HubConfig {
 	port: number;
 	internalPort: number; // loopback-only API for local services (internal-server.ts)
@@ -15,7 +12,7 @@ export interface HubConfig {
 	idleMinutes: number;
 	maxHeadless: number;
 	piBin: string;
-	watchAlert: WatchAlert; // how a closed watch app is alerted (notifier.ts)
+	push: boolean; // Web Push alerts for finished turns, waiting dialogs and ring questions (notifier.ts)
 	approvalMode: ApprovalMode; // the default for app-started sessions (see auto-approve.ts)
 	ringProfileUrl: string; // the ring-profile service ring notes are forwarded to; "" turns forwarding off
 	dev: boolean;
@@ -32,7 +29,7 @@ export const DEFAULTS = {
 	maxHeadless: 6,
 	piBin: "pi",
 	approvalMode: "auto" as ApprovalMode,
-	watchAlert: "auto" as WatchAlert,
+	push: true,
 	ringProfileUrl: "http://127.0.0.1:7880",
 	dev: false,
 };
@@ -50,10 +47,12 @@ export function loadConfig(dataDir = defaultDataDir()): HubConfig {
 	const file = join(dataDir, "config.json");
 	if (!existsSync(file)) writeFileSync(file, `${JSON.stringify(DEFAULTS, null, 2)}\n`, { mode: 0o600 });
 	const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
-	const cfg: HubConfig = { ...DEFAULTS, ...raw, dataDir };
+	const { watchAlert, ...rest } = raw;
+	const cfg: HubConfig = { ...DEFAULTS, ...rest, dataDir };
+	if (watchAlert !== undefined && raw.push === undefined) cfg.push = watchAlert !== "off"; // the setting's earlier, four-mode form
 	if (raw.autoApprove === false && raw.approvalMode === undefined) cfg.approvalMode = "manual"; // the setting's earlier, boolean form
 	if (!APPROVAL_MODES.includes(cfg.approvalMode)) throw new ConfigError(`approvalMode in ${file} must be one of ${APPROVAL_MODES.join(", ")}`);
-	if (!WATCH_ALERTS.includes(cfg.watchAlert)) throw new ConfigError(`watchAlert in ${file} must be one of ${WATCH_ALERTS.join(", ")}`);
+	if (typeof cfg.push !== "boolean") throw new ConfigError(`push in ${file} must be true or false`);
 	if (!cfg.hostname || !cfg.allowedLogin) {
 		throw new ConfigError(
 			`Set hostname and allowedLogin in ${file}.\n` +

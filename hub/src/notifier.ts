@@ -1,143 +1,101 @@
-// Alerts for a closed app (spec §7). When no watch app is open, a question that appears or a
-// turn that ends should still reach the wrist:
-//   notification: a BlobDB notification through the phone's Developer Connection, with an Open
-//     action that launches the watchapp on that question or session. It works only while the
-//     Pebble phone app is in the foreground, so
-//   auto: falls back to a Web Push (mirrored to the watch by the phone, but without Open).
-// The Notifier is the one alert path: watchPush's turn pushes come here too (turnPush), so each
-// event alerts once: a frame if the phone answers, else (auto) one Web Push.
+// Web Push alerts (push + TL;DR spec): a pi turn finished, needs Michael or errored, or
+// ring-profile raised a question. The phone shows the push and mirrors it to the watch.
+// Titles are short (24 characters fit the watch's notification header): the agent's TL;DR
+// title for a finished turn, else "<project> · <event>". A session someone is looking at
+// in the app gets no push for its turns.
 // Every entry point catches and logs: callers are synchronous listeners and must not see a throw.
 
-import { randomInt, randomUUID } from "node:crypto";
-import type { PushPayload, WatchQuery } from "../../shared/src/protocol.ts";
-import { notificationFrame } from "./notification-frame.ts";
-import { clipText as clip } from "./push-watch.ts";
-import type { RingAlert } from "./watch.ts";
-
-export type AlertMode = "auto" | "notification" | "push" | "off";
-
-export type LaunchTarget = { queryId: string } | { sessionId: string };
+import { basename } from "node:path";
+import type { PushPayload, Snapshot, WatchQuery } from "../../shared/src/protocol.ts";
+import { parseTldr, stripTldr } from "../../shared/src/tldr.ts";
+import { clipText, dialogMessage } from "./push-watch.ts";
+import type { TurnOutcome } from "./turns.ts";
+import { dialogQueryId, type RingAlert } from "./watch.ts";
 
 export interface NotifierDeps {
-	mode: AlertMode;
-	appUuid: string;
-	phone: () => string | null;
-	appOpen: () => boolean;
-	send?: (host: string, frame: Uint8Array) => Promise<boolean>;
+	enabled: boolean;
 	push: (p: PushPayload) => Promise<boolean>;
+	viewing: (sessionId: string) => boolean; // an app is showing this session
 	markDelivered: (queryId: string) => void;
+	isPending: (queryId: string) => boolean; // still unanswered (stuck reminders)
+	stuckMs?: number;
 	log?: (m: string) => void;
-	now?: () => number;
+	setTimer?: (fn: () => void, ms: number) => unknown;
 }
 
-const SESSION_BIT = 0x80000000;
-const CODE_MASK = 0x7fffffff;
-const TABLE_MAX = 32;
-const PUSH_BODY_MAX = 160;
-const FRAME_BODY_MAX = 240;
-const FRAME_TITLE_MAX = 64; // TimelineAttribute Title
-const RING_BODY = "Question waiting";
+const TITLE_MAX = 24;
+const BODY_MAX = 160;
 const MISS_TITLE = "Didn't catch that";
+
+// "<project> · <event>", the project cut (with "…") so the whole fits TITLE_MAX.
+export function shortTitle(project: string, event: "done" | "approve?" | "question" | "error" | "waiting"): string {
+	const suffix = ` · ${event}`;
+	const room = TITLE_MAX - suffix.length;
+	const p = project.trim() || "pi";
+	return `${p.length > room ? `${p.slice(0, room - 1)}…` : p}${suffix}`;
+}
 
 export class Notifier {
 	private deps: NotifierDeps;
-	private targets = new Map<number, LaunchTarget>(); // oldest first
-	// The table lives in memory only. A random start keeps a restarted hub from handing an old
-	// notification's code to a new alert: an old Open then finds nothing and opens the app as usual.
-	private seq = randomInt(1, CODE_MASK);
 
 	constructor(deps: NotifierDeps) {
 		this.deps = deps;
 	}
 
-	// The watch sends the code it was launched with back; this says what it meant.
-	launchTarget(code: number): LaunchTarget | null {
-		return this.targets.get(code >>> 0) ?? null;
+	// A turn outcome from watchPush. finished: the TL;DR, else the start of the reply;
+	// needs_you: what the dialog asks; error: the error text.
+	async turn(o: TurnOutcome, snap: Snapshot): Promise<void> {
+		try {
+			if (!this.deps.enabled || this.deps.viewing(o.sessionId)) return;
+			const project = basename(snap.cwd);
+			if (o.kind === "needs_you") {
+				const d = snap.dialogs[0];
+				const title = shortTitle(project, d?.method === "confirm" ? "approve?" : "question");
+				const sent = await this.send({ sessionId: o.sessionId, title, kind: "needs_you" }, d ? dialogMessage(d) : "");
+				// The closed-app ring path answers only dialogs that were alerted.
+				if (sent && d) this.deps.markDelivered(dialogQueryId(o.sessionId, d));
+				return;
+			}
+			if (o.kind === "error") {
+				await this.send({ sessionId: o.sessionId, title: shortTitle(project, "error"), kind: "error" }, o.text);
+				return;
+			}
+			const tldr = parseTldr(o.text);
+			const title = tldr?.title ? clipText(tldr.title, TITLE_MAX) : shortTitle(project, "done");
+			await this.send({ sessionId: o.sessionId, title, kind: "finished" }, tldr?.summary ?? stripTldr(o.text));
+		} catch (err) {
+			this.log(`notifier: turn ${o.sessionId}: ${(err as Error).message}`);
+		}
 	}
 
-	launchCodes(): IterableIterator<[number, LaunchTarget]> {
-		return this.targets.entries();
-	}
-
+	// A ring-profile question. pi dialogs alert through turn (needs_you), so they're ignored here.
 	async query(q: WatchQuery): Promise<void> {
 		try {
-			const { mode } = this.deps;
-			if (mode === "off" || this.deps.appOpen()) return;
-			let delivered = false;
-			if (mode !== "push") delivered = await this.frame(q.label, q.text, this.code({ queryId: q.id }, false));
-			if (!delivered && mode !== "notification") {
-				// A ring question never leaves the machine in a push, whoever can read the lock screen.
-				const body = q.source === "ring-profile" ? RING_BODY : clip(q.text, PUSH_BODY_MAX);
-				delivered = await this.deps.push({ sessionId: q.sessionId ?? "", title: q.label, kind: "query", body });
-			}
-			if (delivered) this.deps.markDelivered(q.id);
+			if (!this.deps.enabled || q.source !== "ring-profile") return;
+			if (await this.send({ sessionId: q.sessionId ?? "", title: shortTitle("ring", "question"), kind: "query" }, q.text)) this.deps.markDelivered(q.id);
 		} catch (err) {
 			this.log(`notifier: query ${q.id}: ${(err as Error).message}`);
 		}
 	}
 
 	// What a ring note did to a pi dialog while the app was closed (spec §5): one alert.
-	// A miss names the dialog and its options, and Open shows the query; an answer is
-	// the receipt for an approval given blind, and Open shows its session.
+	// A miss names the dialog and its options; an answer is the receipt for an approval given blind.
 	async ringAlert(a: RingAlert): Promise<void> {
 		try {
-			const { mode } = this.deps;
-			if (mode === "off" || this.deps.appOpen()) return;
+			if (!this.deps.enabled) return;
 			const q = a.query;
-			const title = a.kind === "miss" ? MISS_TITLE : `Answered: ${a.option}`;
+			const title = a.kind === "miss" ? MISS_TITLE : clipText(`Answered: ${a.option}`, TITLE_MAX);
 			const body = a.kind === "miss" ? `${q.label}: ${q.options.join(", ")}` : q.label;
-			const target = a.kind === "miss" || !q.sessionId ? this.code({ queryId: q.id }, false) : this.code({ sessionId: q.sessionId }, true);
-			let sent = false;
-			if (mode !== "push") sent = await this.frame(title, body, target);
-			if (!sent && mode !== "notification") await this.deps.push({ sessionId: q.sessionId ?? "", title: clip(title, FRAME_TITLE_MAX), kind: "query", body: clip(body, PUSH_BODY_MAX) });
+			await this.send({ sessionId: q.sessionId ?? "", title, kind: "query" }, body);
 		} catch (err) {
 			this.log(`notifier: ring ${a.kind} ${a.query.id}: ${(err as Error).message}`);
 		}
 	}
 
-	// A finished or error turn from watchPush (already body-filled and clipped). needs_you is the
-	// pi query path's job, so it is ignored here.
-	async turnPush(p: PushPayload): Promise<void> {
-		try {
-			const { mode } = this.deps;
-			if ((p.kind !== "finished" && p.kind !== "error") || mode === "off" || this.deps.appOpen()) return;
-			let sent = false;
-			if (mode !== "push") sent = await this.frame(p.title, p.body ?? "", this.code({ sessionId: p.sessionId }, true));
-			if (!sent && mode !== "notification") await this.deps.push(p);
-		} catch (err) {
-			this.log(`notifier: turn ${p.sessionId}: ${(err as Error).message}`);
-		}
-	}
-
-	// True when the frame went out. False when there is no phone, no sender or the socket failed.
-	private async frame(title: string, body: string, launchCode: number): Promise<boolean> {
-		const host = this.deps.phone();
-		if (host === null || !this.deps.send) return false;
-		try {
-			const f = notificationFrame({
-				appUuid: this.deps.appUuid,
-				itemId: randomUUID(),
-				token: randomInt(0, 0x10000),
-				time: Math.floor((this.deps.now ?? Date.now)() / 1000),
-				title: clip(title, FRAME_TITLE_MAX),
-				body: clip(body, FRAME_BODY_MAX),
-				launchCode,
-			});
-			return await this.deps.send(host, f);
-		} catch (err) {
-			this.log(`notifier: frame to ${host} failed: ${(err as Error).message}`);
-			return false;
-		}
-	}
-
-	// Session alerts have the high bit set; the low 31 bits count up, skipping 0 ("no code").
-	private code(target: LaunchTarget, session: boolean): number {
-		this.seq = (this.seq + 1) & CODE_MASK || 1;
-		const code = ((session ? SESSION_BIT : 0) | this.seq) >>> 0;
-		this.targets.delete(code);
-		this.targets.set(code, target);
-		while (this.targets.size > TABLE_MAX) this.targets.delete(this.targets.keys().next().value as number);
-		return code;
+	// The body is clipped to BODY_MAX and left out when empty. True when the push went out.
+	private send(p: PushPayload, body: string): Promise<boolean> {
+		const b = clipText(body, BODY_MAX);
+		return this.deps.push(b ? { ...p, body: b } : p);
 	}
 
 	private log(m: string): void {

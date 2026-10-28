@@ -35,13 +35,12 @@ export interface HubDeps {
 	home?: string;
 	log?: (msg: string) => void;
 	push?: PushStore;
-	viewers?: Viewers; // open apps; holds back push while there are any
+	viewers?: Viewers; // open apps and the session each shows; the Notifier holds back pushes for a viewed session
 	updater?: Updater; // self-update from the app (update.ts); absent means the routes answer 501
 	restart?: () => void; // after a successful update; the default exits so systemd restarts the unit
 	watch?: WatchService; // the Pebble watch API; absent means /api/watch/* answers 503
 	images?: ImageStore; // image bytes by ref; absent means a private store
 	launchFn?: typeof launchOnPhone; // watch launch relay; tests stub it
-	launchTarget?: (code: number) => { queryId: string } | { sessionId: string } | null; // what a notification's launch code meant (Notifier)
 	catalog?: Pick<ModelCatalog, "get">; // models for /api/defaults and new sessions; absent means none known
 	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
 	notesOutbox?: Outbox; // forwards ring notes to ring-profile; absent (ringProfileUrl "") means notes are only stored
@@ -291,7 +290,7 @@ export function createHubServer(deps: HubDeps): Server {
 				if (!deps.watch) throw new HttpError(503, "Watch API isn't set up on this hub");
 				deps.watch.notePhone(req.headers, req.socket.remoteAddress);
 				const url = new URL(req.url ?? "/", "http://hub");
-				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, launchFn: deps.launchFn, launchTarget: deps.launchTarget, log }))) throw new HttpError(404, "Not found");
+				if (!(await routeWatch(req, res, url, { watch: deps.watch, version: deps.version, launchFn: deps.launchFn, log }))) throw new HttpError(404, "Not found");
 				return;
 			}
 			if (req.method === "POST" && path === "/api/index/webhook") {

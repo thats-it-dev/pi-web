@@ -8,7 +8,7 @@ import { LastModelStore } from "../src/last-model.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import { SessionIndex } from "../src/sessions.ts";
-import { WatchService } from "../src/watch.ts";
+import { dialogQueryId, WatchService } from "../src/watch.ts";
 import { closedSession, shortModel, turnsFrom } from "../src/watch-sessions.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
 
@@ -113,6 +113,14 @@ test("pi dialog appears as a query with source pi and label \"pi · <title>\"", 
 			createdAt: 1000,
 		},
 	]);
+	svc.close();
+});
+
+test("dialogQueryId builds the same id the dialog's query carries", async () => {
+	const { registry, svc } = setup();
+	const h = await session(registry);
+	raise(h, push);
+	assert.equal(dialogQueryId("s-1", push), svc.pending().queries[0].id);
 	svc.close();
 });
 

@@ -17,7 +17,6 @@ import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
 import { createHubServer } from "./server.ts";
 import { gitUpdater } from "./update.ts";
-import { sendToPhone } from "./watch-launch.ts";
 import { attachWatchStream } from "./watch-stream.ts";
 import { WatchService } from "./watch.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
@@ -51,21 +50,18 @@ setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
 const watch = new WatchService({ registry, index, viewers, home: homedir(), dataDir: cfg.dataDir, catalog, lastModel });
-// Alerts for a closed watch app: a notification through the phone, else a Web Push.
-const WATCH_APP_UUID = "6d55f4ea-2ff6-419e-a2be-1ebdfd4f8f0b";
+// Web Push alerts for turns, dialogs and ring questions; none for a session someone is viewing.
 const notifier = new Notifier({
-	mode: cfg.watchAlert,
-	appUuid: WATCH_APP_UUID,
-	phone: () => watch.phone,
-	appOpen: () => watch.connected(), // the stream or a long-poll; between polls an alert may slip through
-	send: async (host, frame) => (await sendToPhone(host, frame)).ok,
+	enabled: cfg.push,
 	push: (p) => push.send(p),
+	viewing: (id) => viewers.viewing(id),
 	markDelivered: (id) => watch.markDelivered(id),
+	isPending: () => true, // stub until stuck reminders land (Task 6: watch.isPending)
 	log: (m) => console.log(m),
 });
 watch.onNewQuery((q) => void notifier.query(q));
 watch.onRingAlert((a) => void notifier.ringAlert(a));
-watchPush(registry, (p) => void notifier.turnPush(p), viewers);
+watchPush(registry, (o, snap) => void notifier.turn(o, snap));
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {
 	bridge = await startBridgeServer({ socketPath: join(cfg.dataDir, "bridge.sock"), registry, log: (m) => console.log(m) });
@@ -79,7 +75,7 @@ const updater = gitUpdater(repoRoot, version);
 // Ring notes for ring-profile, retried every minute until it takes them; none when ringProfileUrl is "".
 const notesOutbox = createNotesOutbox(cfg.ringProfileUrl, cfg.dataDir, undefined, (m) => console.log(m));
 void notesOutbox?.flush(); // notes queued before a restart
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox, launchTarget: (c) => notifier.launchTarget(c) });
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
