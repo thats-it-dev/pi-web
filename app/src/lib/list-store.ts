@@ -30,8 +30,8 @@ export class ListStore extends EventTarget {
 	private viewing: string | null = null; // the session on screen, reported to the hub
 	private refreshSeq = 0;
 	private timer: ReturnType<typeof setInterval> | undefined;
-	// The events stream is held only while the app is visible: the hub treats an
-	// open stream as someone looking at the app and holds back push notifications.
+	// The events stream is held only while the app is visible: only a stream
+	// opened with `?viewing=<id>` makes the hub hold back pushes, and only for that session.
 	private onVisible = () => {
 		if (document.visibilityState !== "visible") return this.closeEvents();
 		if (this.stream) return;

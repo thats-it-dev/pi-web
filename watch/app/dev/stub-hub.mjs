@@ -182,15 +182,6 @@ function removeQuery(id) {
 	return true;
 }
 
-// Launch codes: 1 opens the first query; 2, or 0x80000001-0x800000FF (the
-// session bit, as the hub's Notifier marks session alerts), the first session.
-// Anything else (e.g. 0x80001000) is unknown: 404.
-function launchTarget(code) {
-	if (code === 1 && queries[0]) return { queryId: queries[0].id };
-	if ((code === 2 || (code > 0x80000000 && code < 0x80000100)) && sessions[0]) return { sessionId: sessions[0].id };
-	return null;
-}
-
 // --- Streaming --------------------------------------------------------------
 
 const STREAM_WORDS = ("Reading the session list, then the text window. Each frame adds a few words, " +
@@ -342,10 +333,6 @@ async function handle(req, res) {
 		if (path === "/api/watch/models") {
 			if (!sessions.some((s) => s.id === q.get("session"))) return json(res, 404, { error: "Session not found" });
 			return json(res, 200, { current: MODELS[0], models: MODELS });
-		}
-		if (path === "/api/watch/launch-target") {
-			const target = launchTarget(Number(q.get("code")));
-			return target ? json(res, 200, target) : json(res, 404, { error: "unknown code" });
 		}
 		return json(res, 404, { error: "not found" });
 	}

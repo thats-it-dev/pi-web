@@ -62,9 +62,7 @@ const notifier = new Notifier({
 watch.onNewQuery((q) => void notifier.query(q));
 watch.onRingAlert((a) => void notifier.ringAlert(a));
 watch.onDialog((s, d, snap) => void notifier.dialog(s, d, snap));
-viewers.onViewing((s, viewing) => {
-	if (!viewing) void notifier.viewingEnded(s);
-});
+viewers.onViewing((s, viewing) => notifier.viewingChanged(s, viewing));
 watchPush(registry, (o, snap) => void notifier.turn(o, snap));
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {

@@ -78,8 +78,8 @@ test("dialog: confirm says approve?, select says question; body is the dialog me
 	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
 	await t.n.dialog("s-1", select, snap("s-1", "/work/x", [confirm, select]));
 	assert.deepEqual(t.pushed, [
-		{ sessionId: "s-1", title: "x · approve?", kind: "needs_you", body: "Run tests?\nnpm test" },
-		{ sessionId: "s-1", title: "x · question", kind: "needs_you", body: "Which branch?" },
+		{ sessionId: "s-1", title: "x · approve?", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Run tests?\nnpm test" },
+		{ sessionId: "s-1", title: "x · question", kind: "needs_you", tag: dialogQueryId("s-1", select), body: "Which branch?" },
 	]);
 });
 
@@ -139,7 +139,7 @@ test("a session being viewed gets no push; another session still does", async ()
 test("a ring-profile query pushes its text and is marked delivered, whatever is being viewed", async () => {
 	const t = setup({ viewing: () => true });
 	await t.n.query(ringQuery);
-	assert.deepEqual(t.pushed, [{ sessionId: "", title: "ring · question", kind: "query", body: "How did you sleep?" }]);
+	assert.deepEqual(t.pushed, [{ sessionId: "", title: "ring · question", kind: "query", tag: "rp:1", body: "How did you sleep?" }]);
 	assert.deepEqual(t.delivered, ["rp:1"]);
 });
 
@@ -168,8 +168,8 @@ test("ring miss and answered receipts", async () => {
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "a very long option text indeed" });
 	assert.deepEqual(t.pushed.slice(0, 2), [
-		{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "pi · fix: yes, no" },
-		{ sessionId: "s-1", title: "Answered: yes", kind: "query", body: "pi · fix" },
+		{ sessionId: "s-1", title: "Didn't catch that", kind: "query", tag: piQuery.id, body: "pi · fix: yes, no" },
+		{ sessionId: "s-1", title: "Answered: yes", kind: "query", tag: piQuery.id, body: "pi · fix" },
 	]);
 	assert.ok(t.pushed[2].title.length <= 24);
 	assert.ok(t.pushed[2].title.startsWith("Answered: a very"));
@@ -192,7 +192,7 @@ test("a pending dialog gets one 'waiting' push after 15 minutes", async () => {
 	t.timers[0].fn();
 	await new Promise((r) => setImmediate(r));
 	assert.equal(t.pushed.length, 2);
-	assert.deepEqual(t.pushed[1], { sessionId: "s-1", title: "x · waiting", kind: "needs_you", body: "Still waiting: Run tests?\nnpm test" });
+	assert.deepEqual(t.pushed[1], { sessionId: "s-1", title: "x · waiting", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Still waiting: Run tests?\nnpm test" });
 });
 
 test("a dialog resolved before the timer sends no reminder", async () => {
@@ -229,7 +229,7 @@ test("a ring-profile query gets 'ring · waiting' too", async () => {
 	assert.equal(t.timers.length, 1);
 	t.timers[0].fn();
 	await new Promise((r) => setImmediate(r));
-	assert.deepEqual(t.pushed[1], { sessionId: "", title: "ring · waiting", kind: "query", body: "Still waiting: How did you sleep?" });
+	assert.deepEqual(t.pushed[1], { sessionId: "", title: "ring · waiting", kind: "query", tag: "rp:1", body: "Still waiting: How did you sleep?" });
 });
 
 test("no timer when the push did not go out", async () => {
@@ -237,4 +237,75 @@ test("no timer when the push did not go out", async () => {
 	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
 	await t.n.query(ringQuery);
 	assert.equal(t.timers.length, 0);
+});
+
+test("a dialog, its reminder, a ring question and its receipts are tagged by query id; finished and error are not", async () => {
+	const t = setup();
+	await t.n.turn(finished("done"), snap());
+	await t.n.turn({ sessionId: "s-1", kind: "error", messageIndex: 1, text: "boom" }, snap());
+	assert.equal(t.pushed[0].tag, undefined);
+	assert.equal(t.pushed[1].tag, undefined);
+	const id = dialogQueryId("s-1", confirm);
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	t.timers[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual(t.pushed.slice(2).map((p) => p.tag), [id, id]);
+});
+
+test("an empty body becomes a per-kind fallback", async () => {
+	const t = setup();
+	await t.n.turn(finished(""), snap());
+	await t.n.turn({ sessionId: "s-1", kind: "error", messageIndex: 1, text: "  " }, snap());
+	await t.n.dialog("s-1", { id: "d9", method: "confirm", title: "" }, snap("s-1", "/work/x"));
+	await t.n.query({ ...ringQuery, text: "" });
+	await t.n.query({ ...ringQuery, id: "rp:2", text: "", label: "" });
+	assert.deepEqual(t.pushed.map((p) => p.body), ["(no text)", "The model returned an error.", "Needs you.", "ring · follow-up", "Question waiting"]);
+});
+
+function grace(t: ReturnType<typeof setup>) {
+	return t.timers.filter((x) => x.ms === 5000);
+}
+
+test("viewing ends then resumes within 5 s: the held dialog is not pushed", async () => {
+	let viewed = true;
+	const t = setup({ viewing: () => viewed });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	viewed = false;
+	t.n.viewingChanged("s-1", false);
+	assert.equal(grace(t).length, 1);
+	viewed = true;
+	t.n.viewingChanged("s-1", true);
+	grace(t)[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual(t.pushed, []);
+});
+
+test("viewing ends and stays ended for 5 s: the held dialog is pushed", async () => {
+	let viewed = true;
+	const t = setup({ viewing: () => viewed });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	viewed = false;
+	t.n.viewingChanged("s-1", false);
+	assert.deepEqual(t.pushed, []);
+	grace(t)[0].fn();
+	await new Promise((r) => setImmediate(r));
+	assert.deepEqual((t.pushed as PushPayload[]).map((p) => p.title), ["x · approve?"]);
+});
+
+test("false, true, false: only the last grace period flushes", async () => {
+	let viewed = true;
+	const t = setup({ viewing: () => viewed });
+	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
+	viewed = false;
+	t.n.viewingChanged("s-1", false);
+	t.n.viewingChanged("s-1", true);
+	t.n.viewingChanged("s-1", false);
+	const [first, second] = grace(t);
+	assert.equal(grace(t).length, 2);
+	first.fn(); // superseded
+	await new Promise((r) => setImmediate(r));
+	assert.equal(t.pushed.length, 0);
+	second.fn();
+	await new Promise((r) => setImmediate(r));
+	assert.equal(t.pushed.length, 1);
 });

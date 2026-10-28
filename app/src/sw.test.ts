@@ -84,3 +84,14 @@ test("sw falls back to PUSH_BODY without body, and shows body when it is a non-e
 	await push({ sessionId: "", title: "ring · follow-up", kind: "query", body: "Question waiting" });
 	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Finished.", "Finished.", "Fixed the parser.", "Question waiting", "Question waiting"]);
 });
+
+test("the notification tag is the payload's tag, else the session, else pi-web", async () => {
+	const { handlers, self } = loadWorker();
+	const show = self.registration.showNotification;
+	const push = (p: object) => dispatch(handlers.push, { data: { json: () => p } });
+	await push({ sessionId: "s-1", title: "t", kind: "needs_you", tag: "dialog:s-1:d1" });
+	await push({ sessionId: "s-1", title: "t", kind: "needs_you", tag: "" });
+	await push({ sessionId: "", title: "t", kind: "query", tag: "rp:1" });
+	await push({ sessionId: "", title: "t", kind: "query" });
+	expect(show.mock.calls.map((c) => c[1].tag)).toEqual(["dialog:s-1:d1", "s-1", "rp:1", "pi-web"]);
+});

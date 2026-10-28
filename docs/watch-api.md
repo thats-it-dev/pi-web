@@ -84,7 +84,7 @@ node -e 'const ws = new (require("ws"))(process.argv[1], { headers: { host: "<ho
 
 ## Long-poll
 
-The fallback when a WebSocket is not available. `GET /api/watch/pending` returns at once. Add `wait=1` and `since=<cursor>` to hold the request open until the cursor moves past `since`, or for 25 seconds, whichever comes first. Either way the reply is the full `WatchPending`; keep its `cursor` and send it as the next `since`. A client that goes away is dropped from the wait. If `since` is missing or not a number, it counts as 0. A held poll counts as an open app for the alerts (see "Alerts"), but notices are not delivered over long-poll.
+The fallback when a WebSocket is not available. `GET /api/watch/pending` returns at once. Add `wait=1` and `since=<cursor>` to hold the request open until the cursor moves past `since`, or for 25 seconds, whichever comes first. Either way the reply is the full `WatchPending`; keep its `cursor` and send it as the next `since`. A client that goes away is dropped from the wait. If `since` is missing or not a number, it counts as 0. Notices are not delivered over long-poll.
 
 ## Alerts
 

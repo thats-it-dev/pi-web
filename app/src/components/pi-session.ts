@@ -2,6 +2,7 @@ import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
+import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
 import { takeHandoff } from "../lib/draft.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
@@ -328,7 +329,7 @@ export class PiSession extends LitElement {
 
 	private async copyLastReply(): Promise<void> {
 		const last = this.store?.conv.messages.findLast((m) => m.role === "assistant");
-		const text = last ? contentText(last.content).trim() : "";
+		const text = last ? stripTldr(contentText(last.content)).trim() : ""; // without the TL;DR line
 		if (!text) {
 			toast("There's no reply to copy yet.");
 			return;

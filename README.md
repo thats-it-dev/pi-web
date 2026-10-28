@@ -52,11 +52,11 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
   "maxHeadless": 6,
   "piBin": "pi",
   "approvalMode": "auto",
-  "watchAlert": "auto"
+  "push": true
 }
 ```
 
-`watchAlert` is how the hub alerts the Pebble watch when its app is closed: `auto` (default) sends a notification with an Open action through the phone's Developer Connection and, if the phone is unreachable (the Pebble app must be in the foreground on iOS), falls back to a Web Push; `notification` and `push` use only one of those; `off` sends nothing.
+`push` turns the hub's Web Push alerts (a finished turn, a dialog that needs you, a ring question) on or off; the phone mirrors them to the watch. It is Web Push only. The older `watchAlert: "off"` still loads as `push: false`.
 
 `approvalMode` is the approval mode new app-started sessions begin in; the session settings sheet in the app (the sliders next to the model) changes it per session. While a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed:
 
@@ -106,7 +106,7 @@ The hub keeps its push keys in `~/.config/pi-web/vapid.json` and the subscribed 
 
 ## Watch
 
-The hub has an API for a Pebble watch. It offers **queries**: pi's approval dialogs, and questions that local services such as ring-profile raise through a loopback API on `127.0.0.1:7879`. It also lists the sessions, takes answers, skips and prompts, and receives voice notes from an Index 01 ring. It is open to anything on the tailnet logged in as you, with no extra token, so the phone and the ring need only the hub's address. When the watch app is closed, `watchAlert` (above) decides how a new query or a finished turn reaches the wrist. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [watch UI spec](docs/superpowers/specs/2026-10-27-watch-ui-design.md) for the design.
+The hub has an API for a Pebble watch. It offers **queries**: pi's approval dialogs, and questions that local services such as ring-profile raise through a loopback API on `127.0.0.1:7879`. It also lists the sessions, takes answers, skips and prompts, and receives voice notes from an Index 01 ring. It is open to anything on the tailnet logged in as you, with no extra token, so the phone and the ring need only the hub's address. When the watch app is closed, `push` (above) turns the Web Push that carries a new query or a finished turn to the wrist on or off. See [docs/watch-api.md](docs/watch-api.md) for the routes and curl examples, and the [watch UI spec](docs/superpowers/specs/2026-10-27-watch-ui-design.md) for the design.
 
 The watch side is in `watch/`: one Pebble Alloy watchapp for the Pebble Time 2 (emery), `watch/app/`, built on the pebble-ui library, with a phone-side PebbleKit JS bridge to the hub. It has three screens: the session list, a session's last reply, and a query answered from an action menu. A ring note answers the query on screen or prompts the open session. [watch/README.md](watch/README.md) covers the toolchain, the emulator dev loop against a stub hub or the real hub, the Pebble app setup (the hub URL and theme are set in the app's settings page), the hardware checklist and the known issues. [watch/PROTOCOL.md](watch/PROTOCOL.md) has the phone-to-watch messages.
 

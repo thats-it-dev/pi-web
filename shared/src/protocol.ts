@@ -297,6 +297,7 @@ export interface PushPayload {
 	sessionId: string;
 	title: string;
 	kind: PushKind;
+	tag?: string; // notifications with the same tag replace each other; absent means one per session
 	body?: string; // a short line of detail, clipped to 160 characters; absent means the kind's stock text
 }
 

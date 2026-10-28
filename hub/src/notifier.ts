@@ -25,6 +25,7 @@ export interface NotifierDeps {
 
 const TITLE_MAX = 24;
 const BODY_MAX = 160;
+const VIEW_GRACE_MS = 5000; // a stream that reconnects by itself is gone for a moment; don't flush on that
 const MISS_TITLE = "Didn't catch that";
 
 // "<project> · <event>", the project cut (with "…") so the whole fits TITLE_MAX.
@@ -38,6 +39,7 @@ export function shortTitle(project: string, event: "done" | "approve?" | "questi
 export class Notifier {
 	private deps: NotifierDeps;
 	private scheduled = new Set<string>(); // query ids that already have a reminder timer
+	private graceTokens = new Map<string, object>(); // sessions whose viewing just ended, by pending flush
 	private held = new Map<string, { sessionId: string; dialog: Dialog; snap: Snapshot }>(); // by dialog query id
 
 	constructor(deps: NotifierDeps) {
@@ -51,12 +53,12 @@ export class Notifier {
 			if (!this.deps.enabled || o.kind === "needs_you" || this.deps.viewing(o.sessionId)) return;
 			const project = basename(snap.cwd);
 			if (o.kind === "error") {
-				await this.send({ sessionId: o.sessionId, title: shortTitle(project, "error"), kind: "error" }, o.text);
+				await this.send({ sessionId: o.sessionId, title: shortTitle(project, "error"), kind: "error" }, o.text, "The model returned an error.");
 				return;
 			}
 			const tldr = parseTldr(o.text);
 			const title = tldr?.title ? clipText(tldr.title, TITLE_MAX) : shortTitle(project, "done");
-			await this.send({ sessionId: o.sessionId, title, kind: "finished" }, tldr?.summary ?? stripTldr(o.text));
+			await this.send({ sessionId: o.sessionId, title, kind: "finished" }, tldr?.summary ?? stripTldr(o.text), "(no text)");
 		} catch (err) {
 			this.log(`notifier: turn ${o.sessionId}: ${(err as Error).message}`);
 		}
@@ -78,6 +80,24 @@ export class Notifier {
 		}
 	}
 
+	// A viewer count crossed zero for the session. Ending is flushed after a grace period and
+	// cancelled if the session is viewed again before then (the PWA's stream reconnecting).
+	viewingChanged(sessionId: string, viewing: boolean): void {
+		if (viewing) {
+			this.graceTokens.delete(sessionId);
+			return;
+		}
+		const token = {};
+		this.graceTokens.set(sessionId, token);
+		const fire = () => {
+			if (this.graceTokens.get(sessionId) !== token) return;
+			this.graceTokens.delete(sessionId);
+			void this.viewingEnded(sessionId);
+		};
+		const timer = (this.deps.setTimer ?? setTimeout)(fire, VIEW_GRACE_MS) as { unref?: () => void } | undefined;
+		timer?.unref?.();
+	}
+
 	// The app stopped showing the session: push its held dialogs that are still pending, drop the rest.
 	async viewingEnded(sessionId: string): Promise<void> {
 		for (const [id, h] of [...this.held]) {
@@ -96,9 +116,9 @@ export class Notifier {
 		const project = basename(snap.cwd);
 		const body = dialogMessage(dialog);
 		const id = dialogQueryId(sessionId, dialog);
-		if (await this.send({ sessionId, title: shortTitle(project, dialog.method === "confirm" ? "approve?" : "question"), kind: "needs_you" }, body)) {
+		if (await this.send({ sessionId, title: shortTitle(project, dialog.method === "confirm" ? "approve?" : "question"), kind: "needs_you", tag: id }, body, "Needs you.")) {
 			this.deps.markDelivered(id);
-			this.scheduleStuck(id, { sessionId, title: shortTitle(project, "waiting"), kind: "needs_you" }, body, true);
+			this.scheduleStuck(id, { sessionId, title: shortTitle(project, "waiting"), kind: "needs_you", tag: id }, body, true);
 		}
 	}
 
@@ -111,7 +131,7 @@ export class Notifier {
 			try {
 				if (!this.deps.enabled || !this.deps.isPending(id) || (dialog && this.deps.viewing(p.sessionId))) return;
 				const b = clipText(body, BODY_MAX);
-				this.send(p, b ? `Still waiting: ${b}` : "Still waiting").catch((err) => this.log(`notifier: waiting ${id}: ${(err as Error).message}`));
+				this.send(p, b ? `Still waiting: ${b}` : "Still waiting", "Still waiting").catch((err) => this.log(`notifier: waiting ${id}: ${(err as Error).message}`));
 			} catch (err) {
 				this.log(`notifier: waiting ${id}: ${(err as Error).message}`);
 			}
@@ -125,9 +145,9 @@ export class Notifier {
 		try {
 			if (!this.deps.enabled || q.source !== "ring-profile") return;
 			const sessionId = q.sessionId ?? "";
-			if (await this.send({ sessionId, title: shortTitle("ring", "question"), kind: "query" }, q.text)) {
+			if (await this.send({ sessionId, title: shortTitle("ring", "question"), kind: "query", tag: q.id }, q.text, q.label || "Question waiting")) {
 				this.deps.markDelivered(q.id);
-				this.scheduleStuck(q.id, { sessionId, title: shortTitle("ring", "waiting"), kind: "query" }, q.text, false);
+				this.scheduleStuck(q.id, { sessionId, title: shortTitle("ring", "waiting"), kind: "query", tag: q.id }, q.text, false);
 			}
 		} catch (err) {
 			this.log(`notifier: query ${q.id}: ${(err as Error).message}`);
@@ -142,16 +162,16 @@ export class Notifier {
 			const q = a.query;
 			const title = a.kind === "miss" ? MISS_TITLE : clipText(`Answered: ${a.option}`, TITLE_MAX);
 			const body = a.kind === "miss" ? `${q.label}: ${q.options.join(", ")}` : q.label;
-			await this.send({ sessionId: q.sessionId ?? "", title, kind: "query" }, body);
+			await this.send({ sessionId: q.sessionId ?? "", title, kind: "query", tag: q.id }, body, q.label || "Question waiting");
 		} catch (err) {
 			this.log(`notifier: ring ${a.kind} ${a.query.id}: ${(err as Error).message}`);
 		}
 	}
 
-	// The body is clipped to BODY_MAX and left out when empty. True when the push went out.
-	private send(p: PushPayload, body: string): Promise<boolean> {
-		const b = clipText(body, BODY_MAX);
-		return this.deps.push(b ? { ...p, body: b } : p);
+	// The body is clipped to BODY_MAX; an empty one becomes the fallback, so no push is bodiless.
+	// True when the push went out.
+	private send(p: PushPayload, body: string, fallback: string): Promise<boolean> {
+		return this.deps.push({ ...p, body: clipText(body, BODY_MAX) || fallback });
 	}
 
 	private log(m: string): void {
