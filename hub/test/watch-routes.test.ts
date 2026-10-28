@@ -69,6 +69,10 @@ async function raise(existing?: FakeHandle): Promise<{ h: FakeHandle; requestId:
 	return { h, requestId: `dialog:${h.sessionId}:d1` };
 }
 
+test("GET /api/watch/launch-target is gone (404)", async () => {
+	assert.equal((await call(port, "GET", "/api/watch/launch-target?code=7", WATCH)).status, 404);
+});
+
 test("watch routes need the tailnet identity and not an Origin; other routes still need an Origin", async () => {
 	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, "tailscale-user-login": undefined })).status, 403);
 	assert.equal((await call(port, "GET", "/api/watch/pending", { ...WATCH, host: "evil.test" })).status, 403);

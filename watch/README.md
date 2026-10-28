@@ -135,14 +135,14 @@ Vite's `/api` proxy (with `ws: true`) adds the `Tailscale-User-Login` header the
 - **Internal API** (`hub/src/internal-server.ts`), loopback only, `127.0.0.1:7879` (config `internalPort`), for local services such as the ring profile: `GET /queries`; `POST /queries` with `{label, text, options[], callbackUrl, timeoutMs?}` raises an external query (the outcome is POSTed to `callbackUrl`); `POST /queries/:id/clear-by-ring` with `{text}`. Example: `curl -s -XPOST 127.0.0.1:7879/queries -d '{"label":"ring · follow-up","text":"test?","options":["A","B"],"callbackUrl":"http://127.0.0.1:9/x"}'`.
 - **Queries** are held by `QueryStore` (`hub/src/queries.ts`). A voice note from the ring (agent webhook, `index-webhook.ts`, spec §5) answers the query on screen, else prompts the open session. With the app closed (45 s without its stream, a poll or a `showing` report) it answers the oldest alerted select/confirm pi dialog that existed when the note was recorded, with one "Answered: …" receipt or "Didn't catch that" alert; otherwise it starts a new session. While the app is open, unmatched notes get the notices "Didn't catch that" / "Already answered" (stream only: a long-polling phone gets no notices). A note uploaded twice is refused the second time, by `X-Index-Delivery` or, since the Index app sends none, by a hash of `recordedAt`, the transcription and the audio.
 - **Watch API:** [`docs/watch-api.md`](../docs/watch-api.md) (`new` makes an empty session in `~/pebble`, for Home's "+ New session").
-- **`watchAlert`** (hub config; `hub/src/notifier.ts`) decides how a closed watch app is alerted: `auto` (default behaviour: a Developer Connection BlobDB notification first, the PWA Web Push as fallback), `notification`, `push`, or `off`. One alert per event, and none while the watch app holds the stream or a long-poll; push bodies carry the details. The launch codes behind a notification's Open live in memory: after a hub restart an old notification's Open finds no target and the app opens as a plain launch (codes restart at a random point, so they are not reused).
+- **`push`** (hub config, boolean, default `true`; `hub/src/notifier.ts`) turns the Web Push alerts on or off. A legacy `watchAlert: "off"` means `push: false`, any other value `true`. Web Push only: no Developer Connection notification, no launch codes. Titles are at most 24 characters (the agent's `TL;DR [title]` for a finished turn, else `<project> · done|approve?|question|error|waiting`; `ring · question` for ring-profile). Every pi dialog is pushed once, held while a visible PWA views its session and pushed when it leaves if still pending. A push for session S is held only while a visible PWA reports viewing S. One "Still waiting:" reminder follows after 15 minutes. Details in [docs/watch-api.md](../docs/watch-api.md#alerts).
 
 ### Pebble app setup (watchapp)
 
 On the iPhone, in the Pebble app:
 
-1. Install the app (`pebble install --phone <ip>` from `watch/app`, or the `.pbw` from `build/`). The phone's Developer Connection toggle is needed to install from the spark and for the hub's notification path.
-2. **Keep pi-web's notifications forwarded to the watch** (in the Pebble app, Notifications: the pi-web PWA stays on). While the Pebble app is in the background on iOS the Developer Connection is unreachable, so the PWA's Web Push, mirrored by iOS to the watch, is the only way a closed-app alert reaches the wrist. There is nothing to de-duplicate: the hub sends one alert per event and none while the watch app is open. (A push Apple accepts also marks a pi dialog as alerted, which lets a closed-app ring note answer it; muted, that note could approve a dialog that never reached the wrist.)
+1. Install the app (`pebble install --phone <ip>` from `watch/app`, or the `.pbw` from `build/`). The phone's Developer Connection toggle is needed to install from the spark.
+2. **Keep pi-web's notifications forwarded to the watch** (in the Pebble app, Notifications: the pi-web PWA stays on). The PWA's Web Push, mirrored by iOS to the watch, is the only way an alert reaches the wrist. (A push Apple accepts also marks a pi dialog as alerted, which lets a closed-app ring note answer it; muted, that note could approve a dialog that never reached the wrist.)
 3. Open the app's settings page (the gear next to pi-web in the Pebble app). Set **Hub URL** to the hub's tailnet URL, for example `https://<hostname>` (what `tailscale serve` publishes), and **Dark** as wanted. Save.
 
 ## Hardware checklist
@@ -154,8 +154,8 @@ For Michael's Pebble Time 2 and iPhone. Note the outcome of each item here.
 - [ ] The socket connects; note whether the phone reports `ws online` or long-poll (the iOS PebbleKit JS may not offer `WebSocket`).
 - [ ] Raise a query with the internal API (example above); answer it with buttons; skip it.
 - [ ] A pi approval answered by ring; an unmatched ring note gives "Didn't catch that".
-- [ ] App closed, raise a query: a notification or launch arrives (per `watchAlert`), once.
-- [ ] Pebble app backgrounded on the iPhone and the watch app closed: raise a query; the PWA push buzzes the watch (the Developer Connection is unreachable then, so this is the only alert path).
+- [ ] App closed, raise a query: a push arrives, once (with `push` on).
+- [ ] Pebble app backgrounded on the iPhone and the watch app closed: raise a query; the PWA push buzzes the watch.
 - [ ] Phone locked for 30 min with a session running, then unlocked: how long until the app is live again.
 - [ ] Watch for lost AppMessages: a stale screen, or a failed answer that went through.
 - [ ] Touch: tap a row to pick it (untested in the emulator).

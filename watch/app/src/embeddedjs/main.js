@@ -16,7 +16,6 @@ export const KEYS = (
 
 const DARK_KEY = "pi-web.dark";
 const CONNECTING_MS = 10000; // "connecting" for this long reads as offline
-const SESSION_BIT = 0x80000000; // a launch code for a session alert; without it, a query
 const LAUNCH_MS = 10000; // how long a launch waits for the phone's answer
 const COALESCE = ["home", "reply", "net", "cfg"]; // a later dict of these replaces an earlier one (bridge.js)
 
@@ -108,21 +107,15 @@ class PiStack extends WindowStack {
 				this.changed("net");
 			}, CONNECTING_MS);
 	}
-	// The phone resolves an alert's launch code to a query (sent as query; the
-	// alert has buzzed already, so for 10 s a new query doesn't) or a session
-	// (sent as reply: the first reply in 10 s opens it, unless a session window
-	// is up already). Code 0, a plain launch, does both: a pending query opens
-	// without a buzz, else the phone sends the running session's reply. The
-	// reason and arguments are logged (emulator: 6 and the unsigned code).
+	// A launch tells the phone, which opens a pending query (without a buzz:
+	// for 10 s a new query doesn't buzz) or else the running session (sent as
+	// reply: the first reply in 10 s opens it, unless a session window is up
+	// already). The reason is logged (emulator: 6).
 	launch() {
 		const launch = watch.launch ?? {};
-		console.log("pi-web: launch reason " + launch.reason + " arguments " + launch.arguments);
-		const code = Number(launch.arguments) >>> 0, until = Date.now() + LAUNCH_MS;
-		if (code < SESSION_BIT)
-			this.quietUntil = until;
-		if (!code || code >= SESSION_BIT)
-			this.sessionUntil = until;
-		this.link.send("launched", { CODE: code | 0 });
+		console.log("pi-web: launch reason " + launch.reason);
+		this.quietUntil = this.sessionUntil = Date.now() + LAUNCH_MS;
+		this.link.send("launched", {});
 	}
 	onModelChanged(application) {
 		// The first dicts can arrive before Home is up: wait for it.

@@ -8,7 +8,7 @@ Callers have no `Origin`. Every request needs the Tailscale identity: the `Host`
 
 There is no token and no webhook signing. That means anything running on one of your tailnet devices, including a web page in a browser there that knows the hub's hostname, can use these routes as you. That is the trade chosen for a single-user tailnet.
 
-Keep pi-web's notifications **on** in the Pebble app. When the watch app is closed and the Pebble app is in the background on iOS, the PWA's Web Push, mirrored to the watch, is the only alert that reaches the wrist (spec §7). The hub sends one alert per event and none while the watch app is open, so nothing arrives twice. See `watchAlert` in [watch/README.md](../watch/README.md#hub-side).
+Keep pi-web's notifications **on** in the Pebble app. When the watch app is closed and the Pebble app is in the background on iOS, the PWA's Web Push, mirrored to the watch, is the only alert that reaches the wrist (spec §7). The hub sends Web Push alerts only (see "Alerts"). Config `push` turns them on or off.
 
 ## Types
 
@@ -34,7 +34,6 @@ All bodies are JSON. Success is `200`, and a result with `ok: false` is still a 
 | GET | `/api/watch/sessions` | | `{ sessions: WatchSession[] }` | |
 | GET | `/api/watch/history` | `session` (required), `before` (turn index), `limit` (default 12, max 50) | `{ turns: { i, role, text }[], total }`; `role` is `you`, `agent` or `tool` | `404` unknown session |
 | GET | `/api/watch/models` | `session` (required) | `{ current, models }`; rows are `{ provider, id, name }` | `404` session not running |
-| GET | `/api/watch/launch-target` | `code` (the launch code, decimal) | `{ queryId }` or `{ sessionId }` | `404` unknown code |
 | GET | `/api/watch/health` | | `{ ok, hubVersion, sessions: { running, pending } }` | |
 | POST | `/api/watch/showing` | `{ queryId: string \| null, sessionId?: string \| null }` | `{ ok: true }` | |
 | POST | `/api/watch/answer` | `{ queryId, option }` or `{ queryId, text }`, exactly one | `WatchAnswerResult` | |
@@ -55,7 +54,6 @@ Notes:
 - **prompt** sends `{ type: "prompt", text, mode: "send" }` to the session, reopening a closed one from its file. The watch's Continue sends the text "continue".
 - **new** creates an empty pi session in `~/pebble`, with the same folder and model choice as a ring note's new session, and sends no prompt.
 - **archive** hides a session from `sessions` until it has newer activity. The list is kept in `<dataDir>/watch-archive.json`.
-- **launch-target** resolves the code from a notification's Open action. Session codes have the high bit set. The table holds the last 32 codes and lives in memory only. After a hub restart an old code is a `404`, and the app opens as a plain launch. Codes start at a random point, so they are not reused across restarts.
 - **history** pages back: pass the earliest `i` you have as `before`.
 
 ## Stream
@@ -90,7 +88,14 @@ The fallback when a WebSocket is not available. `GET /api/watch/pending` returns
 
 ## Alerts
 
-When no watch app holds the stream or a long-poll, a new query, a finished or errored turn, and a closed-app ring note's receipt reach the wrist through the hub's Notifier (`hub/src/notifier.ts`, config `watchAlert`). It first tries a BlobDB notification through the phone's Developer Connection, whose **Open** action carries a launch code (see `launch-target`). If the phone is unreachable, it falls back to the pi-web PWA's Web Push. Ring-profile pushes carry no question text.
+The hub's Notifier (`hub/src/notifier.ts`) sends Web Push only; the phone shows the push and mirrors it to the watch. No Developer Connection notification is sent and nothing launches the watch app with a code. Config `push` (boolean, default `true`) turns the alerts on or off. The earlier `watchAlert` setting still loads: `"off"` becomes `push: false`, any other value `push: true`.
+
+- **Titles** are at most 24 characters. A finished turn uses the agent's `TL;DR [title]` line, else `<project> · done`. Other events use `<project> · approve?`, `question`, `error` or `waiting`; a ring-profile question uses `ring · question`.
+- **Bodies:** a finished turn carries the agent's TL;DR summary, else the clipped reply. A dialog carries its message. A ring-profile question push carries the question text. A ring note's receipt or miss ("Answered: <option>", "Didn't catch that") is pushed too.
+- **Every pi dialog is pushed once.** A dialog raised while a visible PWA is viewing its session is held, and pushed when the PWA leaves the session if it is still pending. A pushed dialog is marked alerted, which lets a closed-app ring note answer it.
+- **Per-session suppression:** a push for session S is held back only while a visible PWA reports viewing S (`GET /api/events?viewing=<id>`). Whether the watch app is open does not matter.
+- **Still waiting:** one reminder, `Still waiting: <body>`, 15 minutes after a dialog's or ring question's push if it is still unanswered.
+- **TL;DR:** headless pi sessions are spawned with `--append-system-prompt` carrying the TL;DR rule, and the PWA hides the TL;DR line.
 
 ## Launch
 
@@ -132,7 +137,7 @@ The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/
 
 **With the app closed**, the note may answer only the oldest pi dialog that:
 - is a select or confirm dialog with options (never input or editor);
-- was alerted (a notification or push reached the phone, or the watch showed it);
+- was alerted (a push reached the phone, or the watch showed it);
 - existed at `recordedAt` (+2 s). Without a usable `recordedAt` the closed path is skipped and a session starts;
 - is neither skipped on the watch nor held back while pi-web is open in a browser.
 
@@ -140,8 +145,8 @@ Ring-profile queries are answered only on screen. While the app is open, a query
 
 | Outcome | When |
 | --- | --- |
-| `answered` | The transcription answered the query the watch is showing or, with the app closed, the eligible pi dialog. With the app closed, or with nothing connected during the grace period, the hub sends one receipt (notification, else push), "Answered: <option>", with the dialog's label. |
-| `no_match` | The note did not fit that query (the sidecar `reason` lists the options). Nothing is approved or denied. On screen the watch flashes "Didn't catch that". With the app closed, or with nothing connected during the grace period, the hub sends one alert (notification, else push), "Didn't catch that", with the dialog's label and options. |
+| `answered` | The transcription answered the query the watch is showing or, with the app closed, the eligible pi dialog. With the app closed, or with nothing connected during the grace period, the hub pushes one receipt, "Answered: <option>", with the dialog's label. |
+| `no_match` | The note did not fit that query (the sidecar `reason` lists the options). Nothing is approved or denied. On screen the watch flashes "Didn't catch that". With the app closed, or with nothing connected during the grace period, the hub pushes one alert, "Didn't catch that", with the dialog's label and options. |
 | `gone` | The query had already been answered. On screen the watch flashes "Already answered"; with the app closed, nothing is sent. |
 | `prompted` | No query was on screen and a session was open on the watch, so the text went to that session as a prompt. |
 | `new_session` | No session was open and there was nothing to answer: no query on screen and, with the app closed, no eligible pi dialog. A session started in `~/pebble` with the text as its prompt. |

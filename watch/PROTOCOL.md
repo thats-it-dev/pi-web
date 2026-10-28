@@ -23,7 +23,7 @@ The key names are `pebble.messageKeys` in `app/package.json`, in this order; a t
 | MSG | Fields | Meaning |
 |---|---|---|
 | `home` | `ROWS`: `id \x1f title \x1f status \x1f sub` per row | Home's session list, waiting sessions first. `sub` is the elapsed run time for running sessions, the time (`HH:MM`) for done ones, else empty. "+ New session" is the watch's own row and is never sent. |
-| `query` | `ID`, `SOURCE` (`pi` or `ring`), `SESSION_ID` (empty for ring-profile), `LABEL`, `TEXT`, `OPTIONS`, `AT` | The query the watch should show: the one its launch code named, else the oldest. |
+| `query` | `ID`, `SOURCE` (`pi` or `ring`), `SESSION_ID` (empty for ring-profile), `LABEL`, `TEXT`, `OPTIONS`, `AT` | The query the watch should show: the oldest. |
 | `query_gone` | `ID` | That query ended (answered, skipped, gone). The watch drops it only if it is the current one. |
 | `reply` | `SESSION_ID`, `LABEL`, `TEXT`, `AT`, `STATUS` | The open session's last agent reply and status. No streamed text is relayed: while `STATUS` is `r` the watch keeps the text and shows a typing indicator. |
 | `models` | `SESSION_ID`, `LIST`: `provider \x1f id \x1f name` per row | The answer to CMD `models`. |
@@ -46,7 +46,7 @@ The key names are `pebble.messageKeys` in `app/package.json`, in this order; a t
 | `archive` | `SESSION_ID` | `POST /api/watch/archive`, then a new `home`. |
 | `models` | `SESSION_ID` | `GET /api/watch/models`, answered with MSG `models`. |
 | `model` | `SESSION_ID`, `PROVIDER`, `MODEL_ID` | `POST /api/watch/model`. |
-| `launched` | `CODE`: the launch code, 0 for a plain launch | Sent on every launch. A code is resolved with `GET /api/watch/launch-target` to a query (sent as `query`) or a session (opened, sent as `reply`). Code 0 opens the most recent session if nothing else is pending (`bridge.js` `resume`). The code is a 32-bit pattern and may arrive signed; session codes have the high bit set. |
+| `launched` | none | Sent on every launch. A pending query opens first; otherwise the most recent session opens if the first frame lands within 9 s (`bridge.js` `resume`). No alert launches the app with a code any more: alerts are Web Push. |
 | `new` | none | `POST /api/watch/new`, then opens the empty session it returns, if the watch is still on Home. |
 
 A failed hub call becomes a `notice`: "Hub unreachable" for a network error or timeout, else the hub's `error` text or "Hub error <status>" (`bridge.js` `failText`).

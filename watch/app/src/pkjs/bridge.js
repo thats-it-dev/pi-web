@@ -240,7 +240,6 @@ function createBridge(deps) {
 	var dark = storage.getItem(DARK_KEY) !== "0";
 	var resync = false; // the stream came back: the next pending frame is sent in full
 	var sentQuery = null; // the id of the query the watch was last told about
-	var launchQuery = null; // a query the watch was launched for, current while it exists
 	var fullOptions = {}; // query id -> the hub's option strings, index for index
 	var answering = {}; // query ids with an answer or skip on its way to the hub
 	var runStart = {}; // session id -> when the phone first saw it running
@@ -379,10 +378,9 @@ function createBridge(deps) {
 
 	// Queries ---------------------------------------------------------------
 
-	// The query the watch should be showing: the one it was launched for, else the oldest.
+	// The query the watch should be showing: the oldest.
 	function target() {
-		var sorted = byCreated(frame.queries);
-		return findBy(sorted, "id", launchQuery) || sorted[0] || null;
+		return byCreated(frame.queries)[0] || null;
 	}
 
 	function queryDict(q) {
@@ -417,7 +415,6 @@ function createBridge(deps) {
 		if (q && (sentQuery !== q.id || force)) sendQuery(q);
 		for (var id in fullOptions) if (!findBy(frame.queries, "id", id)) delete fullOptions[id];
 		for (var a in answering) if (!findBy(frame.queries, "id", a)) delete answering[a];
-		if (gotFrame && launchQuery !== null && !findBy(frame.queries, "id", launchQuery)) launchQuery = null;
 	}
 
 	function update(force) {
@@ -604,7 +601,7 @@ function createBridge(deps) {
 		});
 	}
 
-	// A launch without an alert opens the session with the most recent activity,
+	// A launch opens the session with the most recent activity,
 	// whatever its status (Michael's call; Home stays under it), unless a query is pending (it opens on its
 	// own) or the watch already shows something. Runs once, with the first frame,
 	// after the watch reports Home (that report would close a session opened before it),
@@ -622,27 +619,10 @@ function createBridge(deps) {
 		if (best) open(str(best.id));
 	}
 
-	function launched(p) {
-		var code = typeof p.CODE === "number" ? p.CODE : -1;
-		if (code === 0) {
-			plainLaunch = deps.now();
-			resume();
-			return;
-		}
-		// The code is a 32-bit pattern; the AppMessage int may arrive signed.
-		if (code < 0) code = code >>> 0;
-		hub.get("/api/watch/launch-target?code=" + code, function (err, json) {
-			if (err || !json) {
-				log("pi-web: launch target " + code + " unknown: " + (err && err.message));
-				return;
-			}
-			if (json.queryId) {
-				launchQuery = json.queryId;
-				if (findBy(frame.queries, "id", json.queryId)) syncQuery(true);
-			} else if (json.sessionId) {
-				open(str(json.sessionId));
-			}
-		});
+	// The watch says it launched (plain launch: no alert opens the app any more).
+	function launched() {
+		plainLaunch = deps.now();
+		resume();
 	}
 
 	function onShowing(p) {
@@ -670,7 +650,7 @@ function createBridge(deps) {
 		else if (cmd === "archive" && sid) archive(sid);
 		else if (cmd === "models" && sid) models(sid);
 		else if (cmd === "model" && sid) post("/api/watch/model", { sessionId: sid, provider: str(p.PROVIDER), modelId: str(p.MODEL_ID) });
-		else if (cmd === "launched") launched(p);
+		else if (cmd === "launched") launched();
 		else if (cmd === "new") create();
 		else log("pi-web: unknown command " + cmd);
 	}

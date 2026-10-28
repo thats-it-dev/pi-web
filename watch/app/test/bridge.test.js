@@ -538,38 +538,6 @@ test("models fetches the catalogue and sends provider/id/name rows", () => {
 	assert.deepEqual(t.last("models"), { MSG: "models", SESSION_ID: "s1", LIST: ["ollama", "qwen3", "Qwen 3"].join(US) + RS + ["anthropic", "m1", "M"].join(US) });
 });
 
-test("launched with a query code fetches launch-target and sends that query", () => {
-	const t = setup();
-	t.pend([query("q1", 1), query("q2", 2)], []);
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 7 });
-	assert.equal(t.hub.of("get")[0].path, "/api/watch/launch-target?code=7");
-	t.hub.reply(null, { queryId: "q2" });
-	const out = t.drain();
-	assert.deepEqual(out.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q1"], ["query", "q2"]]);
-});
-
-test("launched with a session code (signed 32-bit) fetches launch-target and sends the reply", () => {
-	const t = setup();
-	t.pend([], [sess("s9", "done", { title: "Nine" })]);
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 0x80000003 | 0 });
-	assert.equal(t.hub.of("get")[0].path, "/api/watch/launch-target?code=" + 0x80000003);
-	t.hub.reply(null, { sessionId: "s9" });
-	assert.equal(t.hub.of("get")[1].path, "/api/watch/history?session=s9&limit=6");
-	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "done it" }], total: 1 });
-	t.drain();
-	assert.equal(t.last("reply").SESSION_ID, "s9");
-	assert.equal(t.last("reply").TEXT, "done it");
-});
-
-test("launched with an unknown code (404) sends nothing", () => {
-	const t = setup();
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 8 });
-	const e = new Error("hub answered 404");
-	e.status = 404;
-	t.hub.reply(e);
-	assert.equal(t.drain().length, 0);
-});
-
 test("start sends cfg, net and an empty home; settings update cfg; net statuses are filtered", () => {
 	const t = setup({ store: { "pi-web.dark": "0" } });
 	t.bridge.start();
@@ -645,20 +613,6 @@ test("a reply of 600 multibyte characters still fits one dict", () => {
 	t.drain();
 	assert.ok(dictBytes(t.last("reply")) <= 1000);
 	assert.ok(t.last("reply").TEXT.length > 0);
-});
-
-test("launched before the first pending frame still makes that query current", () => {
-	const t = setup();
-	t.bridge.start();
-	t.drain();
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 7 });
-	t.hub.reply(null, { queryId: "q2" });
-	assert.equal(t.drain().filter((d) => d.MSG === "query").length, 0);
-	const out = t.pend([query("q1", 1), query("q2", 2)], []);
-	assert.deepEqual(out.filter((d) => d.MSG === "query").map((d) => d.ID), ["q2"]);
-	// Once a real frame lacks it, the oldest is current again.
-	const o2 = t.pend([query("q1", 1)], []);
-	assert.deepEqual(o2.filter((d) => d.MSG === "query" || d.MSG === "query_gone").map((d) => [d.MSG, d.ID]), [["query_gone", "q2"], ["query", "q1"]]);
 });
 
 const PATH = "/home/michael/workspace/pi-web-watch-ui/hub/src/watch.ts";
@@ -817,14 +771,13 @@ test("hub error notices: HTTP message is shown clipped; no message gives Hub err
 	assert.deepEqual(failNotice(new Error("timeout")), ["Hub unreachable"]);
 });
 
-// A plain launch (no alert): CMD launched with CODE 0.
-test("a plain launch opens the session with the most recent activity, whatever its status, without a launch-target fetch", () => {
+// A plain launch: CMD launched.
+test("a plain launch opens the session with the most recent activity, whatever its status", () => {
 	const t = setup();
 	t.pend([], [sess("d1", "done", { updatedAt: NOW }), sess("r1", "running", { updatedAt: NOW - 9 * MIN }), sess("r2", "running", { updatedAt: NOW - 2 * MIN })]);
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	t.bridge.onAppMessage({ CMD: "launched" });
 	assert.equal(t.hub.of("get").length, 0); // until the watch says Home is up: its report would close the session
 	t.bridge.onAppMessage({ CMD: "showing" });
-	assert.equal(t.hub.of("get", "/api/watch/launch-target").length, 0);
 	assert.equal(t.hub.of("get")[0].path, "/api/watch/history?session=d1&limit=6");
 	t.hub.reply(null, { turns: [{ i: 0, role: "agent", text: "done" }], total: 1 });
 	t.drain();
@@ -835,7 +788,7 @@ test("a plain launch before the first frame opens the latest session once the fr
 	const t = setup();
 	t.bridge.start();
 	t.drain();
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	t.bridge.onAppMessage({ CMD: "launched" });
 	t.bridge.onAppMessage({ CMD: "showing" });
 	assert.equal(t.hub.of("get").length, 0);
 	t.pend([], [sess("r1", "running")]);
@@ -847,17 +800,17 @@ test("a plain launch before the first frame opens the latest session once the fr
 test("a plain launch with a pending query, no sessions, or a screen already chosen opens no session", () => {
 	const a = setup();
 	a.pend([query("q1", 1)], [sess("r1", "running")]);
-	a.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	a.bridge.onAppMessage({ CMD: "launched" });
 	a.bridge.onAppMessage({ CMD: "showing" });
 	assert.equal(a.hub.of("get").length, 0);
 	assert.ok(a.last("query"));
 	const b = setup();
 	b.pend([], []);
-	b.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	b.bridge.onAppMessage({ CMD: "launched" });
 	b.bridge.onAppMessage({ CMD: "showing" });
 	assert.equal(b.hub.of("get").length, 0);
 	const c = setup();
-	c.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	c.bridge.onAppMessage({ CMD: "launched" });
 	c.bridge.onAppMessage({ CMD: "showing", SESSION_ID: "d1" });
 	c.pend([], [sess("d1", "done"), sess("r1", "running")]);
 	assert.equal(c.hub.of("get").length, 0);
@@ -867,14 +820,14 @@ test("a plain launch whose first frame comes more than 9 s late opens no session
 	const t = setup();
 	t.bridge.start();
 	t.drain();
-	t.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	t.bridge.onAppMessage({ CMD: "launched" });
 	t.bridge.onAppMessage({ CMD: "showing" });
 	t.clock.t += 9500;
 	t.pend([], [sess("r1", "running")]);
 	assert.equal(t.hub.of("get").length, 0);
 	// Within 9 s it does.
 	const u = setup();
-	u.bridge.onAppMessage({ CMD: "launched", CODE: 0 });
+	u.bridge.onAppMessage({ CMD: "launched" });
 	u.bridge.onAppMessage({ CMD: "showing" });
 	u.clock.t += 8000;
 	u.pend([], [sess("r1", "running")]);

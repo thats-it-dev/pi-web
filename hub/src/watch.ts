@@ -1,7 +1,7 @@
 // What the Pebble watch shows and answers (spec §4–§6). Queries are derived on
 // demand from the live handles' pending dialogs plus the external ones in the
 // QueryStore; a small record of turns that finished or errored while no app was
-// open feeds the Notifier. The service also keeps the watch's skips and what it
+// open is kept (the Notifier pushes alerts on its own). The service also keeps the watch's skips and what it
 // reports as on screen, and wakes long-pollers.
 
 import type { IncomingHttpHeaders } from "node:http";
