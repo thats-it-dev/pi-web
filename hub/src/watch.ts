@@ -90,6 +90,7 @@ export class WatchService {
 	private outcomes = new Map<string, Outcome>(); // by session id
 	private alertFns = new Set<(a: TurnAlert) => void>();
 	private queryFns = new Set<(q: WatchQuery) => void>();
+	private missFns = new Set<(q: WatchQuery) => void>();
 	private announced = new Set<string>(); // query ids already handed to queryFns, pruned to those still present
 	private created = new Map<string, number>(); // query id → first seen
 	private showingState: ShowingState | null = null;
@@ -208,11 +209,42 @@ export class WatchService {
 		};
 	}
 
-	// Nothing is sent on subscribe; the caller sends pending() itself.
+	// Nothing is sent on subscribe; the caller sends pending() itself. When the
+	// last subscriber (the app's stream) leaves, nothing counts as shown (spec §5).
 	subscribe(fn: (f: WatchStreamFrame) => void): () => void {
 		this.subscribers.add(fn);
 		return () => {
-			this.subscribers.delete(fn);
+			if (!this.subscribers.delete(fn) || this.subscribers.size > 0 || !this.showingState) return;
+			this.showingState = null;
+			this.changed();
+		};
+	}
+
+	// An app holds the stream or a long-poll.
+	appOpen(): boolean {
+		return this.subscribers.size + this.waiters.size > 0;
+	}
+
+	// The pi dialog the watch would show first (spec §5: a ring note answers it while the app is closed).
+	oldestDialog(): WatchQuery | null {
+		return this.visible().find((q) => q.source === "pi") ?? null;
+	}
+
+	// A ring note that fit none of q's options while the app was closed; the Notifier alerts.
+	ringMiss(q: WatchQuery): void {
+		for (const fn of [...this.missFns]) {
+			try {
+				fn(q);
+			} catch (err) {
+				this.deps.log?.(`watch: ring miss listener: ${(err as Error).message}`);
+			}
+		}
+	}
+
+	onRingMiss(fn: (q: WatchQuery) => void): () => void {
+		this.missFns.add(fn);
+		return () => {
+			this.missFns.delete(fn);
 		};
 	}
 

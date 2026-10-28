@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import type { Dialog } from "../../shared/src/protocol.ts";
+import type { Dialog, WatchQuery } from "../../shared/src/protocol.ts";
 import type { HubConfig } from "../src/config.ts";
 import { type IndexHeaders, ReplayCache, handleIndexWebhook, readIndexHeaders, verifyIndex } from "../src/index-webhook.ts";
 import { Viewers } from "../src/push-watch.ts";
@@ -220,7 +220,7 @@ test("on-screen pi query + unmatched text keeps it and emits a notice frame", as
 	assert.equal(j.action, "no_match");
 	assert.equal(j.queryId, requestId);
 	assert.equal(typeof j.reason, "string");
-	assert.ok(logs.includes(`index: ${s.delivery} no_match (options: allow, deny)`));
+	assert.ok(logs.includes(`index: ${s.delivery} no_match ${requestId} (options: allow, deny)`));
 	watch.showing({ queryId: null, sessionId: null });
 	settle(h);
 });
@@ -249,6 +249,17 @@ test("open session, no query on screen → prompt to that session", async () => 
 	const j = sidecar(s.delivery);
 	assert.equal(j.action, "prompted");
 	assert.equal(j.sessionId, h.sessionId);
+	assert.ok(logs.includes(`index: ${s.delivery} prompted ${h.sessionId}`));
+	watch.showing({ queryId: null, sessionId: null });
+});
+
+test("a delivery without an id logs the outcome and its session with no empty field", async () => {
+	const h = (await registry.create("/work/noid")) as FakeHandle;
+	watch.showing({ queryId: null, sessionId: h.sessionId });
+	const b = multipart({ transcription: "go on" });
+	const { "x-index-delivery": _drop, ...headers } = signed(b).headers;
+	assert.equal((await post(port, headers, b)).status, 200);
+	assert.ok(logs.includes(`index: prompted ${h.sessionId}`), logs.slice(-3).join(" | "));
 	watch.showing({ queryId: null, sessionId: null });
 });
 
@@ -300,18 +311,98 @@ test("open session gone at prompt time → new session", async () => {
 	watch.showing({ queryId: null, sessionId: null });
 });
 
-test("pending query not on screen + nothing open → new session, query untouched", async () => {
+test("app open on Home + pending query not on screen → new session, query untouched", async () => {
 	const { h, requestId } = await raise();
+	const off = watch.subscribe(() => {}); // the app's stream: open, showing Home
 	watch.showing({ queryId: null, sessionId: null });
 	const before = created.length;
 	const b = multipart({ transcription: "allow" });
 	const s = signed(b);
 	assert.equal((await post(port, s.headers, b)).status, 200);
+	off();
 	assert.equal(created.length, before + 1);
 	assert.equal(h.received.filter((c) => c.type === "dialog_response").length, 0);
 	assert.ok(watch.pending().queries.some((q) => q.id === requestId));
 	assert.equal(sidecar(s.delivery).action, "new_session");
 	settle(h);
+});
+
+// ---- app closed (spec §5): the note answers the oldest pending pi dialog ----
+
+const misses: WatchQuery[] = [];
+watch.onRingMiss((q) => misses.push(q));
+const settleAll = () => {
+	for (const h of created) if (h.dialogs.length) settle(h);
+	for (const h of registry.all()) if ((h as FakeHandle).dialogs?.length) settle(h as FakeHandle);
+};
+
+test("app closed + two pending pi dialogs + a matching note → answers the oldest only", async () => {
+	settleAll();
+	const a = await raise();
+	await sleep(5);
+	const b2 = await raise();
+	const before = created.length;
+	const b = multipart({ transcription: "deny" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before);
+	assert.deepEqual(a.h.received.filter((c) => c.type === "dialog_response"), [{ type: "dialog_response", id: "d1", value: "deny" }]);
+	assert.equal(b2.h.received.length, 0);
+	const j = sidecar(s.delivery);
+	assert.equal(j.action, "answered");
+	assert.equal(j.queryId, a.requestId);
+	assert.ok(logs.includes(`index: ${s.delivery} answered ${a.requestId}`));
+	settle(b2.h);
+});
+
+test("app closed + pending pi dialog + unmatched note → no_match, nothing answered, one alert with the options", async () => {
+	settleAll();
+	misses.length = 0;
+	const { h, requestId } = await raise();
+	const before = created.length;
+	const b = multipart({ transcription: "banana" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before);
+	assert.equal(h.received.length, 0);
+	assert.ok(watch.pending().queries.some((q) => q.id === requestId));
+	assert.deepEqual(misses.map((q) => [q.id, q.options]), [[requestId, ["allow", "deny"]]]);
+	const j = sidecar(s.delivery);
+	assert.equal(j.action, "no_match");
+	assert.equal(j.queryId, requestId);
+	settle(h);
+});
+
+test("app closed + only a ring-profile query pending → new session, the ring query untouched", async () => {
+	settleAll();
+	misses.length = 0;
+	const outcomes: unknown[] = [];
+	const q = watch.queries.raise({ source: "ring-profile", label: "ring", text: "ok?", options: ["yes", "no"], timeoutMs: 60_000, onOutcome: (o) => outcomes.push(o) });
+	const before = created.length;
+	const b = multipart({ transcription: "yes" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.equal(created.length, before + 1);
+	assert.deepEqual(outcomes, []);
+	assert.deepEqual(misses, []);
+	assert.equal(sidecar(s.delivery).action, "new_session");
+	watch.skip(q.id);
+});
+
+test("the app's stream closing clears what it showed: the next note doesn't prompt that session", async () => {
+	settleAll();
+	const h = (await registry.create("/work/left")) as FakeHandle;
+	const off = watch.subscribe(() => {});
+	watch.showing({ queryId: null, sessionId: h.sessionId });
+	off();
+	assert.equal(watch.onScreen(), null);
+	const before = created.length;
+	const b = multipart({ transcription: "still there?" });
+	const s = signed(b);
+	assert.equal((await post(port, s.headers, b)).status, 200);
+	assert.deepEqual(h.received, []);
+	assert.equal(created.length, before + 1);
+	assert.equal(sidecar(s.delivery).action, "new_session");
 });
 
 test("empty transcription keeps the audio and does nothing else", async () => {

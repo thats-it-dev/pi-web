@@ -36,6 +36,7 @@ const PUSH_BODY_MAX = 160;
 const FRAME_BODY_MAX = 240;
 const FRAME_TITLE_MAX = 64; // TimelineAttribute Title
 const RING_BODY = "Question waiting";
+const MISS_TITLE = "Didn't catch that";
 
 export class Notifier {
 	private deps: NotifierDeps;
@@ -69,6 +70,21 @@ export class Notifier {
 			if (delivered) this.deps.markDelivered(q.id);
 		} catch (err) {
 			this.log(`notifier: query ${q.id}: ${(err as Error).message}`);
+		}
+	}
+
+	// A ring note that fit none of a pi dialog's options while the app was closed (spec §5):
+	// one alert naming the options, whose Open shows the query.
+	async ringMiss(q: WatchQuery): Promise<void> {
+		try {
+			const { mode } = this.deps;
+			if (mode === "off" || this.deps.appOpen()) return;
+			const body = q.options.join(", ");
+			let sent = false;
+			if (mode !== "push") sent = await this.frame(MISS_TITLE, body, this.code({ queryId: q.id }, false));
+			if (!sent && mode !== "notification") await this.deps.push({ sessionId: q.sessionId ?? "", title: MISS_TITLE, kind: "query", body: clip(body, PUSH_BODY_MAX) });
+		} catch (err) {
+			this.log(`notifier: ring miss ${q.id}: ${(err as Error).message}`);
 		}
 	}
 

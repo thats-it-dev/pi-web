@@ -176,3 +176,27 @@ test("the launch table keeps the last 32 entries", async () => {
 	assert.equal([...t.n.launchCodes()].length, 32);
 	assert.deepEqual([...t.n.launchCodes()].at(-1)![1], { queryId: "q39" });
 });
+
+test("ringMiss: a frame titled \"Didn't catch that\" with the option names, launching the query", async () => {
+	const t = setup({ mode: "notification" });
+	await t.n.ringMiss(piQuery);
+	assert.equal(t.sent.length, 1);
+	const text = Buffer.from(t.sent[0][1]).toString("latin1");
+	assert.ok(text.includes("Didn't catch that"));
+	assert.ok(text.includes("yes, no"));
+	const code = [...t.n.launchCodes()].find(([, v]) => "queryId" in v && v.queryId === piQuery.id);
+	assert.ok(code && code[0] < 0x80000000);
+	assert.equal(t.pushed.length, 0);
+	assert.deepEqual(t.delivered, []);
+});
+
+test("ringMiss: auto with the phone unreachable → one push; off or app open → nothing", async () => {
+	const t = setup({ phone: null });
+	await t.n.ringMiss(piQuery);
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "Didn't catch that", kind: "query", body: "yes, no" }]);
+	for (const o of [{ mode: "off" as const }, { appOpen: true }]) {
+		const u = setup(o);
+		await u.n.ringMiss(piQuery);
+		assert.equal(u.sent.length + u.pushed.length, 0);
+	}
+});

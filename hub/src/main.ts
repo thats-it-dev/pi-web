@@ -63,6 +63,7 @@ const notifier = new Notifier({
 	log: (m) => console.log(m),
 });
 watch.onNewQuery((q) => void notifier.query(q));
+watch.onRingMiss((q) => void notifier.ringMiss(q));
 watchPush(registry, (p) => void notifier.turnPush(p), viewers);
 let bridge: Awaited<ReturnType<typeof startBridgeServer>>;
 try {

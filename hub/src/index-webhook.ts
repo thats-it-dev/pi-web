@@ -96,31 +96,39 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
 	});
 }
 
+type Decision = Pick<Sidecar, "action" | "sessionId" | "queryId" | "reason">;
+
 // Spec §5: answer the query the watch is showing, else prompt the session it
-// has open, else start a session in ~/pebble. A pending query that is not on
-// screen is never answered.
-async function decide(watch: WatchService, text: string): Promise<Pick<Sidecar, "action" | "sessionId" | "queryId" | "reason">> {
+// has open. With the app closed (no stream or poll, nothing shown), answer the
+// oldest pending pi dialog. Otherwise start a session in ~/pebble. A query that
+// is pending but not on screen is never answered while the app is open, and a
+// ring-profile query only ever on screen.
+async function decide(watch: WatchService, text: string): Promise<Decision> {
 	if (!text) return { action: "kept_audio" };
 	const shown = watch.onScreen();
-	if (shown?.queryId) {
-		const r = await watch.answer(shown.queryId, { text });
-		if (r.ok) return { action: "answered", queryId: shown.queryId };
-		// The note was meant for this query, so it never becomes a prompt or a new session.
-		if (r.reason === "no_match") {
-			watch.notice("Didn't catch that");
-			return { action: "no_match", queryId: shown.queryId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
-		}
-		if (r.reason === "gone") {
-			watch.notice("Already answered");
-			return { action: "gone", queryId: shown.queryId };
-		}
-		return { action: "error", queryId: shown.queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
-	}
+	if (shown?.queryId) return answer(watch, shown.queryId, text, () => watch.notice("Didn't catch that"));
 	if (shown?.sessionId) {
 		const r = await watch.prompt(shown.sessionId, text);
 		if (r.ok) return { action: "prompted", sessionId: shown.sessionId };
 	}
+	const head = shown || watch.appOpen() ? null : watch.oldestDialog();
+	if (head) return answer(watch, head.id, text, () => watch.ringMiss(head));
 	return { action: "new_session", sessionId: await watch.startRingSession(text) };
+}
+
+// The note was meant for this query, so it never becomes a prompt or a new session.
+async function answer(watch: WatchService, queryId: string, text: string, miss: () => void): Promise<Decision> {
+	const r = await watch.answer(queryId, { text });
+	if (r.ok) return { action: "answered", queryId };
+	if (r.reason === "no_match") {
+		miss();
+		return { action: "no_match", queryId, reason: r.options?.length ? `options: ${r.options.join(", ")}` : r.reason };
+	}
+	if (r.reason === "gone") {
+		watch.notice("Already answered");
+		return { action: "gone", queryId };
+	}
+	return { action: "error", queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
 }
 
 export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
@@ -169,14 +177,14 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		stage = "store";
 		if (audio) saveAudio(deps.dataDir, delivery, audio);
 		stage = "decide";
-		let outcome: Awaited<ReturnType<typeof decide>>;
+		let outcome: Decision;
 		try {
 			outcome = await decide(deps.watch, transcription);
 		} catch (e) {
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };
 		}
-		log(`index: ${delivery} ${outcome.action}${outcome.reason ? ` (${outcome.reason})` : ""}`);
+		log(["index:", delivery, outcome.action, outcome.queryId ?? outcome.sessionId, outcome.reason && `(${outcome.reason})`].filter(Boolean).join(" "));
 		stage = "store";
 		const { signature: _omit, ...kept } = headers;
 		saveSidecar(deps.dataDir, delivery, { receivedAt: (deps.now ?? Date.now)(), headers: kept, transcription, recordedAt: text("recordedAt"), client: text("client"), ...outcome });
