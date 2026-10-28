@@ -40,15 +40,7 @@ const index = new SessionIndex(join(root, "sessions"));
 const registry = new Registry({ factory: { startRpc: async (o) => new FakeHandle(`s-${++n}`, o.cwd, o.sessionFile ?? null) }, lookup: index, maxHeadless: 6, idleMs: 60_000 });
 const watch = new WatchService({ registry, index, viewers: new Viewers(), home: root });
 let clock = 1_000_000;
-let fetches: string[] = [];
-let upstream: "ok" | "fail" | "throw" = "ok";
-const fetchFn = (async (input: string | URL | Request) => {
-	fetches.push(String(input));
-	if (upstream === "throw") throw new Error("offline");
-	if (upstream === "fail") return new Response("no", { status: 500 });
-	return new Response(JSON.stringify({ current: { temperature_2m: 11.5, weather_code: 3 } }), { status: 200 });
-}) as typeof fetch;
-const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch, fetchFn, now: () => clock });
+const server = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {}, watch, now: () => clock });
 const bare = createHubServer({ cfg, registry, index, version: "0.1.0-test", home: root, log: () => {} });
 let port = 0;
 let barePort = 0;
@@ -170,25 +162,6 @@ test("health carries no watch secrets; watch/health carries the counts", async (
 	const w = await call(port, "GET", "/api/watch/health", WATCH);
 	assert.deepEqual([w.status, w.body.ok, w.body.hubVersion], [200, true, "0.1.0-test"]);
 	assert.deepEqual(Object.keys(w.body.sessions).sort(), ["pending", "running"]);
-});
-
-test("weather proxies Open-Meteo once per 10 minutes per rounded coordinate and answers 502 when upstream fails", async () => {
-	fetches = [];
-	const a = await call(port, "GET", "/api/watch/weather?lat=52.52&lon=13.41", WATCH);
-	assert.deepEqual([a.status, a.body], [200, { tempC: 11.5, code: 3 }]);
-	assert.equal(fetches.length, 1);
-	assert.match(fetches[0], /^https:\/\/api\.open-meteo\.com\/v1\/forecast\?latitude=52\.52&longitude=13\.41&current=temperature_2m,weather_code$/);
-	await call(port, "GET", "/api/watch/weather?lat=52.49&lon=13.44", WATCH);
-	assert.equal(fetches.length, 1);
-	clock += 11 * 60_000;
-	await call(port, "GET", "/api/watch/weather?lat=52.52&lon=13.41", WATCH);
-	assert.equal(fetches.length, 2);
-	assert.equal((await call(port, "GET", "/api/watch/weather?lat=abc&lon=1", WATCH)).status, 400);
-	assert.equal((await call(port, "GET", "/api/watch/weather?lat=1", WATCH)).status, 400);
-	upstream = "fail";
-	assert.equal((await call(port, "GET", "/api/watch/weather?lat=1&lon=2", WATCH)).status, 502);
-	upstream = "throw";
-	assert.equal((await call(port, "GET", "/api/watch/weather?lat=3&lon=4", WATCH)).status, 502);
 });
 
 test("the watch prefix boundary: paths that resolve outside /api/watch/ still need an Origin", async () => {

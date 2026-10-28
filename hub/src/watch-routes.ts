@@ -10,23 +10,14 @@ import { launchOnPhone, UUID_RE } from "./watch-launch.ts";
 export interface WatchRouteDeps {
 	watch: WatchService;
 	version: string;
-	fetchFn?: typeof fetch;
 	launchFn?: typeof launchOnPhone;
 	launchTarget?: (code: number) => { queryId: string } | { sessionId: string } | null;
-	now?: () => number;
 	log?: (m: string) => void;
 }
 
 const WAIT_MS = 25_000;
 const HISTORY_DEFAULT = 12;
 const HISTORY_MAX = 50;
-const WEATHER_TTL_MS = 10 * 60_000;
-
-interface Weather {
-	tempC: number;
-	code: number;
-}
-const weatherCache = new WeakMap<WatchService, Map<string, { at: number; value: Weather }>>();
 
 const str = (v: unknown): v is string => typeof v === "string" && v !== "";
 
@@ -77,7 +68,6 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 			return reply(target), true;
 		}
 		if (p === "/api/watch/health") return reply({ ok: true, hubVersion: deps.version, sessions: watch.health() }), true;
-		if (p === "/api/watch/weather") return reply(await weather(watch, q.get("lat"), q.get("lon"), deps)), true;
 		return false;
 	}
 
@@ -136,28 +126,3 @@ export async function routeWatch(req: IncomingMessage, res: ServerResponse, url:
 	return false;
 }
 
-async function weather(watch: WatchService, latRaw: string | null, lonRaw: string | null, deps: WatchRouteDeps): Promise<Weather> {
-	const lat = latRaw === null || latRaw === "" ? NaN : Number(latRaw);
-	const lon = lonRaw === null || lonRaw === "" ? NaN : Number(lonRaw);
-	if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new HttpError(400, "lat and lon must be numbers");
-	let cache = weatherCache.get(watch);
-	if (!cache) weatherCache.set(watch, (cache = new Map()));
-	const now = (deps.now ?? Date.now)();
-	const key = `${lat.toFixed(1)},${lon.toFixed(1)}`;
-	const hit = cache.get(key);
-	if (hit && now - hit.at < WEATHER_TTL_MS) return hit.value;
-	try {
-		const r = await (deps.fetchFn ?? fetch)(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`, { signal: AbortSignal.timeout(5000) });
-		if (!r.ok) throw new Error(`HTTP ${r.status}`);
-		const j = (await r.json()) as { current?: { temperature_2m?: unknown; weather_code?: unknown } };
-		const tempC = j.current?.temperature_2m;
-		const code = j.current?.weather_code;
-		if (typeof tempC !== "number" || typeof code !== "number") throw new Error("unexpected shape");
-		const value = { tempC, code };
-		cache.set(key, { at: now, value });
-		return value;
-	} catch (e) {
-		deps.log?.(`watch: weather upstream failed: ${(e as Error).message}`);
-		throw new HttpError(502, "Weather upstream failed");
-	}
-}
