@@ -357,10 +357,11 @@ async function raiseOn(d: Dialog, o: { alert?: boolean } = {}): Promise<{ h: Fak
 	if (o.alert !== false) cw.markDelivered(id);
 	return { h, id };
 }
-async function ringClosed(transcription: string, recordedAt?: number) {
-	const b = multipart(recordedAt === undefined ? { transcription } : { transcription, recordedAt: String(recordedAt) });
+// recordedAt defaults to the clock; null leaves it out, a string is sent as is.
+async function ringClosed(transcription: string, recordedAt: number | string | null = clock, p = cport) {
+	const b = multipart(recordedAt === null ? { transcription } : { transcription, recordedAt: String(recordedAt) });
 	const s = signed(b);
-	assert.equal((await post(cport, s.headers, b)).status, 200);
+	assert.equal((await post(p, s.headers, b)).status, 200);
 	return sidecar(s.delivery);
 }
 const confirmD: Dialog = { id: "c1", method: "confirm", title: "Run the migration?" };
@@ -488,6 +489,9 @@ test("a stream blip on a query answers that query; on Home the note starts a ses
 	assert.equal(j.action, "answered");
 	assert.equal(j.queryId, b2.id);
 	assert.equal(a.h.received.length, 0);
+	// Nothing connected: the answer gets the closed branch's receipt.
+	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id, x.kind === "answered" ? x.option : null]), [["answered", b2.id, "yes"]]);
+	alerts.length = 0;
 	off = cw.subscribe(() => {});
 	cw.showing({ queryId: null, sessionId: null });
 	off();
@@ -496,6 +500,57 @@ test("a stream blip on a query answers that query; on Home the note starts a ses
 	assert.equal(j2.action, "new_session");
 	assert.equal(a.h.received.length, 0);
 	assert.deepEqual(alerts, []);
+});
+
+test("a blip on a query: a miss gets the miss alert; with the stream still connected, only the notice", async () => {
+	fresh();
+	const { h, id } = await raiseOn(ask);
+	let off = cw.subscribe(() => {});
+	cw.showing({ queryId: id, sessionId: null });
+	off();
+	const j = await ringClosed("banana");
+	assert.equal(j.action, "no_match");
+	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id]), [["miss", id]]);
+	alerts.length = 0;
+	const frames: unknown[] = [];
+	off = cw.subscribe((f) => frames.push(f));
+	cw.showing({ queryId: id, sessionId: null });
+	assert.equal((await ringClosed("allow")).action, "answered");
+	off();
+	assert.deepEqual(alerts, []);
+	assert.equal(h.received.length, 1);
+});
+
+test("app closed + an alerted dialog but no usable recordedAt → new session, the dialog untouched", async () => {
+	fresh();
+	const { h } = await raiseOn(ask);
+	assert.equal((await ringClosed("allow", null)).action, "new_session");
+	assert.equal((await ringClosed("allow", "not a time")).action, "new_session");
+	assert.equal(h.received.length, 0);
+});
+
+test("a restarted hub starts inside the grace period: a note at once doesn't answer an alerted dialog", async () => {
+	fresh();
+	const w = new WatchService({ registry, index: idx, viewers: new Viewers(), home: root, now: () => clock });
+	const srv = createServer((req, res) => void handleIndexWebhook(req, res, { watch: w, dataDir: root, replays: new ReplayCache(), now: () => clock }));
+	await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+	const p = (srv.address() as AddressInfo).port;
+	try {
+		const { h, id } = await raiseOn(ask);
+		w.pending();
+		w.markDelivered(id);
+		clock += 30_000;
+		const j = await ringClosed("allow", clock, p);
+		assert.equal(j.action, "new_session");
+		assert.equal(h.received.length, 0);
+		clock += GRACE;
+		const j2 = await ringClosed("allow", clock, p);
+		assert.equal(j2.action, "answered");
+		assert.equal(j2.queryId, id);
+	} finally {
+		srv.close();
+		w.close();
+	}
 });
 
 test("between long-polls the app still counts as open", async () => {

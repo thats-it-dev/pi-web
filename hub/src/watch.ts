@@ -123,6 +123,7 @@ export class WatchService {
 		this.deps = deps;
 		this.archived = this.loadArchive();
 		this.now = deps.now ?? Date.now;
+		this.lastAppSeenAt = this.now(); // a restarted hub waits out the phone's reconnect before calling the app closed
 		const { registry, viewers } = deps;
 		this.queries = new QueryStore({ now: this.now, onChange: () => this.changed() });
 		this.offs = [

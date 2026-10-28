@@ -4,6 +4,7 @@ import { HttpError } from "./errors.ts";
 import { sendJson } from "./http.ts";
 import { type Sidecar, prune, saveAudio, saveSidecar } from "./index-store.ts";
 import { parseMultipart } from "./multipart.ts";
+import type { WatchQuery } from "../../shared/src/protocol.ts";
 import type { WatchService } from "./watch.ts";
 
 export interface IndexHeaders {
@@ -111,28 +112,37 @@ interface Handlers {
 // existed when the note was recorded. Otherwise start a session in ~/pebble.
 // While the app is open, a query that is pending but not on screen is never
 // answered, and a ring-profile query only ever on screen.
-async function decide(watch: WatchService, text: string, recordedAt: number): Promise<Decision> {
+async function decide(watch: WatchService, text: string, recordedAt: number | null): Promise<Decision> {
 	if (!text) return { action: "kept_audio" };
 	const open = watch.appOpen();
 	const shown = open ? watch.onScreen() : null;
-	if (shown?.queryId) return answer(watch, shown.queryId, text, { miss: () => watch.notice("Didn't catch that"), gone: () => watch.notice("Already answered") });
+	if (shown?.queryId) {
+		// Within the grace (nothing connected) the watch may be closed already: alert as when closed.
+		if (watch.subscriberCount() + watch.waiterCount() > 0) return answer(watch, shown.queryId, text, { miss: () => watch.notice("Didn't catch that"), gone: () => watch.notice("Already answered") });
+		const q = watch.pending().queries.find((x) => x.id === shown.queryId);
+		return answer(watch, shown.queryId, text, q ? closedHandlers(watch, q, text) : { miss: () => {}, gone: () => {} });
+	}
 	if (shown?.sessionId) {
 		const r = await watch.prompt(shown.sessionId, text);
 		if (r.ok) return { action: "prompted", sessionId: shown.sessionId };
 	}
-	const head = open ? null : watch.oldestDialog(recordedAt);
-	if (head) {
-		return answer(watch, head.id, text, {
-			miss: () => watch.ringAlert({ kind: "miss", query: head }),
-			gone: () => {}, // nobody to tell: the app is closed
-			// Select and confirm map text through matchOption, so this is the option sent.
-			answered: () => {
-				const m = matchOption(text, head.options);
-				if (m.kind === "match") watch.ringAlert({ kind: "answered", query: head, option: m.option });
-			},
-		});
-	}
+	// Without a usable recordedAt nothing is known to have existed when the note was spoken.
+	const head = open || recordedAt === null ? null : watch.oldestDialog(recordedAt);
+	if (head) return answer(watch, head.id, text, closedHandlers(watch, head, text));
 	return { action: "new_session", sessionId: await watch.startRingSession(text) };
+}
+
+// With no watch to flash on: one receipt or miss alert through the Notifier; gone is silent.
+function closedHandlers(watch: WatchService, q: WatchQuery, text: string): Handlers {
+	return {
+		miss: () => watch.ringAlert({ kind: "miss", query: q }),
+		gone: () => {},
+		// Select and confirm map text through matchOption, so this is the option sent (none for free text or a ring-profile answer).
+		answered: () => {
+			const m = q.source === "pi" ? matchOption(text, q.options) : null;
+			if (m?.kind === "match") watch.ringAlert({ kind: "answered", query: q, option: m.option });
+		},
+	};
 }
 
 // The note was meant for this query, so it never becomes a prompt or a new session.
@@ -153,13 +163,13 @@ async function answer(watch: WatchService, queryId: string, text: string, on: Ha
 	return { action: "error", queryId, reason: `unexpected answer result: ${String((r as { reason?: unknown }).reason)}` };
 }
 
-// The note's recording time in ms: the ring's recordedAt (ms or a date string), else now.
-function recordedTime(v: string | undefined, now: number): number {
-	if (!v) return now;
+// The note's recording time in ms (ms since the epoch, or a date string); null when absent or unparseable.
+function recordedTime(v: string | undefined): number | null {
+	if (!v) return null;
 	const n = Number(v);
 	if (Number.isFinite(n) && n > 0) return n;
 	const d = Date.parse(v);
-	return Number.isFinite(d) ? d : now;
+	return Number.isFinite(d) ? d : null;
 }
 
 export async function handleIndexWebhook(req: IncomingMessage, res: ServerResponse, deps: IndexDeps): Promise<void> {
@@ -210,7 +220,7 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		stage = "decide";
 		let outcome: Decision;
 		try {
-			outcome = await decide(deps.watch, transcription, recordedTime(text("recordedAt"), (deps.now ?? Date.now)()));
+			outcome = await decide(deps.watch, transcription, recordedTime(text("recordedAt")));
 		} catch (e) {
 			log(`index: decide: ${(e as Error).message}`);
 			outcome = { action: "error", reason: (e as Error).message };
