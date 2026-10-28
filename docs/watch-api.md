@@ -45,7 +45,7 @@ All bodies are JSON. Success is `200`, and a result with `ok: false` is still a 
 | POST | `/api/watch/new` | `{}` | `{ ok: true, sessionId }` | |
 | POST | `/api/watch/model` | `{ sessionId, provider, modelId }` | `{ ok: true }` | `409` if the session refuses |
 | POST | `/api/watch/launch` | `{ uuid }` (the watchapp's uuid) | `{ ok: true }` or `{ ok: false, reason: "no_phone" \| "unreachable" }` | `400` bad uuid |
-| POST | `/api/index/webhook` | multipart | empty `200` | `400`, `409`, `413` |
+| POST | `/api/index/webhook` | multipart | empty `200` (also for a duplicate, which is ignored) | `400`, `413` |
 
 Notes:
 
@@ -111,7 +111,7 @@ The ring posts a `multipart/form-data` body to `POST /api/index/webhook` (up to 
 | `X-Index-Webhook-Version` | must be `1` (else `400`) |
 | `X-Index-Trigger` | what started the recording |
 | `X-Index-Test` | `true` for a test event, which is accepted and then ignored |
-| `X-Index-Delivery` | a unique id per delivery, if sent; one seen in the last hour is `409` |
+| `X-Index-Delivery` | a unique id per delivery, if sent; one seen in the last hour is acknowledged with `200` and ignored |
 | `X-Index-Timestamp`, `X-Index-Signature` | read into the sidecar, not checked |
 | `X-Audio-Size` | audio size (read, not checked) |
 
@@ -119,7 +119,7 @@ Leave "Sign requests" off in the Index app; a signature is ignored if sent.
 
 The parts the hub reads are `audio`, `transcription`, `recordedAt` and `client`. `recordedAt` can be epoch milliseconds, epoch seconds (any number below 1e11) or a date string. The transcription is trimmed and cut to 8000 characters.
 
-**Re-uploads.** The real Index app sends no `X-Index-Delivery`. Without one, the hub keys the delivery by its content: `sha256(recordedAt, transcription, audio bytes)`, named `content-<32 hex>`. The same note uploaded again within an hour is a `409` and does nothing, so a retried upload can never answer a second dialog. Two notes differ in `recordedAt` or audio. A note with neither `recordedAt` nor audio can't be told apart from another saying the same words, so it is not de-duplicated, and it gets a random name.
+**Re-uploads.** The real Index app sends no `X-Index-Delivery`. Without one, the hub keys the delivery by its content: `sha256(recordedAt, transcription, audio bytes)`, named `content-<32 hex>`. The same note uploaded again within an hour gets `200` and does nothing (a non-2xx could keep the app re-sending it), so a retried upload can never answer a second dialog. Two notes differ in `recordedAt` or audio. A note with neither `recordedAt` nor audio can't be told apart from another saying the same words, so it is not de-duplicated, and it gets a random name.
 
 The hub then picks an outcome (routing in the [watch UI spec](superpowers/specs/2026-10-27-watch-ui-design.md) §5).
 
@@ -199,4 +199,4 @@ curl -sS -i -X POST "$HOST/api/index/webhook" \
   --data-binary @body.bin
 ```
 
-A `200` with an empty body means it was accepted. The outcome is in the newest `<dataDir>/index/content-*.json` and in the hub's log line. Sending the same `body.bin` again within an hour gets a `409`.
+A `200` with an empty body means it was accepted. The outcome is in the newest `<dataDir>/index/content-*.json` and in the hub's log line. Sending the same `body.bin` again within an hour gets `200` and is ignored (the log says `duplicate delivery ignored`).

@@ -161,16 +161,16 @@ const settle = (h: FakeHandle) => {
 	h.fire({ type: "state_changed" });
 };
 
-test("rejects without the tailnet identity (403) or with the wrong host; no signature is needed; a replayed delivery is 409", async () => {
+test("rejects without the tailnet identity (403) or with the wrong host; no signature is needed; a replayed delivery is acknowledged (200) and ignored", async () => {
 	const b = multipart({ transcription: "" });
 	const s = signed(b, { delivery: "rej-1" });
 	assert.equal((await post(port, { ...s.headers, "tailscale-user-login": "" }, b)).status, 403);
 	assert.equal((await post(port, { ...s.headers, host: "evil.test" }, b)).status, 403);
 	assert.equal((await post((bare.address() as AddressInfo).port, s.headers, b)).status, 503);
 	assert.equal((await post(port, { ...s.headers, "x-index-signature": "00" }, b)).status, 200);
-	assert.equal((await post(port, s.headers, b)).status, 409);
-	assert.equal((await post(port, s.headers, b)).body, JSON.stringify({ error: "Duplicate delivery" }));
-	assert.ok(logs.some((l) => l === "index: rejected (Duplicate delivery)"));
+	assert.equal((await post(port, s.headers, b)).status, 200); // acknowledged, ignored
+	assert.equal((await post(port, s.headers, b)).body, "");
+	assert.ok(logs.some((l) => l === "index: duplicate delivery ignored"));
 });
 
 test("a test event is 200 with an empty body and writes nothing", async () => {
@@ -277,7 +277,7 @@ test("a delivery without an id is named by its content key for its log line and 
 	watch.showing({ queryId: null, sessionId: null });
 });
 
-test("without a delivery id, a re-upload of the same note is a 409 and acts once; a different note still acts", async () => {
+test("without a delivery id, a re-upload of the same note is acknowledged (200) and acts once; a different note still acts", async () => {
 	const h = (await registry.create("/work/noid2")) as FakeHandle;
 	watch.showing({ queryId: null, sessionId: h.sessionId });
 	const noId = (b: Buffer) => {
@@ -288,7 +288,7 @@ test("without a delivery id, a re-upload of the same note is a 409 and acts once
 	const one = multipart({ transcription: "go on", recordedAt: "1700000000100" }, audio);
 	assert.equal((await post(port, noId(one), one)).status, 200);
 	const again = await post(port, noId(one), one);
-	assert.deepEqual(again, { status: 409, body: JSON.stringify({ error: "Duplicate delivery" }) });
+	assert.deepEqual(again, { status: 200, body: "" });
 	// Same words at another time, and the same time with other audio, are different notes.
 	const later = multipart({ transcription: "go on", recordedAt: "1700000000200" }, audio);
 	assert.equal((await post(port, noId(later), later)).status, 200);
@@ -434,7 +434,7 @@ test("app closed + two alerted dialogs: the same note re-uploaded without a deli
 	const body = multipart({ transcription: "allow", recordedAt: String(clock) }, Buffer.from("note audio"));
 	const { "x-index-delivery": _drop, ...headers } = signed(body).headers;
 	assert.equal((await post(cport, headers, body)).status, 200);
-	assert.equal((await post(cport, headers, body)).status, 409);
+	assert.equal((await post(cport, headers, body)).status, 200); // acknowledged, ignored
 	assert.equal(a.h.received.filter((c) => c.type === "dialog_response").length, 1);
 	assert.equal(b2.h.received.length, 0);
 	assert.deepEqual(alerts.map((x) => [x.kind, x.query.id]), [["answered", a.id]]);

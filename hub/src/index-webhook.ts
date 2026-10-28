@@ -213,6 +213,11 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 	}
 	const headers = readIndexHeaders(req.headers);
 	const v = verifyIndex(headers, deps.replays);
+	if (!v.ok && v.status === 409) {
+		// Acknowledged, not processed: a non-2xx could keep the Index app re-sending it.
+		log("index: duplicate delivery ignored");
+		return done();
+	}
 	if (!v.ok) {
 		log(`index: rejected (${v.reason})`);
 		return sendJson(res, v.status, { error: v.reason }, {});
@@ -237,8 +242,8 @@ export async function handleIndexWebhook(req: IncomingMessage, res: ServerRespon
 		if (!delivery) {
 			const key = contentKey(text("recordedAt"), raw, audio);
 			if (key && deps.replays.seen(key)) {
-				log("index: rejected (Duplicate delivery)");
-				return sendJson(res, 409, { error: "Duplicate delivery" }, {});
+				log("index: duplicate delivery ignored");
+				return done();
 			}
 			delivery = key ?? randomUUID();
 		}
