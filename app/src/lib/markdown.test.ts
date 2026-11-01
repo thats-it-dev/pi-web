@@ -22,6 +22,14 @@ describe("renderMarkdown", () => {
 		expect(out).not.toContain("<img");
 		expect(out).toContain('href="https://example.com/a.png"');
 	});
+	it("labels table cells with their column name for mobile restacking", () => {
+		const out = renderMarkdown('| a | b"c |\n|---|---|\n| 1 | <b>x</b> |');
+		expect(out).toContain('data-label="a"');
+		expect(out).toContain('data-label="b&quot;c"');
+		expect(out).toContain("<th>a</th>");
+		// cell content still goes through the safe inline renderer
+		expect(out).not.toMatch(/<td[^>]*><b>/i);
+	});
 	it("never produces an executable link or image from hostile input", () => {
 		const hostile = [
 			"[x](&#106;avascript:alert(1))",

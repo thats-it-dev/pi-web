@@ -14,15 +14,15 @@ type ImageContent = Extract<ContentBlock, { type: "image" }>;
 // completed messages is memoized per object: they are never mutated once they
 // land in conv.messages (and tool runs are replaced, not mutated). The
 // streaming partial is mutated in place, so it is never memoized.
-const memos = new WeakMap<object, Map<string, unknown>>();
-function memo<T>(key: object, slot: string, compute: () => T): T {
+const memos = new WeakMap<WeakKey, Map<string, unknown>>();
+function memo<T>(key: WeakKey, slot: string, compute: () => T): T {
 	let m = memos.get(key);
 	if (!m) memos.set(key, (m = new Map()));
 	if (!m.has(slot)) m.set(slot, compute());
 	return m.get(slot) as T;
 }
 
-function markdown(text: string, key: object | null) {
+function markdown(text: string, key: WeakKey | null) {
 	return unsafeHTML(key ? memo(key, "md", () => renderMarkdown(text)) : renderMarkdownUncached(text));
 }
 
@@ -168,8 +168,16 @@ export const messageStyles = css`
 	.md code { font-family: var(--font-mono); font-size: 0.9em; background: var(--code-bg); padding: 1px 4px; border-radius: 2px; }
 	.md pre code { background: none; padding: 0; }
 	.md blockquote { border-left: 3px solid var(--line); margin: 0 0 0.7em; padding-left: 12px; color: var(--text-secondary); }
-	.md table { border-collapse: collapse; display: block; overflow-x: auto; margin-bottom: 0.7em; }
+	.md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; margin-bottom: 0.7em; background: linear-gradient(to right, var(--bg) 80%, rgba(0,0,0,0)) left center, linear-gradient(to left, var(--bg) 80%, rgba(0,0,0,0)) right center, linear-gradient(to right, rgba(0,0,0,0), var(--line)) left center, linear-gradient(to left, rgba(0,0,0,0), var(--line)) right center; background-repeat: no-repeat; background-size: 20px 100%, 20px 100%, 10px 100%, 10px 100%; background-attachment: local, local, scroll, scroll; }
 	.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+	/* narrow screens: restack rows into label/value cards (labels from td[data-label]) */
+	@media (max-width: 640px) {
+		.md table { width: 100%; overflow: visible; background: none; }
+		.md table thead { display: none; }
+		.md table tr { display: block; border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 10px; margin: 0 0 8px; }
+		.md table td { display: flex; gap: 8px; align-items: baseline; border: none; padding: 3px 0; }
+		.md table td::before { content: attr(data-label); font-weight: 600; color: var(--text-secondary); flex: none; }
+	}
 	details > summary { cursor: pointer; list-style: none; }
 	details > summary::-webkit-details-marker { display: none; }
 	.think summary { font-size: 0.82em; color: var(--text-muted); font-style: italic; }

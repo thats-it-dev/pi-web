@@ -24,6 +24,17 @@ const md = new Marked({
 			const label = esc(token.text || token.href);
 			return SAFE_URL.test(token.href) ? link(token.href, label) : label;
 		},
+		// Cells carry their column name so narrow screens can restack rows into
+		// label/value cards (see the @media rule in render/messages.ts).
+		table(token: Tokens.Table) {
+			const head = token.header.map((c) => `<th>${this.parser.parseInline(c.tokens)}</th>`).join("");
+			const body = token.rows
+				.map((row) => `<tr>${row
+					.map((c, i) => `<td data-label="${esc(token.header[i]?.text ?? "")}">${this.parser.parseInline(c.tokens)}</td>`)
+					.join("")}</tr>`)
+				.join("");
+			return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>\n`;
+		},
 	},
 });
 
