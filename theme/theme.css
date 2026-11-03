@@ -17,9 +17,12 @@
 	--accent: #e4002b;
 	--success: #00843d;
 
+	/* One family everywhere: Nunito. The Inter and Work Sans faces stay declared — apps that name a
+	 * family directly still resolve and the published file list stays additive — but no token points
+	 * at them, so a browser never downloads them. */
 	--font-display: "Nunito", ui-rounded, system-ui, sans-serif;
-	--font-body: "Inter", system-ui, -apple-system, sans-serif;
-	--font-quote: "Work Sans", system-ui, sans-serif;
+	--font-body: "Nunito", ui-rounded, system-ui, sans-serif;
+	--font-quote: "Nunito", ui-rounded, system-ui, sans-serif;
 	--font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
 	/* Light theme */
