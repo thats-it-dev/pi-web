@@ -43,8 +43,8 @@ a, :focus-visible { color: var(--primary); outline-color: var(--primary); }
 | `--code-bg` | #f1f5f9 | #1e293b | code blocks |
 | `--ring` | 30% amber | 40% amber | focus rings |
 | `--font-display` | Nunito | | headings, labels |
-| `--font-body` | Inter | | body |
-| `--font-quote` | Work Sans | | quotes |
+| `--font-body` | Nunito | | body — one family everywhere by design |
+| `--font-quote` | Nunito | | quotes |
 | `--font-mono` | system monospace | | code |
 
 ## Dark mode
