@@ -27,6 +27,7 @@ export class ProgressStore extends EventTarget {
 	private session: SessionStore;
 	private goal: Goal | null = null;
 	private plan: (PlanDoc & { path: string }) | null = null;
+	private planSrc: string | null = null;
 	private overlay = new Map<string, Overlay>();
 	private cached: ProgressView | null = null;
 	private running = false;
@@ -54,6 +55,11 @@ export class ProgressStore extends EventTarget {
 
 	get view(): ProgressView {
 		return (this.cached ??= this.compute());
+	}
+
+	// The plan's markdown, for showing it whole.
+	get planText(): string | null {
+		return this.view.plan ? this.planSrc : null;
 	}
 
 	start(): void {
@@ -174,11 +180,13 @@ export class ProgressStore extends EventTarget {
 			const r = await this.api.plan(this.session.id, path);
 			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
 			this.plan = { ...parsePlan(r.text), path };
+			this.planSrc = r.text;
 			this.changed();
 		} catch (e) {
 			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
 			if (e instanceof HubError && e.status === 404) {
 				this.plan = null;
+				this.planSrc = null;
 				this.changed();
 			}
 		}

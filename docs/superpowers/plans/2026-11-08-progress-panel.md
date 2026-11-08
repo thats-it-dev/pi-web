@@ -306,24 +306,24 @@ Layout rules:
 - Below 1200 px there's no aside: the header shows the badge when `badgeLabel` isn't `null`. Tapping it, or a touch swipe starting within 24 px of the right edge and moving ≥ 60 px left, opens `pi-progress-view` full screen. Close it with ✕, Escape, or browser Back (push a history state while it's open).
 - `ProgressStore` is created in `open()`, alongside `SessionStore`, and stopped in `teardown()`.
 
-- [ ] **Step 1: Seed the e2e hub.** Copy `todo.jsonl` and `subagent-fg.jsonl` from Task 1 into the e2e sessions dir, with `/FIXTURE` rewritten to `WORKDIR`, plus a `docs/superpowers/plans/p.md` with two tasks.
-- [ ] **Step 2: Write the failing e2e tests** in `smoke.spec.ts`:
+- [x] **Step 1: Seed the e2e hub.** Copy `todo.jsonl` and `subagent-fg.jsonl` from Task 1 into the e2e sessions dir, with `/FIXTURE` rewritten to `WORKDIR`, plus a `docs/superpowers/plans/p.md` with two tasks.
+- [x] **Step 2: Write the failing e2e tests** in `smoke.spec.ts`:
   - desktop (1280×800): open the seeded session. The aside shows `to-dos` with the fixture's count and `subagents` with one `done` row.
   - phone project: the header badge shows the count; tapping it shows the full-screen view; Escape closes it.
   - desktop: a session with none of this data has no aside.
-- [ ] **Step 3: Run the tests and confirm they fail**
+- [x] **Step 3: Run the tests and confirm they fail**
 
 Run: `npm run e2e -w app -- smoke`
 Expected: FAIL
 
-- [ ] **Step 4: Implement the layout, the header badge and `pi-progress-view`.**
-- [ ] **Step 5: Run everything**
+- [x] **Step 4: Implement the layout, the header badge and `pi-progress-view`.**
+- [x] **Step 5: Run everything**
 
 Run: `npm test && npm run typecheck && npm run e2e -w app`
 Expected: PASS. Update the `look.spec.ts` snapshots only for sessions that now legitimately show the panel, and say so in the commit message.
 
-- [ ] **Step 6: Visual check:** run the dev hub and app (README "Develop") against a real session that has to-dos and a subagent, and screenshot desktop (1280 and 1440) and phone, in light and dark. Compare against `pi-sidebar` for spacing and type, and fix anything that looks bolted on.
-- [ ] **Step 7: Commit**
+- [x] **Step 6: Visual check:** run the dev hub and app (README "Develop") against a real session that has to-dos and a subagent, and screenshot desktop (1280 and 1440) and phone, in light and dark. Compare against `pi-sidebar` for spacing and type, and fix anything that looks bolted on.
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/src app/e2e

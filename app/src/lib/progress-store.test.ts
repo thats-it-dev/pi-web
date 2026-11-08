@@ -103,6 +103,7 @@ describe("ProgressStore", () => {
 		expect(fake.plan).toHaveBeenCalledTimes(1);
 		expect(store.view.plan?.path).toBe(PLAN);
 		expect(store.view.plan?.tasks).toHaveLength(1);
+		expect(store.planText).toBe("# P\n### Task 1: A\n- [ ] x\n");
 		ev(session, { type: "tool_execution_start", toolCallId: "e0", toolName: "edit", args: { path: "src/other.ts" } });
 		ev(session, { type: "tool_execution_end", toolCallId: "e0", toolName: "edit", result: {}, isError: false });
 		await flush();

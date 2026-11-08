@@ -237,3 +237,61 @@ test("terminal: a pi open in a terminal is live in the app, and prompts from eit
 		await term.quit();
 	}
 });
+
+// Seeded by hub-for-e2e.ts from the progress fixtures.
+const TODO_SESSION = "01a1bd36-16ac-7413-9382-8ac913737489"; // three to-dos, all done
+const SUBAGENT_SESSION = "01a1bd37-0fea-71de-9b21-5898d150477c"; // one foreground subagent, done
+const PLAN_SESSION = "e2e-plan-session";
+
+test("desktop: the progress column shows to-dos and subagents beside the chat", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await page.goto(`/#/s/${TODO_SESSION}`);
+	const aside = page.locator("pi-session aside");
+	await expect(aside).toContainText("to-dos");
+	await expect(aside).toContainText("3/3");
+	await expect(page.getByRole("button", { name: "Progress" })).toHaveCount(0);
+
+	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
+	await expect(aside).toContainText("subagents");
+	await expect(aside.locator(".child")).toHaveCount(1);
+	await expect(aside.locator(".child [aria-label=done]")).toHaveCount(1);
+});
+
+test("desktop: a plan opens in a sheet", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await page.goto(`/#/s/${PLAN_SESSION}`);
+	await expect(page.locator("pi-session aside")).toContainText("Task 1: First");
+	await page.locator("pi-session aside").getByRole("button", { name: "open plan" }).click();
+	await expect(page.locator("tk-sheet")).toContainText("Plan P");
+});
+
+test("desktop: a session with no progress has no column", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await startChat(page, "plain");
+	await expect(page.locator("pi-messages")).toContainText("Hello world");
+	await expect(page.locator("pi-session aside")).toHaveCount(0);
+});
+
+test("phone: a badge opens the full-screen progress view, Escape closes it", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone flow");
+	await page.goto(`/#/s/${TODO_SESSION}`);
+	await expect(page.locator("pi-session aside")).toHaveCount(0);
+	const badge = page.getByRole("button", { name: "Progress" });
+	await expect(badge).toHaveText("3/3");
+	await badge.click();
+	const view = page.locator("pi-progress-view");
+	await expect(view).toContainText("to-dos");
+	await page.keyboard.press("Escape");
+	await expect(view).toHaveCount(0);
+
+	await badge.click();
+	await expect(view).toBeVisible();
+	await view.getByRole("button", { name: "Close" }).click();
+	await expect(view).toHaveCount(0);
+
+	await badge.click();
+	await expect(view).toBeVisible();
+	await page.goBack();
+	await expect(view).toHaveCount(0);
+	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}`));
+});

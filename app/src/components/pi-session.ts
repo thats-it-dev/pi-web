@@ -1,5 +1,6 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
@@ -8,20 +9,28 @@ import { takeHandoff } from "../lib/draft.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import type { ListStore } from "../lib/list-store.ts";
+import { renderMarkdown } from "../lib/markdown.ts";
+import { ProgressStore } from "../lib/progress-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
+import { badgeLabel, progressStyles, renderProgress } from "../render/progress.ts";
+import { markdownStyles } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
 import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
 import "./pi-header.ts";
 import "./pi-messages.ts";
+import "./pi-progress-view.ts";
 
-type Sheet = "model" | "stats" | "fork" | "menu";
-const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", menu: "this chat" };
+type Sheet = "model" | "stats" | "fork" | "menu" | "plan";
+const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", menu: "this chat", plan: "plan" };
+const WIDE = "(min-width: 1200px)"; // room for the progress column beside the chat
+const EDGE = 24; // a swipe from this close to the right edge opens the progress view
+const SWIPE = 60;
 const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])";
 
 export class PiSession extends LitElement {
@@ -35,6 +44,8 @@ export class PiSession extends LitElement {
 		menuStep: { state: true },
 		forkPoints: { state: true },
 		tucked: { state: true },
+		wide: { state: true },
+		progressOpen: { state: true },
 	};
 	declare api: HubApi;
 	declare list: ListStore | null;
@@ -45,8 +56,11 @@ export class PiSession extends LitElement {
 	declare menuStep: MenuStep;
 	declare forkPoints: ForkPoint[];
 	declare tucked: boolean;
+	declare wide: boolean;
+	declare progressOpen: boolean;
 
 	store: SessionStore | null = null;
+	progress: ProgressStore | null = null;
 	private loader: ImageLoader | null = null; // one per session view: blob URLs live and die with it
 	private stream: { close(): void } | null = null;
 	private streamId: string | null = null;
@@ -55,14 +69,20 @@ export class PiSession extends LitElement {
 	private ticker: ReturnType<typeof setInterval> | undefined;
 	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
+	private swipeFrom: { x: number; y: number } | null = null;
 	private attaching = false; // the sheet closed for the file picker: leave the keyboard down
 
 	static styles = [
 		sharedStyles,
 		sheetStyles,
 		chatMenuStyles,
+		markdownStyles,
+		progressStyles,
 		css`
-			:host { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+			:host { display: flex; min-height: 0; height: 100%; }
+			.chat { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+			aside { flex: none; width: 300px; border-left: 1px solid var(--line); overflow-y: auto; overscroll-behavior: contain; }
+			.plan-doc { font-size: 0.9rem; }
 			.scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 			.tray { border-top: 1px solid var(--line); padding: 4px 14px; font-size: 0.75rem; }
 			.tray summary { cursor: pointer; font-weight: 400; }
@@ -80,7 +100,20 @@ export class PiSession extends LitElement {
 		this.menuStep = "root";
 		this.forkPoints = [];
 		this.tucked = false;
+		this.wide = matchMedia(WIDE).matches;
+		this.progressOpen = false;
+		this.addEventListener("pi-open-plan", this.onOpenPlan);
 	}
+
+	connectedCallback(): void {
+		super.connectedCallback();
+		this.mq.addEventListener("change", this.onWide);
+		window.addEventListener("popstate", this.onPop);
+		this.addEventListener("touchstart", this.onTouchStart, { passive: true });
+		this.addEventListener("touchend", this.onTouchEnd, { passive: true });
+	}
+
+	private mq = matchMedia(WIDE);
 
 	willUpdate(changed: PropertyValues<this>): void {
 		if (changed.has("sessionId") && this.sessionId && this.sessionId !== this.store?.id) this.open(this.sessionId);
@@ -90,6 +123,10 @@ export class PiSession extends LitElement {
 		this.teardown();
 		this.list?.setViewing(null);
 		this.stopTicker();
+		this.mq.removeEventListener("change", this.onWide);
+		window.removeEventListener("popstate", this.onPop);
+		this.removeEventListener("touchstart", this.onTouchStart);
+		this.removeEventListener("touchend", this.onTouchEnd);
 		super.disconnectedCallback();
 	}
 
@@ -102,8 +139,13 @@ export class PiSession extends LitElement {
 		this.list?.setViewing(id);
 		this.loader = sessionImageLoader(this.api, store);
 		this.sheet = null;
+		this.progressOpen = false;
 		this.atBottom = true;
 		this.tucked = false;
+		const progress = new ProgressStore(this.api, store);
+		this.progress = progress;
+		progress.addEventListener("change", this.onStoreChange);
+		progress.start();
 		store.addEventListener("change", this.onStoreChange);
 		store.addEventListener("notice", this.onNotice);
 		store.addEventListener("snapshot", this.onSnapshot);
@@ -146,6 +188,9 @@ export class PiSession extends LitElement {
 		this.streamId = null;
 		this.loader?.dispose();
 		this.loader = null;
+		this.progress?.removeEventListener("change", this.onStoreChange);
+		this.progress?.stop();
+		this.progress = null;
 		const s = this.store;
 		if (!s) return;
 		s.removeEventListener("change", this.onStoreChange);
@@ -159,11 +204,18 @@ export class PiSession extends LitElement {
 		this.syncTicker();
 	};
 
-	// Re-render once a second while a dialog with a timeout shows its countdown.
+	// Re-render once a second while a dialog with a timeout shows its countdown, or while the progress panel
+	// shows a running subagent's elapsed time.
 	private syncTicker(): void {
-		const counting = Boolean(this.store?.dialogs[0]?.timeout);
+		const counting = Boolean(this.store?.dialogs[0]?.timeout) || this.progressTicks();
 		if (counting && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
 		if (!counting) this.stopTicker();
+	}
+
+	private progressTicks(): boolean {
+		const v = this.progress?.view;
+		if (!v || !(this.wide || this.progressOpen)) return false;
+		return v.subagents.recent.concat(v.subagents.earlier).some((c) => c.state === "running");
 	}
 
 	private stopTicker(): void {
@@ -357,6 +409,62 @@ export class PiSession extends LitElement {
 		void this.run({ type: "dialog_response", id, ...a });
 	}
 
+	// ---- progress panel -------------------------------------------------------
+
+	private onWide = () => {
+		this.wide = this.mq.matches;
+		if (this.wide) this.progressOpen = false; // the column shows it now
+		this.syncTicker();
+	};
+
+	private openProgress(): void {
+		if (this.progressOpen || this.wide) return;
+		history.pushState({ piProgress: true }, "");
+		this.progressOpen = true;
+		this.syncTicker();
+	}
+
+	private closeProgress = () => {
+		if (!this.progressOpen) return;
+		if (history.state?.piProgress) history.back(); // onPop closes it
+		else this.progressOpen = false;
+		this.syncTicker();
+	};
+
+	private onPop = () => {
+		if (!this.progressOpen) return;
+		this.progressOpen = false;
+		this.syncTicker();
+	};
+
+	// A swipe that starts at the right edge and travels left opens the progress view.
+	private onTouchStart = (e: TouchEvent) => {
+		const t = e.touches[0];
+		this.swipeFrom = e.touches.length === 1 && t && window.innerWidth - t.clientX <= EDGE ? { x: t.clientX, y: t.clientY } : null;
+	};
+
+	private onTouchEnd = (e: TouchEvent) => {
+		const from = this.swipeFrom;
+		this.swipeFrom = null;
+		const t = e.changedTouches[0];
+		if (!from || !t || this.wide || !this.progress || badgeLabel(this.progress.view) === null) return;
+		const dx = t.clientX - from.x;
+		if (dx <= -SWIPE && Math.abs(t.clientY - from.y) < Math.abs(dx)) this.openProgress();
+	};
+
+	private onOpenPlan = () => {
+		if (this.progress?.planText != null) this.sheet = "plan";
+	};
+
+	private emit(type: string, detail: unknown): void {
+		this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+	}
+
+	private renderProgressPanel() {
+		const progress = this.progress;
+		return progress && !progress.view.empty ? progress : null;
+	}
+
 	// ---- scrolling and focus --------------------------------------------------
 
 	private onScroll = (e: Event) => {
@@ -367,7 +475,9 @@ export class PiSession extends LitElement {
 		this.lastScrollTop = el.scrollTop;
 	};
 
-	updated(): void {
+	updated(changed: PropertyValues<this>): void {
+		if (changed.has("progressOpen") && changed.get("progressOpen") === true && !this.progressOpen)
+			this.renderRoot.querySelector<LitElement>("pi-header")?.renderRoot.querySelector<HTMLElement>(".badge")?.focus();
 		if (this.atBottom) {
 			const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 			void messages?.updateComplete.then(() => {
@@ -409,26 +519,41 @@ export class PiSession extends LitElement {
 		const cwd = snap?.cwd ?? s.cwdHint;
 		const statuses = [cwd ? abbreviateCwd(cwd, this.home) : null, ...Object.values(snap?.statuses ?? {})].filter((x): x is string => Boolean(x));
 		const dialog = s.dialogs[0];
+		const progress = this.renderProgressPanel();
+		const label = progress && !this.wide ? badgeLabel(progress.view) : null;
+		const now = Date.now();
+		const opts = (selectedKey: string | null) => ({
+			now,
+			selectedKey,
+			openChild: (key: string) => this.emit("pi-open-child", key),
+			openPlan: (path: string) => this.emit("pi-open-plan", path),
+		});
 		return html`
-			<pi-header .store=${s} .version=${this.version} .heading=${heading} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
-			<div class="scroll" @scroll=${this.onScroll}>
-				<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
+			<div class="chat">
+				<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)} @pi-open-progress=${() => this.openProgress()}></pi-header>
+				<div class="scroll" @scroll=${this.onScroll}>
+					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
+				</div>
+				${this.renderTray(snap)}
+				<pi-composer
+					.streaming=${s.conv.streaming}
+					.detached=${s.status === "history"}
+					.items=${slashItems(snap?.commands ?? [])}
+					.rpcOnlyDisabled=${snap?.handleKind === "bridge"}
+					.queue=${s.conv.queue}
+					.statuses=${statuses}
+					.model=${snap?.state.model ?? null}
+					.thinking=${snap?.state.thinkingLevel ?? null}
+					.searchFiles=${this.searchFiles}
+					@pi-submit=${this.onSubmit}
+					@pi-abort=${this.onAbort}
+					@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
+				></pi-composer>
 			</div>
-			${this.renderTray(snap)}
-			<pi-composer
-				.streaming=${s.conv.streaming}
-				.detached=${s.status === "history"}
-				.items=${slashItems(snap?.commands ?? [])}
-				.rpcOnlyDisabled=${snap?.handleKind === "bridge"}
-				.queue=${s.conv.queue}
-				.statuses=${statuses}
-				.model=${snap?.state.model ?? null}
-				.thinking=${snap?.state.thinkingLevel ?? null}
-				.searchFiles=${this.searchFiles}
-				@pi-submit=${this.onSubmit}
-				@pi-abort=${this.onAbort}
-				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
-			></pi-composer>
+			${progress && this.wide ? html`<aside aria-label="Progress">${renderProgress(progress.view, opts(null))}</aside>` : nothing}
+			${progress && this.progressOpen && !this.wide
+				? html`<pi-progress-view .view=${progress.view} .now=${now} .modal=${this.sheet !== null} @pi-close-progress=${this.closeProgress}></pi-progress-view>`
+				: nothing}
 			${dialog
 				? html`<tk-sheet open heading=${dialog.title || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>
 						${dialogSheet(dialog, s.dialogSeenAt.get(dialog.id) ?? Date.now(), (a) => this.answer(dialog.id, a))}
@@ -440,6 +565,7 @@ export class PiSession extends LitElement {
 	}
 
 	private renderSheet(sheet: Sheet, snap: Snapshot | null) {
+		if (sheet === "plan") return html`<div class="md plan-doc">${unsafeHTML(renderMarkdown(this.progress?.planText ?? ""))}</div>`;
 		if (sheet === "fork")
 			return forkSheet(this.forkPoints, (p) => {
 				this.sheet = null;

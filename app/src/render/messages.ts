@@ -149,16 +149,8 @@ function renderBash(m: AgentMessage) {
 	</details>`;
 }
 
-export const messageStyles = css`
-	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
-	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
-	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
-	.imgs.thumbs { justify-content: flex-start; padding: 0 9px 8px; }
-	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
-	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */
-	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
-	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
-	.assistant { display: grid; gap: 8px; min-width: 0; }
+// Rendered markdown (.md): the messages use it, and so does the plan sheet.
+export const markdownStyles = css`
 	.md { overflow-wrap: anywhere; line-height: 1.6; min-width: 0; }
 	.md > :first-child { margin-top: 0; }
 	.md > :last-child { margin-bottom: 0; }
@@ -178,6 +170,19 @@ export const messageStyles = css`
 		.md table td { display: flex; gap: 8px; align-items: baseline; border: none; padding: 3px 0; }
 		.md table td::before { content: attr(data-label); font-weight: 600; color: var(--text-secondary); flex: none; }
 	}
+`;
+
+export const messageStyles = css`
+	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
+	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
+	.imgs.thumbs { justify-content: flex-start; padding: 0 9px 8px; }
+	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
+	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */
+	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
+	.assistant { display: grid; gap: 8px; min-width: 0; }
+	${markdownStyles}
 	details > summary { cursor: pointer; list-style: none; }
 	details > summary::-webkit-details-marker { display: none; }
 	.think summary { font-size: 0.82em; color: var(--text-muted); font-style: italic; }
