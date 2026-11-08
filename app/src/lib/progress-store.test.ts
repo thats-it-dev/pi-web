@@ -159,17 +159,90 @@ describe("ProgressStore", () => {
 	});
 
 	it("an error or a late unknown never reverts a terminal state", async () => {
-		const seq: Array<SubagentChild["state"] | "err"> = ["done", "err", "running"];
+		const first: Array<SubagentChild["state"] | "err"> = ["done", "err", "running", "unknown"];
 		const subagents = vi.fn(async () => {
-			const n = seq.shift() ?? "done";
+			const n = first.shift() ?? "done";
 			if (n === "err") throw new HubError(0, "down");
-			return { children: [child({ state: n })] };
+			return { children: [child({ state: n }), child({ key: "t2:0", toolCallId: "t2", state: "running" })] };
 		});
+		const { session, store } = setup({ subagents });
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([subCall("t1", true), subCall("t2", true)])) });
+		store.start();
+		const states = () => Object.fromEntries([...store.view.subagents.recent, ...store.view.subagents.earlier].map((c) => [c.key, c.state]));
+		await flush();
+		expect(states()["t1:0"]).toBe("done");
+		for (let i = 0; i < 3; i++) {
+			await vi.advanceTimersByTimeAsync(3000);
+			expect(states()["t1:0"]).toBe("done");
+		}
+		expect(subagents.mock.calls.length).toBeGreaterThanOrEqual(4); // polling kept going, responses consumed
+		store.stop();
+	});
+
+	it("a finished child still gets its times filled in", async () => {
+		const seq = [child({ state: "done", startedAt: null, endedAt: null }), child({ state: "done", startedAt: 5, endedAt: 9 })];
+		const subagents = vi.fn(async () => ({ children: [seq.shift() ?? seq[0] ?? child({ state: "done", startedAt: 5, endedAt: 9 }), child({ key: "t2:0", toolCallId: "t2", state: "running" })] }));
+		const { session, store } = setup({ subagents });
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([subCall("t1", true), subCall("t2", true)])) });
+		store.start();
+		await vi.advanceTimersByTimeAsync(3000);
+		const c = [...store.view.subagents.recent, ...store.view.subagents.earlier].find((x) => x.key === "t1:0")!;
+		expect([c.state, c.startedAt, c.endedAt]).toEqual(["done", 5, 9]);
+		store.stop();
+	});
+
+	it("goal: a slow older response does not overwrite a newer one", async () => {
+		const resolvers: Array<(v: { goal: Goal | null }) => void> = [];
+		const goalFn = vi.fn(() => new Promise<{ goal: Goal | null }>((r) => resolvers.push(r)));
+		const { session, store } = setup({ goal: goalFn });
+		session.apply({ type: "snapshot", snapshot: snap() });
+		store.start(); // fetch #1
+		ev(session, { type: "agent_start" });
+		ev(session, { type: "agent_settled" }); // fetch #2
+		expect(resolvers).toHaveLength(2);
+		resolvers[1]({ goal: { ...goal, text: "new" } });
+		await flush();
+		resolvers[0]({ goal: { ...goal, text: "old" } });
+		await flush();
+		expect(store.view.goal?.text).toBe("new");
+		store.stop();
+	});
+
+	it("does not start a subagents poll while one is in flight", async () => {
+		const subagents = vi.fn(() => new Promise<{ children: SubagentChild[] }>(() => {}));
 		const { session, store } = setup({ subagents });
 		session.apply({ type: "snapshot", snapshot: snap(createConversation([subCall("t1", true)])) });
 		store.start();
 		await vi.advanceTimersByTimeAsync(10_000);
-		expect(store.view.subagents.recent[0].state).toBe("done");
+		expect(subagents).toHaveBeenCalledTimes(1);
+		store.stop();
+	});
+
+	it("a running background child that can't be confirmed shows as unknown", async () => {
+		let fail = false;
+		const subagents = vi.fn(async () => {
+			if (fail) throw new HubError(0, "down");
+			return { children: [child({ state: "running" })] };
+		});
+		const { session, store } = setup({ subagents });
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([subCall("t1", true)])) });
+		store.start();
+		await flush();
+		const state = () => store.view.subagents.recent[0].state;
+		expect(state()).toBe("running");
+		fail = true;
+		await vi.advanceTimersByTimeAsync(3000); // 1 failure, still live
+		expect(state()).toBe("running");
+		await vi.advanceTimersByTimeAsync(6000); // 3 failures
+		expect(state()).toBe("unknown");
+		fail = false;
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(state()).toBe("running");
+		// not live and the latest fetch failed: unknown at once
+		fail = true;
+		session.apply({ type: "handle_gone", reason: "exit", stderr: "" } as never);
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(state()).toBe("unknown");
 		store.stop();
 	});
 

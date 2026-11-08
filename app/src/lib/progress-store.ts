@@ -3,7 +3,7 @@
 
 import type { Goal } from "../../../shared/src/goal.ts";
 import { type PlanDoc, parsePlan } from "../../../shared/src/plan.ts";
-import { type SubagentChild, type Todo, deriveProgress, groupSubagents } from "../../../shared/src/progress.ts";
+import { type Progress, type SubagentChild, type Todo, deriveProgress, groupSubagents } from "../../../shared/src/progress.ts";
 import { HubError, type HubApi } from "./api.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -35,7 +35,16 @@ export class ProgressStore extends EventTarget {
 	private ended = new Set<string>(); // tool runs already seen finished
 	private goalTimer: ReturnType<typeof setInterval> | null = null;
 	private childTimer: ReturnType<typeof setInterval> | null = null;
-	private onChange = () => this.update();
+	private prog: Progress | null = null; // deriveProgress once per session change
+	private goalSeq = 0;
+	private planSeq = 0;
+	private childSeq = 0;
+	private childBusy = false;
+	private childFails = 0;
+	private onChange = () => {
+		this.prog = null;
+		this.update();
+	};
 
 	constructor(api: Pick<HubApi, "goal" | "plan" | "subagents">, session: SessionStore) {
 		super();
@@ -54,24 +63,32 @@ export class ProgressStore extends EventTarget {
 		this.wasStreaming = this.session.conv.streaming;
 		this.session.addEventListener("change", this.onChange);
 		this.fetchGoal();
+		this.prog = null;
 		this.update();
 	}
 
 	stop(): void {
 		this.running = false;
+		this.goalSeq++;
+		this.planSeq++;
+		this.childSeq++;
+		this.childBusy = false;
 		this.session.removeEventListener("change", this.onChange);
 		this.setGoalTimer(false);
 		this.setChildTimer(false);
 	}
 
-	private derived() {
-		return deriveProgress(this.session.conv, { live: this.session.status === "live" });
+	private derived(): Progress {
+		return (this.prog ??= deriveProgress(this.session.conv, { live: this.session.status === "live" }));
 	}
 
+	// A "running" report that can't be refreshed is shown as unknown, never as running.
 	private children(): SubagentChild[] {
+		const stale = this.childFails >= 3 || (this.childFails > 0 && this.session.status !== "live");
 		return this.derived().subagents.map((c) => {
 			const o = c.background ? this.overlay.get(c.key) : undefined;
-			return o ? { ...c, ...o } : c;
+			if (!o) return c;
+			return { ...c, ...o, state: stale && o.state === "running" ? "unknown" : o.state };
 		});
 	}
 
@@ -142,22 +159,24 @@ export class ProgressStore extends EventTarget {
 	}
 
 	private async fetchGoal(): Promise<void> {
+		const n = ++this.goalSeq;
 		try {
 			const { goal } = await this.api.goal(this.session.id);
-			if (!this.running) return;
+			if (!this.running || n !== this.goalSeq) return;
 			this.goal = goal;
 			this.changed();
 		} catch {} // keep the last good value
 	}
 
 	private async fetchPlan(path: string): Promise<void> {
+		const n = ++this.planSeq;
 		try {
 			const r = await this.api.plan(this.session.id, path);
-			if (!this.running || this.planPath !== path) return;
+			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
 			this.plan = { ...parsePlan(r.text), path };
 			this.changed();
 		} catch (e) {
-			if (!this.running || this.planPath !== path) return;
+			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
 			if (e instanceof HubError && e.status === 404) {
 				this.plan = null;
 				this.changed();
@@ -166,17 +185,30 @@ export class ProgressStore extends EventTarget {
 	}
 
 	private async fetchChildren(): Promise<void> {
+		if (this.childBusy) return;
+		this.childBusy = true;
+		const n = ++this.childSeq;
 		try {
 			const { children } = await this.api.subagents(this.session.id);
-			if (!this.running) return;
+			if (!this.running || n !== this.childSeq) return;
+			this.childFails = 0;
 			for (const c of children) {
 				if (!c.background) continue;
 				const prev = this.overlay.get(c.key);
-				if (prev && terminal(prev.state)) continue; // a finished child never goes back
+				if (prev && terminal(prev.state)) {
+					// A finished child never goes back, but its times may still be filled in.
+					if (c.state === prev.state) this.overlay.set(c.key, { state: prev.state, startedAt: prev.startedAt ?? c.startedAt, endedAt: prev.endedAt ?? c.endedAt });
+					continue;
+				}
 				this.overlay.set(c.key, { state: c.state, startedAt: c.startedAt, endedAt: c.endedAt });
 			}
-			this.syncChildPolling();
-			this.changed();
-		} catch {} // keep the last good value
+		} catch {
+			if (!this.running || n !== this.childSeq) return;
+			this.childFails++; // keep the last good value, but stop vouching for "running"
+		} finally {
+			if (n === this.childSeq) this.childBusy = false;
+		}
+		this.syncChildPolling();
+		this.changed();
 	}
 }
