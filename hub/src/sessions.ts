@@ -7,10 +7,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage, SessionSummary } from "../../shared/src/protocol.ts";
 import { contentText } from "../../shared/src/reducer.ts";
+import { historyFromText, parseEntries } from "../../shared/src/session-file.ts";
+
+export { historyFromText };
 
 export type FileSummary = Omit<SessionSummary, "live" | "handleKind" | "state"> & { file: string };
-
-type Entry = Record<string, any>;
 
 export function sessionsDir(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
 	if (env.PI_CODING_AGENT_SESSION_DIR) return env.PI_CODING_AGENT_SESSION_DIR;
@@ -20,18 +21,6 @@ export function sessionsDir(env: NodeJS.ProcessEnv = process.env, home = homedir
 		if (typeof settings.sessionDir === "string" && settings.sessionDir) return settings.sessionDir.replace(/^~(?=\/|$)/, home);
 	} catch {}
 	return join(agentDir, "sessions");
-}
-
-function parseEntries(text: string): Entry[] {
-	const out: Entry[] = [];
-	for (const line of text.split("\n")) {
-		if (!line.trim()) continue;
-		try {
-			const v = JSON.parse(line);
-			if (v && typeof v === "object" && !Array.isArray(v)) out.push(v); // null, numbers, arrays are not entries
-		} catch {} // half-written or corrupt line
-	}
-	return out;
 }
 
 export function summarize(file: string, text: string, mtimeMs: number): FileSummary | null {
@@ -113,32 +102,6 @@ export class SessionIndex {
 	async find(id: string): Promise<FileSummary | null> {
 		return (await this.list()).find((s) => s.id === id) ?? null;
 	}
-}
-
-// Messages on the active branch: walk from the last entry back to the root.
-export function historyFromText(text: string): AgentMessage[] {
-	const entries = parseEntries(text);
-	const byId = new Map<string, Entry>();
-	for (const e of entries) if (e.id) byId.set(e.id, e);
-	const path: Entry[] = [];
-	const seen = new Set<Entry>();
-	for (let e = entries.findLast((x) => x.id); e && !seen.has(e); e = e.parentId ? byId.get(e.parentId) : undefined) {
-		seen.add(e); // a parentId cycle would otherwise loop forever
-		path.push(e);
-	}
-	path.reverse();
-	const out: AgentMessage[] = [];
-	for (const e of path) {
-		const ts = Date.parse(e.timestamp);
-		if (e.type === "message") {
-			const m = e.message;
-			if (m && typeof m === "object" && m.role !== "system") out.push(m);
-		}
-		else if (e.type === "compaction") out.push({ role: "compactionSummary", summary: e.summary, tokensBefore: e.tokensBefore, timestamp: ts });
-		else if (e.type === "branch_summary") out.push({ role: "branchSummary", summary: e.summary, timestamp: ts });
-		else if (e.type === "custom_message" && e.display) out.push({ role: "custom", customType: e.customType, content: e.content, display: true, timestamp: ts });
-	}
-	return out;
 }
 
 export async function readHistory(file: string): Promise<AgentMessage[]> {

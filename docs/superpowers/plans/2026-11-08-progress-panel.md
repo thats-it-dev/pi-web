@@ -106,7 +106,7 @@ export interface Goal { text: string; status: GoalStatus; waiting: boolean; upda
 export function goalFromEntries(entries: Array<{ type?: string; customType?: string; data?: unknown }>): Goal | null;
 ```
 
-- [ ] **Step 1: Write the failing tests** in `shared/test/progress.test.ts`. Each test builds a `Conversation` from a fixture (`historyFromText`) or replays `subagent-fg.rpc-events.jsonl` through `applyEvent`:
+- [x] **Step 1: Write the failing tests** in `shared/test/progress.test.ts`. Each test builds a `Conversation` from a fixture (`historyFromText`) or replays `subagent-fg.rpc-events.jsonl` through `applyEvent`:
   - `todos come from the latest todo result`: the `todo.jsonl` fixture yields the last snapshot's tasks, in order, with `activeForm` kept. A conversation with no `todo` results yields `todos === null`. Rows with `status: "deleted"` are left out.
   - `foreground child finished`: `subagent-fg.jsonl` with `live:false` gives one child with `state === "done"`, a non-empty `agent` and `task`, `background === false`, and `sessionFile` matching the fixture.
   - `running only while live`: replaying events up to (not including) `tool_execution_end` gives `state === "running"` with `live:true`, and `state === "unknown"` with `live:false` (**Review Focus 1**).
@@ -115,25 +115,25 @@ export function goalFromEntries(entries: Array<{ type?: string; customType?: str
   - `background child is unknown until status is read`: `subagent-bg.jsonl` gives `background === true`, `state === "unknown"` and `asyncDir` set.
   - `groupSubagents`: children in turns 1, 1, 3 plus a background child in turn 1 with state `running` give `recent` = the turn-3 child plus the running background child, and `earlier` = the other two, newest (highest turn, then highest index) first.
   - `planPath`: the most recent `read`/`edit`/`write` call whose `args.path` matches `PLAN_PATH_RE` wins. Paths elsewhere (e.g. `docs/notes.md`) are ignored, and there's `null` when none match.
-- [ ] **Step 2: Write the failing tests** in `shared/test/plan.test.ts`:
+- [x] **Step 2: Write the failing tests** in `shared/test/plan.test.ts`:
   - `### Task 1: A` with 2 boxes (1 ticked) and `### Task 2: B` with 3 unticked gives `tasks = [{title:"Task 1: A",done:1,total:2},{title:"Task 2: B",done:0,total:3}]`, `current === 0`, and `title` from the first `# ` heading.
   - All ticked gives `current === null`.
   - No `### Task` headings gives `tasks: []` and `current: null` (show nothing rather than a wrong step).
   - Boxes inside fenced code blocks are not counted (plans quote checkbox syntax in code).
-- [ ] **Step 3: Write the failing tests** in `shared/test/goal.test.ts`: the `goal.jsonl` entries give the final goal with `status === "complete"`. The latest entry with `goal: null` gives `null`, except that a `goal: null` entry directly after a `complete` entry (what pi really writes on `goal_complete`) keeps that complete goal. A malformed `data` gives `null`. A goal with a `waiting` field gives `waiting: true`.
-- [ ] **Step 4: Run the tests and confirm they fail**
+- [x] **Step 3: Write the failing tests** in `shared/test/goal.test.ts`: the `goal.jsonl` entries give the final goal with `status === "complete"`. The latest entry with `goal: null` gives `null`, except that a `goal: null` entry directly after a `complete` entry (what pi really writes on `goal_complete`) keeps that complete goal. A malformed `data` gives `null`. A goal with a `waiting` field gives `waiting: true`.
+- [x] **Step 4: Run the tests and confirm they fail**
 
 Run: `npm test -w shared`
 Expected: FAIL (modules not found)
 
-- [ ] **Step 5: Implement `progress.ts`, `plan.ts` and `goal.ts`** to the signatures above. Walk `conv.messages` in order, counting user messages for `turn`. Take toolCall timestamps from the containing assistant message and `endedAt` from the toolResult message. Overlay `conv.tools[toolCallId]` (running, `partialResult`, `result`) on top. A toolCall without a result is `running` only when `opts.live && conv.tools[id]?.running`, otherwise `unknown`.
-- [ ] **Step 6: Export `branchEntries`** from `hub/src/sessions.ts`. Refactor `historyFromText` to use it.
-- [ ] **Step 7: Run the tests and confirm they pass**
+- [x] **Step 5: Implement `progress.ts`, `plan.ts` and `goal.ts`** to the signatures above. Walk `conv.messages` in order, counting user messages for `turn`. Take toolCall timestamps from the containing assistant message and `endedAt` from the toolResult message. Overlay `conv.tools[toolCallId]` (running, `partialResult`, `result`) on top. A toolCall without a result is `running` only when `opts.live && conv.tools[id]?.running`, otherwise `unknown`.
+- [x] **Step 6: Export `branchEntries`** from `hub/src/sessions.ts`. Refactor `historyFromText` to use it.
+- [x] **Step 7: Run the tests and confirm they pass**
 
 Run: `npm test -w shared && npm test -w hub && npm run typecheck`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add shared/src/progress.ts shared/src/plan.ts shared/src/goal.ts shared/test hub/src/sessions.ts
