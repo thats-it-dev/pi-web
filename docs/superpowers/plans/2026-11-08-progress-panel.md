@@ -158,24 +158,24 @@ git commit -m "feat(shared): derive to-dos, subagents, plan and goal from a sess
 
 Parent conv: `registry.get(id)?.snapshot().conv` with `live: true`, else `createConversation(await readHistory(file))` with `live: false`. Map the status.json `state` values recorded in Task 1's `NOTES.md` onto `ChildState`.
 
-- [ ] **Step 1: Write the failing tests** in `hub/test/progress-routes.test.ts`, set up the way `hub/test/server.test.ts` does (temp sessions dir, `SessionIndex`, `Registry`, `createHubServer`, `call(...)` with the `GOOD` headers). Copy Task 1's fixtures in as session files, with `/FIXTURE` rewritten to the temp root:
+- [x] **Step 1: Write the failing tests** in `hub/test/progress-routes.test.ts`, set up the way `hub/test/server.test.ts` does (temp sessions dir, `SessionIndex`, `Registry`, `createHubServer`, `call(...)` with the `GOOD` headers). Copy Task 1's fixtures in as session files, with `/FIXTURE` rewritten to the temp root:
   - `goal`: the fixture session gives the `complete` goal; a session with no goal entries gives `{goal:null}`; an unknown id gives 404.
   - `plan`: `docs/superpowers/plans/p.md` under the cwd gives its text. `../outside.md`, `/etc/hosts`, `notes.txt`, a symlink `docs/superpowers/plans/evil.md → <root>/secret.md`, and a 600 KB `.md` all give 404 (**Review Focus 3**).
   - `subagents`: the background fixture with `status.json` `state` set to a running value gives `running`, and a terminal success value gives `done`. With the asyncDir deleted, `status.json` = `"{"`, or `state: "weird"`, it gives `unknown` (**Review Focus 5**).
   - `child history`: a valid key gives the child transcript's messages. A key not in the list, the key of a child from a *different* session, and `..%2F` all give 404 without touching the filesystem outside the recorded `sessionFile` (**Review Focus 4**).
-  - `children stay out of the sidebar` (only if Task 1's NOTES say child files land in the indexed dir): a child session file seeded beside its parent is missing from `GET /api/sessions`. Filter it in `listSessions` in `server.ts`, using the marker NOTES identified (e.g. `parentSession` plus the pi-subagents session name).
-- [ ] **Step 2: Run the tests and confirm they fail**
+  - ~~`children stay out of the sidebar`~~ SKIPPED: Task 1 found child sessions are nested too deep to be indexed and carry no `parentSession` (only if Task 1's NOTES say child files land in the indexed dir): a child session file seeded beside its parent is missing from `GET /api/sessions`. Filter it in `listSessions` in `server.ts`, using the marker NOTES identified (e.g. `parentSession` plus the pi-subagents session name).
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `node --test hub/test/progress-routes.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: Implement `hub/src/progress-routes.ts`** and wire it into `server.ts`.
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 3: Implement `hub/src/progress-routes.ts`** and wire it into `server.ts`.
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `npm test -w hub && npm run typecheck`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add hub/src/progress-routes.ts hub/src/server.ts hub/test/progress-routes.test.ts

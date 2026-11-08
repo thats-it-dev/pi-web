@@ -25,6 +25,7 @@ import { type SessionIndex, knownCwds, readHistory } from "./sessions.ts";
 import type { Updater } from "./update.ts";
 import type { WatchService } from "./watch.ts";
 import type { launchOnPhone } from "./watch-launch.ts";
+import { routeProgress } from "./progress-routes.ts";
 import { routeWatch } from "./watch-routes.ts";
 
 export interface HubDeps {
@@ -151,6 +152,8 @@ export function createHubServer(deps: HubDeps): Server {
 			res.end(img.bytes);
 			return;
 		}
+
+		if (await routeProgress(req, res, new URL(req.url ?? "/", "http://hub"), { registry, index, cors })) return;
 
 		const sm = p.match(/^\/api\/sessions\/([\w.-]+)\/(history|stream|commands|close|files)$/);
 		if (sm) {
