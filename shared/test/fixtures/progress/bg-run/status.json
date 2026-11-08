@@ -1,0 +1,230 @@
+{
+ "lifecycleArtifactVersion": 3,
+ "runId": "d43cb787-c955-4641-b6b1-e3cd32980cb8",
+ "sessionId": "/FIXTURE/sessions/--FIXTURE-work-bg--/2026-11-08T22-11-04-790Z_01a1bd37-0fd5-7621-b114-82eba7609d10.jsonl",
+ "completionOwnerId": "8624d392-35d1-4a2c-9271-27d7001f890e",
+ "mode": "single",
+ "state": "complete",
+ "steering": {
+  "requested": 0,
+  "scheduled": 0,
+  "pending": 0,
+  "delivered": 0,
+  "failed": 0,
+  "recovered": 0,
+  "recent": []
+ },
+ "lastActivityAt": 1794175929343,
+ "startedAt": 1794175884730,
+ "lastUpdate": 1794175934353,
+ "timeoutMs": 1800000,
+ "deadlineAt": 1794177684152,
+ "pid": 3185618,
+ "pidNamespaceScope": "pid:[4026531836]",
+ "cwd": "/FIXTURE/work-bg",
+ "currentStep": 0,
+ "chainStepCount": 1,
+ "parallelGroups": [],
+ "launchContractDigest": "70d8e29c24b0ed6d44bc3f0026bf122dba4076724729bd25f916bb0f4d5e15ed",
+ "launchResolvedExtensions": {
+  "version": 1,
+  "source": "launch-resolved",
+  "disableAmbientExtensions": false,
+  "runtime": [
+   "sha256:49054e7c37e9a225"
+  ],
+  "configured": [],
+  "required": [],
+  "effective": [
+   "sha256:49054e7c37e9a225"
+  ],
+  "omitted": {
+   "runtime": 0,
+   "configured": 0,
+   "required": 0,
+   "effective": 0
+  }
+ },
+ "runFanoutBudget": {
+  "used": 1,
+  "limit": 64,
+  "remaining": 63
+ },
+ "processTerminal": {
+  "version": 1,
+  "state": "pending",
+  "runId": "d43cb787-c955-4641-b6b1-e3cd32980cb8",
+  "runnerProcessInstanceId": "e07ae437-6e28-4fa1-8c1d-b78cb1efba77"
+ },
+ "steps": [
+  {
+   "agent": "scout",
+   "sessionName": "scout: List the file names in the current directory, then reply ...",
+   "description": "[prompt redacted]",
+   "context": "fresh",
+   "launchContractDigest": "70d8e29c24b0ed6d44bc3f0026bf122dba4076724729bd25f916bb0f4d5e15ed",
+   "launchResolvedExtensions": {
+    "version": 1,
+    "source": "launch-resolved",
+    "disableAmbientExtensions": false,
+    "runtime": [
+     "sha256:49054e7c37e9a225"
+    ],
+    "configured": [],
+    "required": [],
+    "effective": [
+     "sha256:49054e7c37e9a225"
+    ],
+    "omitted": {
+     "runtime": 0,
+     "configured": 0,
+     "required": 0,
+     "effective": 0
+    }
+   },
+   "status": "complete",
+   "sessionFile": "/FIXTURE/sessions/--FIXTURE-work-bg--/2026-11-08T22-11-04-790Z_01a1bd37-0fd5-7621-b114-82eba7609d10/5b56d81d-339a-4cbc-8500-92913eb4e0ec/run-0/session.jsonl",
+   "transcriptPath": "/FIXTURE/sessions/--FIXTURE-work-bg--/subagent-artifacts/d43cb787-c955-4641-b6b1-e3cd32980cb8_scout_transcript.jsonl",
+   "skills": [],
+   "model": "spark/qwen3.8-flash-next:low",
+   "contextLimit": 500000,
+   "thinking": "low",
+   "requestedModel": "spark/qwen3.8-flash-next",
+   "recentTools": [
+    {
+     "tool": "ls",
+     "args": ".",
+     "endMs": 1794175892266
+    },
+    {
+     "tool": "write",
+     "args": "/FIXTURE/sessions/--FIXTURE-work-x--",
+     "endMs": 1794175912468
+    }
+   ],
+   "recentOutput": [
+    "Done. Current directory contains one entry: `.pi-lens-probe-home/` (a directory). Findings written to the output path."
+   ],
+   "processTerminal": {
+    "version": 1,
+    "state": "pending",
+    "runId": "d43cb787-c955-4641-b6b1-e3cd32980cb8",
+    "runnerProcessInstanceId": "e07ae437-6e28-4fa1-8c1d-b78cb1efba77"
+   },
+   "startedAt": 1794175884734,
+   "lastActivityAt": 1794175929343,
+   "turnCount": 3,
+   "tokens": {
+    "input": 12527,
+    "output": 953,
+    "total": 13480,
+    "window": 7732,
+    "windowPeak": 7732
+   },
+   "toolCount": 2,
+   "endedAt": 1794175934351,
+   "durationMs": 49617,
+   "exitCode": 0,
+   "totalCost": {
+    "inputTokens": 12527,
+    "outputTokens": 953,
+    "costUsd": 0
+   },
+   "acceptance": {
+    "status": "attested",
+    "evidenceStatus": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+     "level": "attested",
+     "explicit": false,
+     "inferredReason": [
+      "default lightweight attestation"
+     ],
+     "criteria": [
+      {
+       "id": "criterion-1",
+       "must": "Return a concise result and residual risks when applicable",
+       "evidence": [
+        "manual-notes",
+        "residual-risks"
+       ],
+       "severity": "required"
+      }
+     ],
+     "evidence": [
+      "manual-notes",
+      "residual-risks"
+     ],
+     "verify": [],
+     "stopRules": []
+    },
+    "inferredReason": [
+     "default lightweight attestation"
+    ],
+    "criteria": [
+     {
+      "id": "criterion-1",
+      "must": "Return a concise result and residual risks when applicable",
+      "evidence": [
+       "manual-notes",
+       "residual-risks"
+      ],
+      "severity": "required"
+     }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+     "criteriaSatisfied": [
+      {
+       "id": "criterion-1",
+       "status": "satisfied",
+       "evidence": "Listed directory (1 entry: .pi-lens-probe-home/) and wrote findings to the authoritative output path."
+      }
+     ],
+     "changedFiles": [],
+     "testsAddedOrUpdated": [],
+     "commandsRun": [
+      {
+       "command": "ls .",
+       "result": "passed",
+       "summary": "Only entry is .pi-lens-probe-home/"
+      }
+     ],
+     "validationOutput": [
+      "Successfully wrote /FIXTURE/sessions/--FIXTURE-work-bg--/subagent-artifacts/outputs/d43cb787-c955-4641-b6b1-e3cd32980cb8/context.md"
+     ],
+     "residualRisks": [
+      "Working directory is effectively empty; if scouting was meant to cover real source code, the intended target path is elsewhere and needs confirmation."
+     ],
+     "noStagedFiles": true,
+     "diffSummary": "No code changes; only the scout artifact was written.",
+     "reviewFindings": [
+      "no blockers"
+     ],
+     "manualNotes": "Nothing to scout at the cwd root besides .pi-lens-probe-home/. Parent should redirect to the actual repo path if code context is needed."
+    }
+   }
+  }
+ ],
+ "artifactsDir": "/FIXTURE/sessions/--FIXTURE-work-bg--/subagent-artifacts",
+ "sessionDir": "/FIXTURE/sessions/--FIXTURE-work-bg--/2026-11-08T22-11-04-790Z_01a1bd37-0fd5-7621-b114-82eba7609d10/5b56d81d-339a-4cbc-8500-92913eb4e0ec/async-d43cb787-c955-4641-b6b1-e3cd32980cb8",
+ "outputFile": "/FIXTURE/tmp/pi-subagents/async-subagent-runs/d43cb787-c955-4641-b6b1-e3cd32980cb8/output-0.log",
+ "totalTokens": {
+  "input": 12527,
+  "output": 953,
+  "total": 13480,
+  "window": 7732,
+  "windowPeak": 7732
+ },
+ "turnCount": 3,
+ "toolCount": 2,
+ "outputs": {},
+ "endedAt": 1794175934353,
+ "sessionFile": "/FIXTURE/sessions/--FIXTURE-work-bg--/2026-11-08T22-11-04-790Z_01a1bd37-0fd5-7621-b114-82eba7609d10/5b56d81d-339a-4cbc-8500-92913eb4e0ec/run-0/session.jsonl",
+ "totalCost": {
+  "inputTokens": 12527,
+  "outputTokens": 953,
+  "costUsd": 0
+ }
+}

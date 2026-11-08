@@ -81,7 +81,7 @@ export type ChildState = "running" | "done" | "failed" | "stopped" | "unknown";
 export interface SubagentChild {
   key: string;            // `${toolCallId}:${index}`
   toolCallId: string; index: number;
-  agent: string; task: string;
+  agent: string; task: string;   // task from the toolCall's arguments.task: results[].task is the literal "[prompt redacted]"
   state: ChildState;
   background: boolean;
   turn: number;           // number of user messages before the spawning toolCall
@@ -100,6 +100,8 @@ export function parsePlan(markdown: string): PlanDoc;
 
 // shared/src/goal.ts
 export type GoalStatus = "active" | "paused" | "blocked" | "usage_limited" | "budget_limited" | "complete";
+// Real pi writes `{goal:null}` right after a `complete` entry (see fixtures NOTES.md), so a null that
+// immediately follows a complete goal keeps the complete goal; any other null gives null.
 export interface Goal { text: string; status: GoalStatus; waiting: boolean; updatedAt: number | null }
 export function goalFromEntries(entries: Array<{ type?: string; customType?: string; data?: unknown }>): Goal | null;
 ```
@@ -118,7 +120,7 @@ export function goalFromEntries(entries: Array<{ type?: string; customType?: str
   - All ticked gives `current === null`.
   - No `### Task` headings gives `tasks: []` and `current: null` (show nothing rather than a wrong step).
   - Boxes inside fenced code blocks are not counted (plans quote checkbox syntax in code).
-- [ ] **Step 3: Write the failing tests** in `shared/test/goal.test.ts`: the `goal.jsonl` entries give the final goal with `status === "complete"`. The latest entry with `goal: null` gives `null`. A malformed `data` gives `null`. A goal with a `waiting` field gives `waiting: true`.
+- [ ] **Step 3: Write the failing tests** in `shared/test/goal.test.ts`: the `goal.jsonl` entries give the final goal with `status === "complete"`. The latest entry with `goal: null` gives `null`, except that a `goal: null` entry directly after a `complete` entry (what pi really writes on `goal_complete`) keeps that complete goal. A malformed `data` gives `null`. A goal with a `waiting` field gives `waiting: true`.
 - [ ] **Step 4: Run the tests and confirm they fail**
 
 Run: `npm test -w shared`
