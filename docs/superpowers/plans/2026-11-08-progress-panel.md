@@ -224,24 +224,24 @@ Behaviour (implement exactly):
 - Subagents: while any background child is `unknown` or `running`, poll `subagents()` every 3 s and merge each background child's `state`/`startedAt`/`endedAt` by `key`. Stop polling once all are terminal or on `stop()`.
 - Fetch errors keep the last good value. They never turn a terminal state back into `running`.
 
-- [ ] **Step 1: Write the failing tests** (vitest, fake timers, a fake api, and a real `SessionStore` fed `setHistory`/`apply`):
+- [x] **Step 1: Write the failing tests** (vitest, fake timers, a fake api, and a real `SessionStore` fed `setHistory`/`apply`):
   - `activity follows the snapshot`: an open dialog gives `waiting`, streaming gives `working`, neither gives `idle`.
   - `goal refetches on settle`: streaming true→false triggers a second `goal()` call.
   - `plan refetches after an edit to it`: a `tool_execution_end` for `edit` with that `path` triggers a second `plan()` call, while an edit to another file doesn't.
   - `background polling stops when terminal`: the fake api returns `running` then `done`. After `done` and advancing 10 s, no further `subagents()` calls are made.
   - `stream drops mid-run`: the session store gets `handle_gone`, so status leaves `live` and a previously `running` foreground child becomes `unknown` (**Review Focus 1**).
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `npm test -w app -- progress-store`
 Expected: FAIL
 
-- [ ] **Step 3: Implement the API methods and `ProgressStore`.**
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 3: Implement the API methods and `ProgressStore`.**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `npm test -w app && npm run typecheck -w app`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/lib/api.ts app/src/lib/progress-store.ts app/src/lib/progress-store.test.ts

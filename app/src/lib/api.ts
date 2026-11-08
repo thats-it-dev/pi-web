@@ -1,3 +1,5 @@
+import type { Goal } from "../../../shared/src/goal.ts";
+import type { SubagentChild } from "../../../shared/src/progress.ts";
 import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
 export class HubError extends Error {
@@ -71,6 +73,18 @@ export class HubApi {
 	}
 	files(id: string, q: string, signal?: AbortSignal) {
 		return this.req<{ files: FileEntry[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/files?q=${encodeURIComponent(q)}`, undefined, signal);
+	}
+	goal(id: string) {
+		return this.req<{ goal: Goal | null }>("GET", `/api/sessions/${encodeURIComponent(id)}/goal`);
+	}
+	plan(id: string, path: string) {
+		return this.req<{ path: string; text: string; mtimeMs: number }>("GET", `/api/sessions/${encodeURIComponent(id)}/plan?path=${encodeURIComponent(path)}`);
+	}
+	subagents(id: string) {
+		return this.req<{ children: SubagentChild[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/subagents`);
+	}
+	childHistory(id: string, key: string) {
+		return this.req<{ messages: AgentMessage[]; child: SubagentChild }>("GET", `/api/sessions/${encodeURIComponent(id)}/subagents/${encodeURIComponent(key)}/history`);
 	}
 	close(id: string) {
 		return this.req<{ ok: true }>("POST", `/api/sessions/${encodeURIComponent(id)}/close`, {});
