@@ -161,3 +161,11 @@ test("planPath: latest read/edit/write on a plan file wins", () => {
 	assert.ok(PLAN_PATH_RE.test("docs/superpowers/plans/x.md"));
 	assert.ok(!PLAN_PATH_RE.test("docs/superpowers/plans/sub/x.md.bak"));
 });
+
+test("a pending call without an async arg is a background run, never running", () => {
+	const c = createConversation([user(), call("s1", "subagent", { agent: "scout", task: "look" })]);
+	applyEvent(c, { type: "tool_execution_start", toolCallId: "s1", toolName: "subagent", args: {} });
+	const k = deriveProgress(c, { live: true }).subagents[0];
+	assert.equal(k.background, true);
+	assert.equal(k.state, "unknown");
+});

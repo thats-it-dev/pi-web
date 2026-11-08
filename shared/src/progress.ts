@@ -82,13 +82,14 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 	for (const call of pending) {
 		const msg = results.get(call.id);
 		const run = conv.tools[call.id];
+		// Async is pi-subagents' default, so a pending call without `async: false` is a background run.
 		// Finished only once a result exists; exitCode is already 0 while a child runs.
 		const finished = !!msg || (run?.running === false && !!run.result);
 		const details = rec(msg ? msg.details : (run?.result ?? run?.partialResult)?.details) ?? {};
 		const rs: any[] = Array.isArray(details.results) ? details.results : [];
 		const progress: any[] = Array.isArray(details.progress) ? details.progress : [];
 		const asyncDir = str(details.asyncDir);
-		const background = !!asyncDir || !!str(details.asyncId) || (!finished && call.args?.async === true);
+		const background = !!asyncDir || !!str(details.asyncId) || (!finished && call.args?.async !== false);
 		const specs = specsFromArgs(call.args);
 		const count = Math.max(specs.length, rs.length, progress.length, 1);
 		const isError = msg ? !!msg.isError : !!run?.isError;

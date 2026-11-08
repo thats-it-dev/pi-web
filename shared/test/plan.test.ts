@@ -27,3 +27,9 @@ test("boxes in fenced code are ignored", () => {
 	const md = "### Task 1: A\n- [ ] real\n```md\n- [ ] quoted\n- [x] quoted\n```\n";
 	assert.deepEqual(parsePlan(md).tasks, [{ title: "Task 1: A", done: 0, total: 1 }]);
 });
+
+test("boxes under a later non-Task heading do not count toward the last task", () => {
+	const md = "### Task 1: A\n- [x] a\n\n## Self-review\n- [ ] check\n- [ ] more\n";
+	assert.deepEqual(parsePlan(md).tasks, [{ title: "Task 1: A", done: 1, total: 1 }]);
+	assert.equal(parsePlan(md).current, null);
+});
