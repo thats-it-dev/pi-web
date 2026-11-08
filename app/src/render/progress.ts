@@ -116,7 +116,7 @@ export const progressStyles = css`
 	.progress .file { padding: 0 16px 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
 	.progress li, .progress .child { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 16px; font-size: 0.9rem; min-width: 0; color: var(--text-primary); text-align: left; }
 	.progress li { border-left: 2px solid transparent; padding-left: 14px; }
-	.progress .child { font: inherit; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+	.progress .child { font-family: inherit; font-weight: inherit; line-height: inherit; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 	.progress .child:hover { background: var(--panel); }
 	.progress .child[aria-current="true"] { background: var(--panel); box-shadow: inset 2px 0 0 var(--primary); }
 	.progress .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
