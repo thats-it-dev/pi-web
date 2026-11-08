@@ -69,6 +69,7 @@ export class PiSession extends LitElement {
 	private ticker: ReturnType<typeof setInterval> | undefined;
 	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
+	private mq = matchMedia(WIDE);
 	private swipeFrom: { x: number; y: number } | null = null;
 	private attaching = false; // the sheet closed for the file picker: leave the keyboard down
 
@@ -100,20 +101,22 @@ export class PiSession extends LitElement {
 		this.menuStep = "root";
 		this.forkPoints = [];
 		this.tucked = false;
-		this.wide = matchMedia(WIDE).matches;
+		this.wide = this.mq.matches;
 		this.progressOpen = false;
 		this.addEventListener("pi-open-plan", this.onOpenPlan);
 	}
 
 	connectedCallback(): void {
 		super.connectedCallback();
+		this.wide = this.mq.matches; // may have changed while detached
+		this.mq.removeEventListener("change", this.onWide); // no double add on reconnect
 		this.mq.addEventListener("change", this.onWide);
 		window.addEventListener("popstate", this.onPop);
 		this.addEventListener("touchstart", this.onTouchStart, { passive: true });
 		this.addEventListener("touchend", this.onTouchEnd, { passive: true });
+		this.addEventListener("touchcancel", this.onTouchCancel, { passive: true });
+		this.syncTicker();
 	}
-
-	private mq = matchMedia(WIDE);
 
 	willUpdate(changed: PropertyValues<this>): void {
 		if (changed.has("sessionId") && this.sessionId && this.sessionId !== this.store?.id) this.open(this.sessionId);
@@ -127,6 +130,7 @@ export class PiSession extends LitElement {
 		window.removeEventListener("popstate", this.onPop);
 		this.removeEventListener("touchstart", this.onTouchStart);
 		this.removeEventListener("touchend", this.onTouchEnd);
+		this.removeEventListener("touchcancel", this.onTouchCancel);
 		super.disconnectedCallback();
 	}
 
@@ -139,6 +143,7 @@ export class PiSession extends LitElement {
 		this.list?.setViewing(id);
 		this.loader = sessionImageLoader(this.api, store);
 		this.sheet = null;
+		if (this.progressOpen && history.state?.piProgress) history.back(); // no orphan entry when switching sessions
 		this.progressOpen = false;
 		this.atBottom = true;
 		this.tucked = false;
@@ -443,6 +448,10 @@ export class PiSession extends LitElement {
 		this.swipeFrom = e.touches.length === 1 && t && window.innerWidth - t.clientX <= EDGE ? { x: t.clientX, y: t.clientY } : null;
 	};
 
+	private onTouchCancel = () => {
+		this.swipeFrom = null;
+	};
+
 	private onTouchEnd = (e: TouchEvent) => {
 		const from = this.swipeFrom;
 		this.swipeFrom = null;
@@ -452,6 +461,7 @@ export class PiSession extends LitElement {
 		if (dx <= -SWIPE && Math.abs(t.clientY - from.y) < Math.abs(dx)) this.openProgress();
 	};
 
+	// A session has one plan (the store tracks the latest plan path), so the text comes from the store, not the event's path.
 	private onOpenPlan = () => {
 		if (this.progress?.planText != null) this.sheet = "plan";
 	};
@@ -552,7 +562,7 @@ export class PiSession extends LitElement {
 			</div>
 			${progress && this.wide ? html`<aside aria-label="Progress">${renderProgress(progress.view, opts(null))}</aside>` : nothing}
 			${progress && this.progressOpen && !this.wide
-				? html`<pi-progress-view .view=${progress.view} .now=${now} .modal=${this.sheet !== null} @pi-close-progress=${this.closeProgress}></pi-progress-view>`
+				? html`<pi-progress-view .view=${progress.view} .now=${now} .modal=${this.sheet !== null || s.dialogs.length > 0} @pi-close-progress=${this.closeProgress}></pi-progress-view>`
 				: nothing}
 			${dialog
 				? html`<tk-sheet open heading=${dialog.title || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>

@@ -100,10 +100,12 @@ describe("renderProgress", () => {
 });
 
 describe("badgeLabel", () => {
-	it("covers all four cases", () => {
+	it("covers every case, finished subagents included", () => {
 		expect(badgeLabel(empty())).toBeNull();
 		expect(badgeLabel({ ...empty(), empty: false, goal: { text: "g", status: "active", waiting: false, updatedAt: null } })).toBe("•");
 		expect(badgeLabel({ ...empty(), subagents: { recent: [child({ state: "running" }), child({ key: "x", state: "running" }), child({ key: "y" })], earlier: [] } })).toBe("◐ 2");
+		expect(badgeLabel({ ...empty(), subagents: { recent: [child()], earlier: [] } })).toBe("•");
+		expect(badgeLabel({ ...empty(), subagents: { recent: [], earlier: [child({ state: "failed" })] } })).toBe("•");
 		expect(badgeLabel({ ...empty(), todos: [todo(1, "completed"), todo(2, "pending"), todo(3, "deleted")] })).toBe("1/2");
 	});
 });

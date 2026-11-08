@@ -295,3 +295,21 @@ test("phone: a badge opens the full-screen progress view, Escape closes it", asy
 	await expect(view).toHaveCount(0);
 	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}`));
 });
+
+test("phone: finished subagents still get a badge", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone flow");
+	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
+	await expect(page.getByRole("button", { name: "Progress" })).toHaveText("•");
+});
+
+test("phone: the plan sheet opens above the progress view", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone flow");
+	await page.goto(`/#/s/${PLAN_SESSION}`);
+	await page.getByRole("button", { name: "Progress" }).click();
+	await page.locator("pi-progress-view").getByRole("button", { name: "open plan" }).click();
+	const sheet = page.locator("tk-sheet");
+	await expect(sheet).toContainText("Plan P");
+	await sheet.getByRole("button", { name: "Close" }).click(); // clickable, so nothing covers it
+	await expect(sheet).toHaveCount(0);
+	await expect(page.locator("pi-progress-view")).toBeVisible(); // Escape/close of the sheet left the view open
+});

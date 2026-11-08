@@ -60,7 +60,7 @@ export class PiProgressView extends LitElement {
 	private close = () => this.emit("pi-close-progress");
 
 	private onKey = (e: KeyboardEvent) => {
-		if (this.modal) return;
+		if (this.modal || e.defaultPrevented) return;
 		if (e.key === "Escape") this.close();
 		else if (e.key === "Tab") this.trap(e);
 	};

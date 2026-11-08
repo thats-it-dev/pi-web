@@ -24,7 +24,7 @@ export function badgeLabel(view: ProgressView): string | null {
 	}
 	const running = view.subagents.recent.concat(view.subagents.earlier).filter((c) => c.state === "running").length;
 	if (running) return `◐ ${running}`;
-	return view.goal || view.plan ? "•" : null;
+	return view.goal || view.plan || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
 }
 
 // At most `max` items, centred on `focus`; returns the slice and how many were left out.
