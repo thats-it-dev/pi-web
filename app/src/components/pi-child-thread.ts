@@ -76,8 +76,15 @@ export class PiChildThread extends LitElement {
 		if (changed.has("live")) this.syncPoll();
 	}
 
+	connectedCallback(): void {
+		super.connectedCallback();
+		// A reconnect (not the first connect, which willUpdate covers) resumes.
+		if (this.hasUpdated) void this.fetch();
+	}
+
 	disconnectedCallback(): void {
 		this.stopPoll();
+		this.busy = false;
 		this.seq++; // a response in flight is dropped
 		super.disconnectedCallback();
 	}

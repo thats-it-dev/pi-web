@@ -1,6 +1,14 @@
 export type Route = { name: "home" } | { name: "session"; id: string } | { name: "subagent"; id: string; key: string } | { name: "new" } | { name: "settings" };
 
 export function parseRoute(hash: string): Route {
+	try {
+		return parse(hash);
+	} catch {
+		return { name: "home" }; // a malformed %-escape
+	}
+}
+
+function parse(hash: string): Route {
 	const [path] = hash.replace(/^#\/?/, "").split("?");
 	const parts = path.split("/").filter(Boolean);
 	if (parts[0] === "s" && parts[1] && parts[2] === "sub" && parts[3]) return { name: "subagent", id: decodeURIComponent(parts[1]), key: decodeURIComponent(parts[3]) };

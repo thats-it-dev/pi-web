@@ -15,6 +15,10 @@ describe("routes", () => {
 		expect(parseRoute("#/s/abc/sub/call_1%3A0")).toEqual({ name: "subagent", id: "abc", key: "call_1:0" });
 		expect(parseRoute("#/s/abc/sub")).toEqual({ name: "session", id: "abc" });
 	});
+	it("falls back to home on a malformed escape", () => {
+		expect(parseRoute("#/s/abc/sub/%E0%A4%A")).toEqual({ name: "home" });
+		expect(parseRoute("#/s/%E0%A4%A")).toEqual({ name: "home" });
+	});
 	it("ignores a cwd query on the new-chat route", () => {
 		expect(parseRoute("#/new?cwd=/x")).toEqual({ name: "new" });
 		expect(hrefFor({ name: "new" })).toBe("#/new");

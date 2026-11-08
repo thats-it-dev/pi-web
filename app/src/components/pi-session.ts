@@ -84,6 +84,7 @@ export class PiSession extends LitElement {
 		progressStyles,
 		css`
 			:host { display: flex; min-height: 0; height: 100%; }
+			.chat > [hidden] { display: none !important; }
 			.chat { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 			aside { flex: none; width: 300px; border-left: 1px solid var(--line); overflow-y: auto; overscroll-behavior: contain; }
 			.plan-doc { font-size: 0.9rem; }
@@ -560,14 +561,17 @@ export class PiSession extends LitElement {
 		});
 		return html`
 			<div class="chat">
-				${this.childKey ? nothing : html`<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)} @pi-open-progress=${() => this.openProgress()}></pi-header>`}
+				<pi-header ?hidden=${Boolean(this.childKey)} .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)} @pi-open-progress=${() => this.openProgress()}></pi-header>
+				<!-- The chat stays mounted under a thread (hidden, so out of the tab order): the draft and scroll position survive. -->
 				${this.childKey
 					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"}></pi-child-thread>`
-					: html`<div class="scroll" @scroll=${this.onScroll}>
-						<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
-					</div>
-					${this.renderTray(snap)}
-					<pi-composer
+					: nothing}
+				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll}>
+					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
+				</div>
+				${this.childKey ? nothing : this.renderTray(snap)}
+				<pi-composer
+					?hidden=${Boolean(this.childKey)}
 					.streaming=${s.conv.streaming}
 					.detached=${s.status === "history"}
 					.items=${slashItems(snap?.commands ?? [])}
@@ -580,7 +584,7 @@ export class PiSession extends LitElement {
 					@pi-submit=${this.onSubmit}
 					@pi-abort=${this.onAbort}
 					@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
-				></pi-composer>`}
+				></pi-composer>
 			</div>
 			${progress && this.wide ? html`<aside aria-label="Progress">${renderProgress(progress.view, opts(this.childKey))}</aside>` : nothing}
 			${progress && this.progressOpen && !this.wide

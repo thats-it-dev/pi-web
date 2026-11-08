@@ -323,12 +323,24 @@ test("desktop: a subagent row opens its transcript read-only, back to parent ret
 	await expect(thread).toContainText("scout");
 	await expect(thread.getByText("read-only", { exact: true })).toBeVisible();
 	await expect(thread).toContainText("Child task: list the files here");
-	await expect(page.locator("textarea")).toHaveCount(0);
+	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
+	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await expect(aside.locator(".child")).toHaveAttribute("aria-current", "true"); // the column stays live and marks it
+	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await thread.getByRole("button", { name: "back to parent" }).click();
 	await expect(thread).toHaveCount(0);
 	await expect(page.locator("pi-composer")).toBeVisible();
 	await expect(page).toHaveURL(new RegExp(`#/s/${SUBAGENT_SESSION}$`));
+});
+
+test("desktop: an unsent draft survives a trip to a subagent thread", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
+	await page.getByLabel("Message").fill("half-written thought");
+	await page.locator("pi-session aside .child").click();
+	await expect(page.locator("pi-child-thread")).toContainText("Child task");
+	await page.locator("pi-child-thread").getByRole("button", { name: "back to parent" }).click();
+	await expect(page.getByLabel("Message")).toHaveValue("half-written thought");
 });
 
 test("phone: badge, row, thread full screen, back returns to the parent chat", async ({ page, isMobile }) => {
@@ -339,7 +351,8 @@ test("phone: badge, row, thread full screen, back returns to the parent chat", a
 	const thread = page.locator("pi-child-thread");
 	await expect(thread).toContainText("Child task: list the files here");
 	await expect(page.locator("pi-progress-view")).toHaveCount(0);
-	await expect(page.locator("textarea")).toHaveCount(0);
+	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
+	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await page.goBack(); // the progress entry was replaced: this lands on the parent chat
 	await expect(thread).toHaveCount(0);
 	await expect(page.locator("pi-composer")).toBeVisible();
