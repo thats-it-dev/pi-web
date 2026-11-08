@@ -105,3 +105,8 @@ export function blocksText(content: unknown): string {
 	if (!Array.isArray(content)) return "";
 	return contentText(content.filter((b) => b !== null && typeof b === "object") as AgentMessage["content"]);
 }
+
+export function formatElapsed(ms: number): string {
+	const s = Math.max(0, Math.floor(ms / 1000));
+	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}

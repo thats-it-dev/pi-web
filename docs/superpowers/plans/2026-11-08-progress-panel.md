@@ -270,19 +270,19 @@ Render rules:
 - `badgeLabel`: to-dos present gives `"done/total"`; else the running-subagent count gives `"◐ n"`; else a goal or plan gives `"•"`; else `null`.
 - When a list is long, keep the in-progress item visible: show at most 8 to-dos and 12 plan tasks, centred on the current one, with a `+n more` line.
 
-- [ ] **Step 1: Write the failing tests** (vitest + lit `render` into a detached div; assert on text and attributes): each section's presence and absence; the to-do count excludes `deleted`; an `unknown` child has `aria-label="unknown"` and never contains `◐`; clicking a subagent row calls `openChild` with its key; `badgeLabel` covers all four cases; the overflow keeps the current item visible with 20 to-dos and in-progress at index 15.
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 1: Write the failing tests** (vitest + lit `render` into a detached div; assert on text and attributes): each section's presence and absence; the to-do count excludes `deleted`; an `unknown` child has `aria-label="unknown"` and never contains `◐`; clicking a subagent row calls `openChild` with its key; `badgeLabel` covers all four cases; the overflow keeps the current item visible with 20 to-dos and in-progress at index 15.
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `npm test -w app -- render/progress`
 Expected: FAIL
 
-- [ ] **Step 3: Implement it.** Match `pi-sidebar.ts`'s spacing and typography (read it first). Use only the tokens in Global Constraints.
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 3: Implement it.** Match `pi-sidebar.ts`'s spacing and typography (read it first). Use only the tokens in Global Constraints.
+- [x] **Step 4: Run the tests and confirm they pass**
 
 Run: `npm test -w app`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/render/progress.ts app/src/render/progress.test.ts app/src/lib/format.ts

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "../../../shared/src/protocol.ts";
-import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatTokens, groupSessions, parseArgsRaw, relativeTime, sessionTitle, summarizeToolArgs, truncateOutput, wordCount } from "./format.ts";
+import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatElapsed, formatTokens, groupSessions, parseArgsRaw, relativeTime, sessionTitle, summarizeToolArgs, truncateOutput, wordCount } from "./format.ts";
 
 const s = (over: Partial<SessionSummary>): SessionSummary => ({
 	id: "x", cwd: "/home/m", name: null, firstPrompt: null, userMessages: 1, model: null, contextTokens: null,
@@ -79,5 +79,13 @@ describe("format", () => {
 		expect(blocksText(undefined)).toBe("");
 		expect(blocksText("hi")).toBe("hi");
 		expect(blocksText([null, { type: "text", text: "a" }])).toBe("a");
+	});
+});
+
+describe("formatElapsed", () => {
+	it("formats seconds and minutes", () => {
+		expect(formatElapsed(45_000)).toBe("45s");
+		expect(formatElapsed(72_000)).toBe("1m 12s");
+		expect(formatElapsed(-5)).toBe("0s");
 	});
 });
