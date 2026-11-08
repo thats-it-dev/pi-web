@@ -54,6 +54,7 @@ describe("renderProgress", () => {
 		const idx = ["goal", "plan", "to-dos", "subagents"].map((h) => f.text.indexOf(h));
 		expect(idx.every((i) => i >= 0)).toBe(true);
 		expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+		expect(f.html).toContain("<details>");
 		for (const t of ["ship it", "p.md", "1/2", "Doing two", "earlier (1)"]) expect(f.text).toContain(t);
 		click(f, "open-plan");
 		expect(opts.openPlan).toHaveBeenCalledWith("docs/superpowers/plans/p.md");
@@ -69,6 +70,7 @@ describe("renderProgress", () => {
 		const { f } = mount({ ...empty(), empty: false, subagents: { recent: [child({ state: "unknown", endedAt: null })], earlier: [] } });
 		expect(f.html).toMatch(/aria-label=unknown[^>]*>\?</);
 		expect(f.text).not.toContain("◐");
+		expect(f.text).not.toMatch(/\d+s/);
 	});
 
 	it("opens a child on click and marks the selected one", () => {
@@ -78,6 +80,14 @@ describe("renderProgress", () => {
 		expect(f.text).toContain("1m 39s");
 		click(f, 'class="child"');
 		expect(opts.openChild).toHaveBeenCalledWith("t:0");
+	});
+
+	it("shows the first plan tasks with +n more when current is null", () => {
+		const tasks = Array.from({ length: 20 }, (_, i) => ({ title: `T${i}`, done: 0, total: 1 }));
+		const { f } = mount({ ...empty(), empty: false, plan: { path: "docs/superpowers/plans/p.md", title: null, tasks, current: null } });
+		expect(f.html.match(/class="plan-task /g)!.length).toBe(12);
+		expect(f.text).toContain("T0 ");
+		expect(f.text).toContain("+8 more");
 	});
 
 	it("keeps the in-progress to-do visible when the list is long", () => {

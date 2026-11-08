@@ -28,7 +28,7 @@ export function badgeLabel(view: ProgressView): string | null {
 }
 
 // At most `max` items, centred on `focus`; returns the slice and how many were left out.
-function window<T>(items: T[], focus: number, max: number): { shown: T[]; more: number } {
+function windowAround<T>(items: T[], focus: number, max: number): { shown: T[]; more: number } {
 	if (items.length <= max) return { shown: items, more: 0 };
 	const start = Math.min(Math.max(0, focus - Math.floor(max / 2)), items.length - max);
 	return { shown: items.slice(start, start + max), more: items.length - max };
@@ -41,14 +41,14 @@ function goalSection(view: ProgressView) {
 	return html`<section>
 		<h2 class="label">goal</h2>
 		<p class="goal">${g.text}</p>
-		<span class="pill ${tone}">${g.status.replace("_", " ")}</span>
+		<span class="pill ${tone}">${g.status.replaceAll("_", " ")}</span>
 	</section>`;
 }
 
 function planSection(view: ProgressView, opts: ProgressOpts) {
 	const p = view.plan;
 	if (!p) return nothing;
-	const { shown, more } = window(p.tasks.map((t, i) => ({ t, i })), p.current ?? 0, MAX_PLAN);
+	const { shown, more } = windowAround(p.tasks.map((t, i) => ({ t, i })), p.current ?? 0, MAX_PLAN);
 	return html`<section>
 		<h2 class="label">plan</h2>
 		<div class="file">${p.path.split("/").pop()}</div>
@@ -66,7 +66,7 @@ function todoSection(view: ProgressView) {
 	if (!list.length) return nothing;
 	const done = list.filter((t) => t.status === "completed").length;
 	const focus = Math.max(0, list.findIndex((t) => t.status === "in_progress"));
-	const { shown, more } = window(list, focus, MAX_TODOS);
+	const { shown, more } = windowAround(list, focus, MAX_TODOS);
 	return html`<section>
 		<h2 class="label">to-dos <span class="count">${done}/${list.length}</span></h2>
 		<ul>
@@ -77,7 +77,7 @@ function todoSection(view: ProgressView) {
 }
 
 function childRow(c: SubagentChild, opts: ProgressOpts) {
-	const elapsed = c.startedAt == null ? "" : formatElapsed((c.endedAt ?? opts.now) - c.startedAt);
+	const elapsed = c.startedAt == null || (c.state === "unknown" && c.endedAt == null) ? "" : formatElapsed((c.endedAt ?? opts.now) - c.startedAt);
 	return html`<button class="child" aria-current=${c.key === opts.selectedKey ? "true" : nothing} @click=${() => opts.openChild(c.key)}>
 		<span class="glyph ${c.state}" role="img" aria-label=${c.state}>${GLYPH[c.state]}</span>
 		<span class="txt">${c.agent} · ${c.task}</span>
@@ -116,6 +116,7 @@ export const progressStyles = css`
 	.progress .file { padding: 0 16px 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
 	.progress li, .progress .child { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 16px; font-size: 0.9rem; min-width: 0; color: var(--text-primary); text-align: left; }
 	.progress li { border-left: 2px solid transparent; padding-left: 14px; }
+	.progress .child { font: inherit; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
 	.progress .child:hover { background: var(--panel); }
 	.progress .child[aria-current="true"] { background: var(--panel); box-shadow: inset 2px 0 0 var(--primary); }
 	.progress .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
