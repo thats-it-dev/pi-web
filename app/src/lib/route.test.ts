@@ -10,12 +10,17 @@ describe("routes", () => {
 		expect(parseRoute("#/settings")).toEqual({ name: "settings" });
 		expect(parseRoute("#/whatever")).toEqual({ name: "home" });
 	});
+	it("encodes a subagent key", () => {
+		expect(hrefFor({ name: "subagent", id: "abc", key: "call_1:0" })).toBe("#/s/abc/sub/call_1%3A0");
+		expect(parseRoute("#/s/abc/sub/call_1%3A0")).toEqual({ name: "subagent", id: "abc", key: "call_1:0" });
+		expect(parseRoute("#/s/abc/sub")).toEqual({ name: "session", id: "abc" });
+	});
 	it("ignores a cwd query on the new-chat route", () => {
 		expect(parseRoute("#/new?cwd=/x")).toEqual({ name: "new" });
 		expect(hrefFor({ name: "new" })).toBe("#/new");
 	});
 	it("round-trips", () => {
-		for (const r of [{ name: "home" }, { name: "session", id: "abc" }, { name: "new" }, { name: "settings" }] as const) {
+		for (const r of [{ name: "home" }, { name: "session", id: "abc" }, { name: "new" }, { name: "settings" }, { name: "subagent", id: "abc", key: "call_1:0" }] as const) {
 			expect(parseRoute(hrefFor(r))).toEqual(r);
 		}
 	});

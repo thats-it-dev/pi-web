@@ -24,6 +24,7 @@ import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
 import "./pi-header.ts";
 import "./pi-messages.ts";
+import "./pi-child-thread.ts";
 import "./pi-progress-view.ts";
 
 type Sheet = "model" | "stats" | "fork" | "menu" | "plan";
@@ -38,6 +39,7 @@ export class PiSession extends LitElement {
 		api: { attribute: false },
 		list: { attribute: false },
 		sessionId: { attribute: false },
+		childKey: { attribute: false },
 		home: { attribute: false },
 		version: { state: true },
 		sheet: { state: true },
@@ -50,6 +52,7 @@ export class PiSession extends LitElement {
 	declare api: HubApi;
 	declare list: ListStore | null;
 	declare sessionId: string;
+	declare childKey: string | null; // set: the chat area shows that subagent's transcript, read-only
 	declare home: string;
 	declare version: number;
 	declare sheet: Sheet | null;
@@ -95,6 +98,7 @@ export class PiSession extends LitElement {
 		super();
 		this.list = null;
 		this.sessionId = "";
+		this.childKey = null;
 		this.home = "";
 		this.version = 0;
 		this.sheet = null;
@@ -104,6 +108,7 @@ export class PiSession extends LitElement {
 		this.wide = this.mq.matches;
 		this.progressOpen = false;
 		this.addEventListener("pi-open-plan", this.onOpenPlan);
+		this.addEventListener("pi-open-child", this.onOpenChild);
 	}
 
 	connectedCallback(): void {
@@ -466,6 +471,21 @@ export class PiSession extends LitElement {
 		if (this.progress?.planText != null) this.sheet = "plan";
 	};
 
+	// On the phone the progress view sits on a history entry of its own. Replace that entry with the thread's,
+	// so Back from the thread lands on the parent chat, not on the progress view.
+	private onOpenChild = (e: Event) => {
+		const key = (e as CustomEvent<string>).detail;
+		const href = hrefFor({ name: "subagent", id: this.sessionId, key });
+		if (this.progressOpen && history.state?.piProgress) {
+			this.progressOpen = false;
+			location.replace(href);
+		} else {
+			this.progressOpen = false;
+			location.hash = href;
+		}
+		this.syncTicker();
+	};
+
 	private emit(type: string, detail: unknown): void {
 		this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
 	}
@@ -540,12 +560,14 @@ export class PiSession extends LitElement {
 		});
 		return html`
 			<div class="chat">
-				<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)} @pi-open-progress=${() => this.openProgress()}></pi-header>
-				<div class="scroll" @scroll=${this.onScroll}>
-					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
-				</div>
-				${this.renderTray(snap)}
-				<pi-composer
+				${this.childKey ? nothing : html`<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)} @pi-open-progress=${() => this.openProgress()}></pi-header>`}
+				${this.childKey
+					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"}></pi-child-thread>`
+					: html`<div class="scroll" @scroll=${this.onScroll}>
+						<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
+					</div>
+					${this.renderTray(snap)}
+					<pi-composer
 					.streaming=${s.conv.streaming}
 					.detached=${s.status === "history"}
 					.items=${slashItems(snap?.commands ?? [])}
@@ -558,11 +580,11 @@ export class PiSession extends LitElement {
 					@pi-submit=${this.onSubmit}
 					@pi-abort=${this.onAbort}
 					@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
-				></pi-composer>
+				></pi-composer>`}
 			</div>
-			${progress && this.wide ? html`<aside aria-label="Progress">${renderProgress(progress.view, opts(null))}</aside>` : nothing}
+			${progress && this.wide ? html`<aside aria-label="Progress">${renderProgress(progress.view, opts(this.childKey))}</aside>` : nothing}
 			${progress && this.progressOpen && !this.wide
-				? html`<pi-progress-view .view=${progress.view} .now=${now} .modal=${this.sheet !== null || s.dialogs.length > 0} @pi-close-progress=${this.closeProgress}></pi-progress-view>`
+				? html`<pi-progress-view .view=${progress.view} .now=${now} .selectedKey=${this.childKey} .modal=${this.sheet !== null || s.dialogs.length > 0} @pi-close-progress=${this.closeProgress}></pi-progress-view>`
 				: nothing}
 			${dialog
 				? html`<tk-sheet open heading=${dialog.title || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>

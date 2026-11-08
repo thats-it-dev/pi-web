@@ -346,19 +346,19 @@ git commit -m "feat(app): progress column on desktop, badge and full view on pho
   - `pi-child-thread`: a breadcrumb `<parent heading> › <agent> · <task>` with a `read-only` tag and the state glyph; the transcript via `renderConversation`; and a bottom bar `viewing a subagent · back to parent` that takes the place of the composer, with no input. While `child.state` is `running` or `unknown` *and* the parent is live, it polls `childHistory` every 2 s, and stops once the state is terminal.
   - `pi-open-child` → `location.hash = hrefFor({name:"subagent", id, key})`. On the phone this also closes `pi-progress-view`. Back to parent → `hrefFor({name:"session", id})`.
 
-- [ ] **Step 1: Write the failing tests:** `route.test.ts` round-trips `#/s/abc/sub/call_1%3A0`. In e2e on desktop, clicking the seeded subagent row shows the breadcrumb, the `read-only` tag and the child's first message, no textarea is present, and clicking "back to parent" returns to the chat. On the phone: badge → row → thread full screen → back.
-- [ ] **Step 2: Run the tests and confirm they fail**
+- [x] **Step 1: Write the failing tests:** `route.test.ts` round-trips `#/s/abc/sub/call_1%3A0`. In e2e on desktop, clicking the seeded subagent row shows the breadcrumb, the `read-only` tag and the child's first message, no textarea is present, and clicking "back to parent" returns to the chat. On the phone: badge → row → thread full screen → back.
+- [x] **Step 2: Run the tests and confirm they fail**
 
 Run: `npm test -w app -- route && npm run e2e -w app -- smoke`
 Expected: FAIL
 
-- [ ] **Step 3: Implement the route, `pi-child-thread` and the wiring.**
-- [ ] **Step 4: Run everything**
+- [x] **Step 3: Implement the route, `pi-child-thread` and the wiring.**
+- [x] **Step 4: Run everything**
 
 Run: `npm test && npm run typecheck && npm run e2e -w app`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src app/e2e

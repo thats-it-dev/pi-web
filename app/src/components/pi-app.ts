@@ -97,7 +97,7 @@ export class PiApp extends LitElement {
 		const r = this.route;
 		return html`
 			<tk-shell nav-label="Sessions">
-				<pi-sidebar slot="nav" .list=${this.list} .currentId=${r.name === "session" ? r.id : null}></pi-sidebar>
+				<pi-sidebar slot="nav" .list=${this.list} .currentId=${r.name === "session" || r.name === "subagent" ? r.id : null}></pi-sidebar>
 				${this.renderMain(r)}
 			</tk-shell>
 			<tk-toasts></tk-toasts>
@@ -106,7 +106,9 @@ export class PiApp extends LitElement {
 
 	private renderMain(r: Route) {
 		if (!this.api || r.name === "settings") return html`<pi-settings @pi-hub-changed=${this.connectHub}></pi-settings>`;
-		if (r.name === "session") return html`<pi-session .api=${this.api} .list=${this.list} .sessionId=${r.id} .home=${this.list?.home ?? ""}></pi-session>`;
+		// A subagent route is the same pi-session element: only childKey changes, so the parent's stream stays open.
+		if (r.name === "session" || r.name === "subagent")
+			return html`<pi-session .api=${this.api} .list=${this.list} .sessionId=${r.id} .childKey=${r.name === "subagent" ? r.key : null} .home=${this.list?.home ?? ""}></pi-session>`;
 		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
 		// home: launch() picks the route once the sessions are in; till then, a way to the sessions.
 		return html`<div class="waiting"><button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button></div>`;

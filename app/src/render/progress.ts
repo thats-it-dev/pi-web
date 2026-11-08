@@ -12,7 +12,7 @@ export interface ProgressOpts {
 
 const MAX_TODOS = 8;
 const MAX_PLAN = 12;
-const GLYPH: Record<ChildState, string> = { running: "◐", done: "✓", failed: "✕", stopped: "■", unknown: "?" };
+export const GLYPH: Record<ChildState, string> = { running: "◐", done: "✓", failed: "✕", stopped: "■", unknown: "?" };
 const ACTIVITY = { working: "working", idle: "idle", waiting: "waiting on you" } as const;
 
 const liveTodos = (todos: Todo[]) => todos.filter((t) => t.status !== "deleted");

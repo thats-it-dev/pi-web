@@ -313,3 +313,35 @@ test("phone: the plan sheet opens above the progress view", async ({ page, isMob
 	await expect(sheet).toHaveCount(0);
 	await expect(page.locator("pi-progress-view")).toBeVisible(); // Escape/close of the sheet left the view open
 });
+
+test("desktop: a subagent row opens its transcript read-only, back to parent returns", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
+	const aside = page.locator("pi-session aside");
+	await aside.locator(".child").click();
+	const thread = page.locator("pi-child-thread");
+	await expect(thread).toContainText("scout");
+	await expect(thread.getByText("read-only", { exact: true })).toBeVisible();
+	await expect(thread).toContainText("Child task: list the files here");
+	await expect(page.locator("textarea")).toHaveCount(0);
+	await expect(aside.locator(".child")).toHaveAttribute("aria-current", "true"); // the column stays live and marks it
+	await thread.getByRole("button", { name: "back to parent" }).click();
+	await expect(thread).toHaveCount(0);
+	await expect(page.locator("pi-composer")).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`#/s/${SUBAGENT_SESSION}$`));
+});
+
+test("phone: badge, row, thread full screen, back returns to the parent chat", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone flow");
+	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
+	await page.getByRole("button", { name: "Progress" }).click();
+	await page.locator("pi-progress-view .child").click();
+	const thread = page.locator("pi-child-thread");
+	await expect(thread).toContainText("Child task: list the files here");
+	await expect(page.locator("pi-progress-view")).toHaveCount(0);
+	await expect(page.locator("textarea")).toHaveCount(0);
+	await page.goBack(); // the progress entry was replaced: this lands on the parent chat
+	await expect(thread).toHaveCount(0);
+	await expect(page.locator("pi-composer")).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`#/s/${SUBAGENT_SESSION}$`));
+});

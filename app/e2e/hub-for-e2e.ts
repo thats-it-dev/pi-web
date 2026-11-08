@@ -42,6 +42,24 @@ for (const name of ["todo", "subagent-fg"]) {
 		.replaceAll("/FIXTURE", WORKDIR);
 	writeFileSync(join(seedDir, `${name}.jsonl`), text);
 }
+// The foreground child's own transcript, at the sessionFile the parent recorded.
+{
+	const parent = readFileSync(join(seedDir, "subagent-fg.jsonl"), "utf8");
+	const file = /"sessionFile": "([^"]+session\.jsonl)"/.exec(parent)?.[1];
+	if (!file) throw new Error("subagent-fg fixture has no child sessionFile");
+	mkdirSync(dirname(file), { recursive: true });
+	const t = "2026-11-08T22:11:30.000Z";
+	writeFileSync(
+		file,
+		[
+			{ type: "session", version: 3, id: "e2e-child", timestamp: t, cwd: WORKDIR },
+			{ type: "message", id: "c1", parentId: null, timestamp: t, message: { role: "user", content: [{ type: "text", text: "Child task: list the files here" }], timestamp: 1 } },
+			{ type: "message", id: "c2", parentId: "c1", timestamp: t, message: { role: "assistant", content: [{ type: "text", text: "Child reply: done" }], timestamp: 2 } },
+		]
+			.map((e) => JSON.stringify(e))
+			.join("\n") + "\n",
+	);
+}
 // A plan with two tasks, and a session that has written it.
 mkdirSync(join(WORKDIR, "docs", "superpowers", "plans"), { recursive: true });
 writeFileSync(join(WORKDIR, "docs", "superpowers", "plans", "p.md"), "# Plan P\n\n### Task 1: First\n\n- [x] **Step 1: one**\n- [ ] **Step 2: two**\n\n### Task 2: Second\n\n- [ ] **Step 1: three**\n");
