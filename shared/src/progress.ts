@@ -19,6 +19,7 @@ export interface SubagentChild {
 	endedAt: number | null; // ms epoch
 	sessionFile: string | null;
 	asyncDir: string | null;
+	runId: string | null; // the parent's recorded details.runId/asyncId (from partialResult while running); unvalidated
 }
 export interface Progress { todos: Todo[] | null; subagents: SubagentChild[]; planPath: string | null }
 
@@ -89,6 +90,7 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 		const rs: any[] = Array.isArray(details.results) ? details.results : [];
 		const progress: any[] = Array.isArray(details.progress) ? details.progress : [];
 		const asyncDir = str(details.asyncDir);
+		const runId = str(details.runId) ?? str(details.asyncId);
 		const background = !!asyncDir || !!str(details.asyncId) || (!finished && call.args?.async !== false);
 		const specs = specsFromArgs(call.args);
 		const count = Math.max(specs.length, rs.length, progress.length, 1);
@@ -114,6 +116,7 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 				endedAt: finished && !background ? endedAt : null,
 				sessionFile: str(r?.sessionFile),
 				asyncDir,
+				runId,
 			});
 		}
 	}

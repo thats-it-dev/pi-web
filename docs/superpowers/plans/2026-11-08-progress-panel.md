@@ -24,7 +24,7 @@
 
 1. **The pi process dies mid-subagent** (`handle_gone`, or the hub restarts). The child must show `unknown`, not `running`. Test in Task 2 (`live: false` with a running tool), plus a session-store case in Task 4.
 2. **Reload or reconnect mid-run.** History arrives first, with a `subagent` toolCall that has no toolResult, then the snapshot with `conv.tools` running. The child shows `unknown` until the snapshot arrives, then `running`. Test in Task 2.
-3. **Plan path escapes the cwd.** `../`, absolute paths, a symlink pointing outside, non-`.md` files and files over 512 KB must all return 404. Test in Task 3.
+3. **Plan path escapes the cwd.** `../`, absolute paths outside the cwd, a symlink pointing outside, non-`.md` files and files over 512 KB must all return 404. Test in Task 3.
 4. **Crafted child key.** A key that isn't in the parent's own derived subagent list, or a key from another session, returns 404 and reads nothing. Test in Task 3.
 5. **Missing or broken background status.** An `asyncDir` that's deleted, or a `status.json` that's corrupt or partly written, shows `unknown`, not `running`. Test in Task 3.
 

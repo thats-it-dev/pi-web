@@ -75,6 +75,7 @@ test("running only while live", () => {
 	assert.equal(live[0].state, "running");
 	assert.ok(live[0].agent);
 	assert.equal(live[0].sessionFile, null);
+	assert.equal(live[0].runId, "b47e8aef-3f75-4224-8e21-10f05486f2e4"); // from partialResult.details while running
 	assert.equal(live[0].endedAt, null);
 	assert.equal(deriveProgress(c, { live: false }).subagents[0].state, "unknown");
 	// the exitCode placeholder (0) during a run is never read as done
@@ -129,6 +130,16 @@ test("background child is unknown until status is read", () => {
 	assert.equal(p.subagents[0].state, "unknown");
 	assert.ok(p.subagents[0].asyncDir);
 	assert.equal(p.subagents[0].sessionFile, null);
+	assert.equal(p.subagents[0].runId, "d43cb787-c955-4641-b6b1-e3cd32980cb8");
+});
+
+test("runId comes from details.runId, else asyncId, else null", () => {
+	const mk = (details: Record<string, unknown>) =>
+		deriveProgress(createConversation([user(), call("s1", "subagent", { agent: "a", task: "t" }), result("s1", "subagent", details)]), { live: false }).subagents[0].runId;
+	assert.equal(mk({ runId: "r1", asyncId: "r2" }), "r1");
+	assert.equal(mk({ asyncId: "r2" }), "r2");
+	assert.equal(mk({}), null);
+	assert.equal(deriveProgress(conv("subagent-fg.jsonl"), { live: false }).subagents[0].runId, "b47e8aef-3f75-4224-8e21-10f05486f2e4");
 });
 
 test("turn counts user messages before the call", () => {
@@ -141,7 +152,7 @@ test("turn counts user messages before the call", () => {
 
 const child = (turn: number, index: number, over: Partial<SubagentChild> = {}): SubagentChild => ({
 	key: `c${turn}:${index}`, toolCallId: `c${turn}`, index, agent: "a", task: "t", state: "done", background: false, turn,
-	startedAt: null, endedAt: null, sessionFile: null, asyncDir: null, ...over,
+	startedAt: null, endedAt: null, sessionFile: null, asyncDir: null, runId: null, ...over,
 });
 
 test("groupSubagents", () => {

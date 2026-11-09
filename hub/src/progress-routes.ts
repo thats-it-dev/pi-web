@@ -3,11 +3,14 @@
 //   goal      the session file of the id (live handle or index)
 //   plan      one .md file whose real path stays under the session's real cwd
 //   subagents <asyncDir>/status.json, with asyncDir taken from the parent's recorded tool result
-//   history   the one sessionFile recorded for a child whose key the parent's own records produce
+//   history   for a child whose key the parent's own records produce, the first transcript that exists of:
+//             its recorded sessionFile; the sessionFile its status.json names (background); and the
+//             derived <parent file minus .jsonl>/<runId>/run-<index>/session.jsonl (runId from the
+//             parent's records), whose real path must stay under the parent session file's directory
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { goalFromEntries } from "../../shared/src/goal.ts";
 import { type ChildState, type SubagentChild, deriveProgress } from "../../shared/src/progress.ts";
 import { createConversation } from "../../shared/src/reducer.ts";
@@ -26,6 +29,8 @@ export interface ProgressDeps {
 const MAX_PLAN_BYTES = 512 * 1024;
 const MAX_STATUS_BYTES = 1024 * 1024;
 const notFound = (what: string) => new HttpError(404, `${what} not found`);
+const RUN_ID_RE = /^[\w-]+$/;
+const under = (base: string, p: string) => p.startsWith(base.endsWith(sep) ? base : base + sep);
 
 const STATE: Record<string, ChildState> = {
 	queued: "running",
@@ -59,7 +64,7 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 	};
 	const children = async (id: string): Promise<SubagentChild[]> => {
 		const { conv, live } = await parentConv(id);
-		return Promise.all(deriveProgress(conv, { live }).subagents.map(withStatus));
+		return Promise.all(deriveProgress(conv, { live }).subagents.map((c) => withStatus(c)));
 	};
 
 	if (m) {
@@ -88,20 +93,48 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 	// The key must be one the parent's own records produce; nothing is read before this.
 	const child = (await children(id)).find((c) => c.key === key);
 	if (!child) throw notFound("Subagent");
-	const file = child.sessionFile;
-	if (!file || !isAbsolute(file) || !file.endsWith(".jsonl")) throw notFound("Subagent transcript");
-	let messages;
-	try {
-		messages = await readHistory(file);
-	} catch {
-		throw notFound("Subagent transcript");
-	}
+	const messages = await childTranscript(child, (await located(id)).file);
+	if (!messages) throw notFound("Subagent transcript");
 	sendJson(res, 200, { messages, child }, cors);
 	return true;
 }
 
+const transcriptPath = (p: string | null): p is string => !!p && isAbsolute(p) && p.endsWith(".jsonl") && !p.includes("\0");
+
+// The child's transcript, or null while none of its candidate files exists yet. `child.sessionFile`
+// is the recorded one, or (background) the one its status.json names; the derived layout comes last.
+async function childTranscript(child: SubagentChild, parentFile: string | null): Promise<Awaited<ReturnType<typeof readHistory>> | null> {
+	if (transcriptPath(child.sessionFile)) {
+		try {
+			return await readHistory(child.sessionFile);
+		} catch {}
+	}
+	if (!parentFile || !parentFile.endsWith(".jsonl") || !child.runId || !RUN_ID_RE.test(child.runId)) return null;
+	const derived = join(parentFile.slice(0, -".jsonl".length), child.runId, `run-${child.index}`, "session.jsonl");
+	if (!transcriptPath(derived)) return null;
+	try {
+		const base = await realpath(dirname(parentFile));
+		if (!under(base, await realpath(derived))) return null;
+		return await readHistory(derived);
+	} catch {
+		return null;
+	}
+}
+
+// Whether a pid names no process at all (EPERM means it exists but isn't ours).
+function pidGone(pid: unknown): boolean {
+	if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return false;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === "ESRCH";
+	}
+}
+
 // Background children report through status.json; a foreground child keeps its derived state.
-async function withStatus(c: SubagentChild): Promise<SubagentChild> {
+// A queued/running report whose runner is gone (pid) or past its deadline is unconfirmable: unknown.
+async function withStatus(c: SubagentChild, now = Date.now()): Promise<SubagentChild> {
 	if (!c.background) return c;
 	const unknown = { ...c, state: "unknown" as const };
 	if (!c.asyncDir || !isAbsolute(c.asyncDir)) return unknown;
@@ -111,11 +144,20 @@ async function withStatus(c: SubagentChild): Promise<SubagentChild> {
 		const s = JSON.parse(await readFile(file, "utf8"));
 		if (!s || typeof s !== "object" || Array.isArray(s)) return unknown;
 		const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+		let state = (typeof s.state === "string" && Object.hasOwn(STATE, s.state) ? STATE[s.state] : "unknown") as ChildState;
+		if (state === "running") {
+			const deadline = num(s.deadlineAt);
+			if (pidGone(s.pid) || (deadline !== null && deadline < now)) state = "unknown";
+		}
+		const step = Array.isArray(s.steps) ? s.steps[c.index] : undefined;
+		const named = (v: unknown) => (typeof v === "string" && transcriptPath(v) ? v : null);
+		const sessionFile = c.sessionFile ?? named(step && typeof step === "object" ? step.sessionFile : null) ?? (c.index === 0 ? named(s.sessionFile) : null);
 		return {
 			...c,
-			state: (typeof s.state === "string" && Object.hasOwn(STATE, s.state) ? STATE[s.state] : "unknown") as ChildState,
+			state,
 			startedAt: num(s.startedAt) ?? c.startedAt,
 			endedAt: num(s.endedAt),
+			sessionFile,
 		};
 	} catch {
 		return unknown;
@@ -123,11 +165,12 @@ async function withStatus(c: SubagentChild): Promise<SubagentChild> {
 }
 
 async function readPlan(cwd: string, path: string | null): Promise<{ path: string; text: string; mtimeMs: number }> {
-	if (!cwd || !path || path.includes("\0") || isAbsolute(path) || !/\.md$/.test(path)) throw notFound("Plan");
+	if (!cwd || !path || path.includes("\0") || !/\.md$/.test(path)) throw notFound("Plan");
 	try {
 		const base = await realpath(cwd);
-		const real = await realpath(join(base, path));
-		if (!real.startsWith(base.endsWith(sep) ? base : base + sep)) throw notFound("Plan");
+		// An absolute path is fine as long as its real path is under the real cwd, like any other.
+		const real = await realpath(resolve(base, path));
+		if (!under(base, real)) throw notFound("Plan");
 		const st = await stat(real);
 		if (!st.isFile() || st.size > MAX_PLAN_BYTES) throw notFound("Plan");
 		return { path, text: await readFile(real, "utf8"), mtimeMs: st.mtimeMs };
