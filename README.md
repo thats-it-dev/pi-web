@@ -92,6 +92,15 @@ From the app you can watch the terminal session stream, prompt, steer and queue 
 
 pi can show an image in the conversation with its `show_image` tool: give it the path of a PNG, JPEG, GIF or WebP file (up to 2 MB, checked by content, not extension). The app shows it as a figure in the reply. Images load by reference: messages and history carry only a reference, and the app fetches the bytes when the figure scrolls into view. The `show-image` skill in `bridge/skills` tells pi when to use the tool.
 
+## Progress panel
+
+The progress panel shows the session's goal, plan, to-dos and subagents. On desktop (1200 px and up) it's a right-hand column. On the phone it's a header badge that opens a full-screen view, or swipe in from the right edge. Tapping a subagent opens its thread read-only. The hub serves this data through read-only routes: `/api/sessions/:id/goal`, `/plan`, `/subagents` and `/subagents/:key/history`. The plan section depends on agents ticking the checkboxes as they go; that instruction lives in `~/.pi/agent/AGENTS.md`, outside this repo.
+
+- **To-dos:** `todo` results from rpiv-todo.
+- **Subagents:** `subagent` results from pi-subagents, plus `status.json` for background runs.
+- **Goal:** `goal-state` session entries from pi-goal.
+- **Plan:** the most recent `docs/superpowers/plans/*.md` the agent read or edited.
+
 ## thatsit.app apps
 
 The `thatsit-app` pi skill builds small PWAs at `<name>.thatsit.app` from the app template and turns later changes into PRs with preview links. See [skills/thatsit-app/README.md](skills/thatsit-app/README.md) for install and usage.

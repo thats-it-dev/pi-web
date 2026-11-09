@@ -371,7 +371,7 @@ git commit -m "feat(app): open a subagent's thread read-only"
 - Create or modify: `~/.pi/agent/AGENTS.md`. Outside the repo, but pi loads it for every session; confirmed in pi 1.0.2 `docs/configuration.md` (context files). Check with `ls` that it doesn't already exist; if it does, append rather than overwrite.
 - Modify: `README.md` (one paragraph under a new "Progress panel" heading: what it shows, where the data comes from, and the AGENTS.md instruction)
 
-- [ ] **Step 1: Add this instruction verbatim** to `~/.pi/agent/AGENTS.md`:
+- [x] **Step 1: Add this instruction verbatim** to `~/.pi/agent/AGENTS.md`:
 
 ```markdown
 ## Plan files
@@ -379,9 +379,9 @@ git commit -m "feat(app): open a subagent's thread read-only"
 When you are executing a plan file (for example `docs/superpowers/plans/*.md`) that uses `- [ ]` checkboxes, change each step's `- [ ]` to `- [x]` in that file as soon as the step is done, before starting the next step. Do not tick a step you skipped or that failed.
 ```
 
-- [ ] **Step 2: Verify with a real run.** In a scratch git repo, write a 2-task / 5-step toy plan under `docs/superpowers/plans/` and run `pi -p "execute the plan in docs/superpowers/plans/toy.md"` on flash-auto. Expected: all 5 boxes are `[x]` afterwards. Then open that session in the dev app and confirm the plan section moved through the tasks. Run it twice. **If ticking fails in either run, stop and report to Michael with the session file. Don't guess at the current step.**
-- [ ] **Step 3: Live check of the whole panel:** start the dev hub and app, and run one real session that uses `todo`, a foreground `subagent`, a background `subagent` and `/goal`. Watch it live on desktop and phone. Kill the pi process mid-subagent and confirm the child turns `unknown` (**Review Focus 1**).
-- [ ] **Step 4: Commit the README** (AGENTS.md lives outside the repo; mention it in the commit body)
+- [ ] **Step 2: Verify with a real run.** In a scratch git repo, write a 2-task / 5-step toy plan under `docs/superpowers/plans/` and run `pi -p "execute the plan in docs/superpowers/plans/toy.md"` on flash-auto. Expected: all 5 boxes are `[x]` afterwards. Then open that session in the dev app and confirm the plan section moved through the tasks. Run it twice. **If ticking fails in either run, stop and report to Michael with the session file. Don't guess at the current step.** — handed to Michael to run manually (pi-permission-system blocks unattended runs)
+- [ ] **Step 3: Live check of the whole panel:** start the dev hub and app, and run one real session that uses `todo`, a foreground `subagent`, a background `subagent` and `/goal`. Watch it live on desktop and phone. Kill the pi process mid-subagent and confirm the child turns `unknown` (**Review Focus 1**). — handed to Michael to run manually (pi-permission-system blocks unattended runs)
+- [x] **Step 4: Commit the README** (AGENTS.md lives outside the repo; mention it in the commit body)
 
 ```bash
 git add README.md
