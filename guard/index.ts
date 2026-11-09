@@ -1,0 +1,31 @@
+// pi-web guard: a pi extension that blocks the slow or unsafe habits a local model falls into while
+// working on thatsit.app apps, and restarts a coding run that stops without a reply. Rules: rules.ts.
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { checkToolCall, NUDGE, NUDGE_TYPE, shouldNudge } from "./rules.ts";
+
+type PiApi = { on(event: string, handler: (event: any, ctx: { cwd: string }) => unknown): unknown };
+
+function hasScript(dir: string, name: string): boolean {
+	try {
+		return name in (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts ?? {});
+	} catch {
+		return false;
+	}
+}
+
+export default function piGuard(pi: PiApi): void {
+	const home = homedir();
+
+	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript }));
+
+	pi.on("agent_before_settle", (event) => {
+		// context.canContinue describes the context before these entries: it is false whenever the run ended on an
+		// assistant reply, which is exactly when a nudge is wanted. pi re-checks after appending the nudge.
+		if (event.outcome !== "completed") return undefined;
+		if (!shouldNudge(event.context.contextMessages ?? [])) return undefined;
+		return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
+	});
+}

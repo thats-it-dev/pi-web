@@ -1,0 +1,13 @@
+{
+	"name": "@pi-web/guard",
+	"private": true,
+	"type": "module",
+	"description": "pi extension: deterministic guardrails for app work (CI waiting, e2e runs, file rewrites) and stalled turns",
+	"keywords": ["pi-package"],
+	"pi": { "extensions": ["./index.ts"] },
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+}
