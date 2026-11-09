@@ -41,7 +41,7 @@ function goalSection(view: ProgressView) {
 	return html`<section>
 		<h2 class="label">goal</h2>
 		<p class="goal">${g.text}</p>
-		<span class="pill ${tone}">${g.status.replaceAll("_", " ")}</span>
+		<span class="pill ${tone}">${g.status.replaceAll("_", " ")}</span>${g.waiting ? html`<span class="pill waiting">waiting</span>` : nothing}
 	</section>`;
 }
 
@@ -49,9 +49,11 @@ function planSection(view: ProgressView, opts: ProgressOpts) {
 	const p = view.plan;
 	if (!p) return nothing;
 	const { shown, more } = windowAround(p.tasks.map((t, i) => ({ t, i })), p.current ?? 0, MAX_PLAN);
+	const untouched = p.tasks.some((t) => t.total > 0) && p.tasks.every((t) => t.done === 0);
 	return html`<section>
 		<h2 class="label">plan</h2>
 		<div class="file">${p.path.split("/").pop()}</div>
+		${untouched ? html`<div class="note">no steps ticked yet</div>` : nothing}
 		<ul>
 			${shown.map(({ t, i }) => html`<li class="plan-task ${i === p.current ? "current" : ""}"><span class="txt">${t.title}</span><span class="n">${t.done}/${t.total}</span></li>`)}
 		</ul>
@@ -113,6 +115,8 @@ export const progressStyles = css`
 	.progress .pill { display: inline-block; margin: 2px 16px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.72rem; color: var(--text-secondary); }
 	.progress .pill.ok { color: var(--success); border-color: var(--success); }
 	.progress .pill.warn { color: var(--accent); border-color: var(--accent); }
+	.progress .pill.waiting { margin-left: 0; }
+	.progress .note { padding: 0 16px 4px; font-size: 0.72rem; color: var(--text-muted); }
 	.progress .file { padding: 0 16px 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
 	.progress li, .progress .child { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 16px; font-size: 0.9rem; min-width: 0; color: var(--text-primary); text-align: left; }
 	.progress li { border-left: 2px solid transparent; padding-left: 14px; }

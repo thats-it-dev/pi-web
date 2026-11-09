@@ -6,7 +6,7 @@ import { badgeLabel, renderProgress } from "./progress.ts";
 
 const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, activity: "idle", empty: true });
 const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({
-	key: "t:0", toolCallId: "t", index: 0, agent: "worker", task: "do it", state: "done", background: false, turn: 0, startedAt: 1000, endedAt: 13_000, sessionFile: null, asyncDir: null, ...over,
+	key: "t:0", toolCallId: "t", index: 0, agent: "worker", task: "do it", state: "done", background: false, turn: 0, startedAt: 1000, endedAt: 13_000, sessionFile: null, asyncDir: null, runId: null, ...over,
 });
 const todo = (id: number, status: Todo["status"], over: Partial<Todo> = {}): Todo => ({ id, subject: `task ${id}`, status, ...over });
 
@@ -107,5 +107,22 @@ describe("badgeLabel", () => {
 		expect(badgeLabel({ ...empty(), subagents: { recent: [child()], earlier: [] } })).toBe("•");
 		expect(badgeLabel({ ...empty(), subagents: { recent: [], earlier: [child({ state: "failed" })] } })).toBe("•");
 		expect(badgeLabel({ ...empty(), todos: [todo(1, "completed"), todo(2, "pending"), todo(3, "deleted")] })).toBe("1/2");
+	});
+
+	it("a waiting goal gets a waiting pill next to its status", () => {
+		const g = { text: "ship it", status: "active" as const, waiting: true, updatedAt: null };
+		const { f } = mount({ ...empty(), empty: false, goal: g });
+		expect(f.html).toMatch(/pill [^"]*">active<\/span><span class="pill waiting">waiting<\/span>/);
+		expect(mount({ ...empty(), empty: false, goal: { ...g, waiting: false } }).f.html).not.toContain("pill waiting");
+	});
+
+	it("a plan with no step ticked says so and highlights no task", () => {
+		const plan = { path: "docs/superpowers/plans/p.md", title: "P", tasks: [{ title: "One", done: 0, total: 2 }, { title: "Two", done: 0, total: 3 }], current: null };
+		const { f } = mount({ ...empty(), empty: false, plan });
+		expect(f.text).toContain("no steps ticked yet");
+		expect(f.html).not.toContain("plan-task current");
+		const ticked = mount({ ...empty(), empty: false, plan: { ...plan, tasks: [{ title: "One", done: 1, total: 2 }, plan.tasks[1]], current: 0 } }).f;
+		expect(ticked.text).not.toContain("no steps ticked yet");
+		expect(ticked.html).toContain("plan-task current");
 	});
 });

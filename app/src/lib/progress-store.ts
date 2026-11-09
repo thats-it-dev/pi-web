@@ -22,12 +22,22 @@ const CHILD_POLL_MS = 3000;
 type Overlay = Pick<SubagentChild, "state" | "startedAt" | "endedAt">;
 const terminal = (s: SubagentChild["state"]) => s === "done" || s === "failed" || s === "stopped";
 
+// A plan path relative to the session's cwd when it is under it (tools may pass it absolute), so the
+// same file always compares equal and the hub gets one spelling; anything else is left for the hub to judge.
+export function relPlanPath(path: string, cwd: string | null | undefined): string {
+	let p = path.replace(/^(\.\/)+/, "");
+	const base = cwd ? cwd.replace(/\/+$/, "") : "";
+	if (base && p.startsWith(`${base}/`)) p = p.slice(base.length + 1);
+	return p;
+}
+
 export class ProgressStore extends EventTarget {
 	private api: Pick<HubApi, "goal" | "plan" | "subagents">;
 	private session: SessionStore;
 	private goal: Goal | null = null;
 	private plan: (PlanDoc & { path: string }) | null = null;
 	private planSrc: string | null = null;
+	private planMtime: number | null = null;
 	private overlay = new Map<string, Overlay>();
 	private cached: ProgressView | null = null;
 	private running = false;
@@ -85,7 +95,15 @@ export class ProgressStore extends EventTarget {
 	}
 
 	private derived(): Progress {
-		return (this.prog ??= deriveProgress(this.session.conv, { live: this.session.status === "live" }));
+		if (!this.prog) {
+			const p = deriveProgress(this.session.conv, { live: this.session.status === "live" });
+			this.prog = { ...p, planPath: p.planPath ? relPlanPath(p.planPath, this.cwd()) : null };
+		}
+		return this.prog;
+	}
+
+	private cwd(): string | null {
+		return this.session.snapshot?.cwd ?? this.session.cwdHint;
 	}
 
 	// A "running" report that can't be refreshed is shown as unknown, never as running.
@@ -121,7 +139,9 @@ export class ProgressStore extends EventTarget {
 			this.ended.add(id);
 			if (t.name.startsWith("goal_")) goalTool = true;
 			const p = (t.args as { path?: unknown } | undefined)?.path;
-			if ((t.name === "edit" || t.name === "write") && planPath && p === planPath) planEdited = true;
+			if ((t.name === "edit" || t.name === "write") && planPath && typeof p === "string" && relPlanPath(p, this.cwd()) === planPath) planEdited = true;
+			// A subagent may have ticked the plan's boxes itself.
+			if (t.name === "subagent") planEdited = true;
 		}
 		const settled = this.wasStreaming && !conv.streaming;
 		this.wasStreaming = conv.streaming;
@@ -131,8 +151,9 @@ export class ProgressStore extends EventTarget {
 		if (planPath !== this.planPath) {
 			this.planPath = planPath;
 			this.plan = null;
+			this.planMtime = null;
 			if (planPath) this.fetchPlan(planPath);
-		} else if (planEdited && planPath) this.fetchPlan(planPath);
+		} else if ((planEdited || settled) && planPath) this.fetchPlan(planPath); // bash/sed ticks show up on settle
 		this.syncChildPolling();
 		this.changed();
 	}
@@ -143,15 +164,24 @@ export class ProgressStore extends EventTarget {
 	}
 
 	private setGoalTimer(on: boolean): void {
-		if (on && !this.goalTimer) this.goalTimer = setInterval(() => this.fetchGoal(), GOAL_POLL_MS);
+		// While a turn streams, the plan is polled on the goal's timer too: boxes ticked by bash or a child.
+		if (on && !this.goalTimer)
+			this.goalTimer = setInterval(() => {
+				this.fetchGoal();
+				if (this.planPath) this.fetchPlan(this.planPath);
+			}, GOAL_POLL_MS);
 		else if (!on && this.goalTimer) {
 			clearInterval(this.goalTimer);
 			this.goalTimer = null;
 		}
 	}
 
+	// Background children are polled while running or unknown. In a session that isn't live, a child
+	// the hub itself reports as unknown (no or bad status file) will not change, so it isn't polled.
 	private syncChildPolling(): void {
-		this.setChildTimer(this.children().some((c) => c.background && (c.state === "unknown" || c.state === "running")));
+		const live = this.session.status === "live";
+		const wanted = (c: SubagentChild) => c.state === "running" || (c.state === "unknown" && (live || this.overlay.get(c.key)?.state !== "unknown"));
+		this.setChildTimer(this.children().some((c) => c.background && wanted(c)));
 	}
 
 	private setChildTimer(on: boolean): void {
@@ -179,14 +209,17 @@ export class ProgressStore extends EventTarget {
 		try {
 			const r = await this.api.plan(this.session.id, path);
 			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
+			if (this.plan?.path === path && r.mtimeMs === this.planMtime) return; // unchanged on disk
 			this.plan = { ...parsePlan(r.text), path };
 			this.planSrc = r.text;
+			this.planMtime = r.mtimeMs;
 			this.changed();
 		} catch (e) {
 			if (!this.running || n !== this.planSeq || this.planPath !== path) return;
 			if (e instanceof HubError && e.status === 404) {
 				this.plan = null;
 				this.planSrc = null;
+				this.planMtime = null;
 				this.changed();
 			}
 		}

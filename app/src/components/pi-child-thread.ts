@@ -4,6 +4,7 @@ import type { SubagentChild } from "../../../shared/src/progress.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import type { Conversation } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
+import { childThreadPolls } from "../lib/child-poll.ts";
 import { hrefFor } from "../lib/route.ts";
 import { GLYPH } from "../render/progress.ts";
 import "./pi-messages.ts";
@@ -11,7 +12,8 @@ import "./pi-messages.ts";
 const POLL_MS = 2000;
 
 // One subagent's transcript, read-only: there is no input here and nothing that steers or stops the child.
-// While the child runs (or its state is unknown) and the parent is live, it re-reads the transcript every 2 s.
+// While the parent is live it re-reads the transcript every 2 s until the child is finished; a failed
+// read (the child may not have written its file yet) is retried the same way.
 export class PiChildThread extends LitElement {
 	static properties = {
 		api: { attribute: false },
@@ -112,7 +114,7 @@ export class PiChildThread extends LitElement {
 	}
 
 	private polling(): boolean {
-		return this.isConnected && this.live && (this.child?.state === "running" || this.child?.state === "unknown");
+		return this.isConnected && childThreadPolls(this.live, this.child);
 	}
 
 	private syncPoll(): void {

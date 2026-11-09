@@ -33,3 +33,9 @@ test("boxes under a later non-Task heading do not count toward the last task", (
 	assert.deepEqual(parsePlan(md).tasks, [{ title: "Task 1: A", done: 1, total: 1 }]);
 	assert.equal(parsePlan(md).current, null);
 });
+
+test("no box ticked anywhere: no current task (never a guessed Task 1)", () => {
+	assert.equal(parsePlan("### Task 1: A\n- [ ] a\n- [ ] b\n### Task 2: B\n- [ ] c\n").current, null);
+	// one tick anywhere is evidence enough: the first unfinished task is current
+	assert.equal(parsePlan("### Task 1: A\n- [ ] a\n### Task 2: B\n- [x] c\n- [ ] d\n").current, 0);
+});

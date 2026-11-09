@@ -4,7 +4,7 @@ import type { SubagentChild } from "../../../shared/src/progress.ts";
 import type { Snapshot } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import { HubError } from "./api.ts";
-import { ProgressStore } from "./progress-store.ts";
+import { ProgressStore, relPlanPath } from "./progress-store.ts";
 import { SessionStore } from "./session-store.ts";
 
 const PLAN = "docs/superpowers/plans/p.md";
@@ -16,7 +16,7 @@ const snap = (conv = createConversation([]), over: Partial<Snapshot> = {}): Snap
 	stats: null, models: [], thinkingLevels: ["off"], commands: [], dialogs: [], statuses: {}, widgets: {}, terminalPrompt: null, approvalMode: "auto", ...over,
 });
 const goal: Goal = { text: "ship", status: "active", waiting: false, updatedAt: 1 };
-const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({ key: "t1:0", toolCallId: "t1", index: 0, agent: "scout", task: "look", state: "unknown", background: true, turn: 1, startedAt: null, endedAt: null, sessionFile: null, asyncDir: "/a", ...over });
+const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({ key: "t1:0", toolCallId: "t1", index: 0, agent: "scout", task: "look", state: "unknown", background: true, turn: 1, startedAt: null, endedAt: null, sessionFile: null, asyncDir: "/a", runId: "r1", ...over });
 const readCall = { role: "assistant" as const, timestamp: 1, content: [{ type: "toolCall" as const, id: "r1", name: "read", arguments: { path: PLAN } }] };
 const subCall = (id: string, background: boolean) => ({
 	role: "assistant" as const, timestamp: 1,
@@ -266,6 +266,101 @@ describe("ProgressStore", () => {
 		store.start();
 		await flush();
 		expect(store.view.empty).toBe(true);
+		store.stop();
+	});
+
+	it("an absolute plan path under the cwd is fetched and compared cwd-relative", async () => {
+		const abs = { ...readCall, content: [{ ...readCall.content[0], arguments: { path: `/w/${PLAN}` } }] };
+		const { session, fake, store } = setup();
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([abs])) });
+		store.start();
+		await flush();
+		expect(fake.plan).toHaveBeenLastCalledWith("s1", PLAN);
+		expect(store.view.plan?.path).toBe(PLAN);
+		// an edit by its absolute spelling counts as an edit to the same plan
+		ev(session, { type: "tool_execution_start", toolCallId: "e1", toolName: "edit", args: { path: `/w/${PLAN}` } });
+		ev(session, { type: "tool_execution_end", toolCallId: "e1", toolName: "edit", result: {}, isError: false });
+		await flush();
+		expect(fake.plan).toHaveBeenCalledTimes(2);
+		store.stop();
+		expect(relPlanPath(`./${PLAN}`, "/w")).toBe(PLAN);
+		expect(relPlanPath(`/w/${PLAN}`, "/w/")).toBe(PLAN);
+		expect(relPlanPath(`/elsewhere/${PLAN}`, "/w")).toBe(`/elsewhere/${PLAN}`);
+		expect(relPlanPath(`/wx/${PLAN}`, "/w")).toBe(`/wx/${PLAN}`);
+	});
+
+	it("plan refetches when a subagent run ends and when a turn settles", async () => {
+		const { session, fake, store } = setup();
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([readCall])) });
+		store.start();
+		await flush();
+		expect(fake.plan).toHaveBeenCalledTimes(1);
+		ev(session, { type: "tool_execution_start", toolCallId: "s9", toolName: "subagent", args: { agent: "w", task: "t" } });
+		ev(session, { type: "tool_execution_end", toolCallId: "s9", toolName: "subagent", result: {}, isError: false });
+		await flush();
+		expect(fake.plan).toHaveBeenCalledTimes(2);
+		ev(session, { type: "agent_start" });
+		ev(session, { type: "agent_settled" });
+		await flush();
+		expect(fake.plan).toHaveBeenCalledTimes(3);
+		store.stop();
+	});
+
+	it("plan polls every 5 s while streaming and skips the re-parse when mtime is unchanged", async () => {
+		let mtimeMs = 1;
+		let text = "# P\n### Task 1: A\n- [ ] x\n";
+		const plan = vi.fn(async (_id: string, path: string) => ({ path, text, mtimeMs }));
+		const { session, store } = setup({ plan });
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([readCall])) });
+		store.start();
+		await flush();
+		ev(session, { type: "agent_start" });
+		let changes = 0;
+		store.addEventListener("change", () => changes++);
+		const before = store.view.plan;
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(plan).toHaveBeenCalledTimes(2);
+		expect(store.view.plan).toBe(before); // same mtime: not re-parsed
+		const goalOnly = changes;
+		text = "# P\n### Task 1: A\n- [x] x\n";
+		mtimeMs = 2;
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(plan).toHaveBeenCalledTimes(3);
+		expect(store.view.plan?.tasks[0].done).toBe(1);
+		expect(changes).toBeGreaterThan(goalOnly);
+		ev(session, { type: "agent_settled" });
+		await flush();
+		const n = plan.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(plan).toHaveBeenCalledTimes(n); // not streaming: no polling
+		store.stop();
+	});
+
+	it("a dead session stops polling a child the hub reports as unknown; a live one keeps going", async () => {
+		const subagents = vi.fn(async () => ({ children: [child({ state: "unknown" })] }));
+		const { session, store } = setup({ subagents });
+		session.apply({ type: "snapshot", snapshot: snap(createConversation([subCall("t1", true)])) });
+		store.start();
+		await vi.advanceTimersByTimeAsync(9000);
+		expect(subagents.mock.calls.length).toBeGreaterThanOrEqual(3); // live: still polling
+		session.apply({ type: "handle_gone", reason: "exit", stderr: "" } as never);
+		expect(session.status).not.toBe("live");
+		const n = subagents.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(subagents).toHaveBeenCalledTimes(n);
+		expect(vi.getTimerCount()).toBe(0);
+		store.stop();
+	});
+
+	it("a dead session's child stays polled until the hub has answered for it", async () => {
+		const subagents = vi.fn(async () => ({ children: [child({ state: "unknown" })] }));
+		const { session, store } = setup({ subagents });
+		session.setHistory({ messages: [subCall("t1", true)], live: false, cwd: "/w" });
+		store.start();
+		await flush();
+		expect(subagents).toHaveBeenCalledTimes(1); // asked once
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(subagents).toHaveBeenCalledTimes(1); // answered unknown: no more
 		store.stop();
 	});
 });

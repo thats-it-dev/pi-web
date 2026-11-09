@@ -29,6 +29,7 @@ export function parsePlan(markdown: string): PlanDoc {
 			if (box[1] !== " ") cur.done++;
 		}
 	}
-	const i = tasks.findIndex((t) => t.done < t.total);
+	// No box ticked anywhere: there is no evidence of where work stands, so nothing is highlighted.
+	const i = tasks.some((t) => t.done > 0) ? tasks.findIndex((t) => t.done < t.total) : -1;
 	return { title, tasks, current: i < 0 ? null : i };
 }
