@@ -6,11 +6,14 @@
 //   history   for a child whose key the parent's own records produce, the first transcript that exists of:
 //             its recorded sessionFile; the sessionFile its status.json names (background); and the
 //             derived <parent file minus .jsonl>/<runId>/run-<index>/session.jsonl (runId from the
-//             parent's records), whose real path must stay under the parent session file's directory
+//             parent's records), whose real path must stay under <parent file minus .jsonl>/.
+//             A recorded or status.json sessionFile must have a real path under the hub's real sessions
+//             dir (status.json sits in a shared tmp dir any local user could write); one that doesn't is
+//             neither read nor echoed to the client.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { goalFromEntries } from "../../shared/src/goal.ts";
 import { type ChildState, type SubagentChild, deriveProgress } from "../../shared/src/progress.ts";
 import { createConversation } from "../../shared/src/reducer.ts";
@@ -64,7 +67,7 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 	};
 	const children = async (id: string): Promise<SubagentChild[]> => {
 		const { conv, live } = await parentConv(id);
-		return Promise.all(deriveProgress(conv, { live }).subagents.map((c) => withStatus(c)));
+		return Promise.all(deriveProgress(conv, { live }).subagents.map(async (c) => vetted(await withStatus(c), index.dir)));
 	};
 
 	if (m) {
@@ -93,7 +96,7 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 	// The key must be one the parent's own records produce; nothing is read before this.
 	const child = (await children(id)).find((c) => c.key === key);
 	if (!child) throw notFound("Subagent");
-	const messages = await childTranscript(child, (await located(id)).file);
+	const messages = await childTranscript(child, (await located(id)).file, index.dir);
 	if (!messages) throw notFound("Subagent transcript");
 	sendJson(res, 200, { messages, child }, cors);
 	return true;
@@ -103,22 +106,41 @@ const transcriptPath = (p: string | null): p is string => !!p && isAbsolute(p) &
 
 // The child's transcript, or null while none of its candidate files exists yet. `child.sessionFile`
 // is the recorded one, or (background) the one its status.json names; the derived layout comes last.
-async function childTranscript(child: SubagentChild, parentFile: string | null): Promise<Awaited<ReturnType<typeof readHistory>> | null> {
-	if (transcriptPath(child.sessionFile)) {
+async function childTranscript(child: SubagentChild, parentFile: string | null, sessionsRoot: string): Promise<Awaited<ReturnType<typeof readHistory>> | null> {
+	const named = await inSessions(child.sessionFile, sessionsRoot);
+	if (named) {
 		try {
-			return await readHistory(child.sessionFile);
+			return await readHistory(named);
 		} catch {}
 	}
 	if (!parentFile || !parentFile.endsWith(".jsonl") || !child.runId || !RUN_ID_RE.test(child.runId)) return null;
-	const derived = join(parentFile.slice(0, -".jsonl".length), child.runId, `run-${child.index}`, "session.jsonl");
+	const runs = parentFile.slice(0, -".jsonl".length);
+	const derived = join(runs, child.runId, `run-${child.index}`, "session.jsonl");
 	if (!transcriptPath(derived)) return null;
 	try {
-		const base = await realpath(dirname(parentFile));
+		const base = await realpath(runs);
 		if (!under(base, await realpath(derived))) return null;
 		return await readHistory(derived);
 	} catch {
 		return null;
 	}
+}
+
+// The real path of a transcript that exists under the real sessions dir, else null.
+async function inSessions(p: string | null, sessionsRoot: string): Promise<string | null> {
+	if (!transcriptPath(p)) return null;
+	try {
+		const real = await realpath(p);
+		return under(await realpath(sessionsRoot), real) ? real : null;
+	} catch {
+		return null;
+	}
+}
+
+// A child as the client may see it: a sessionFile that fails `inSessions` is dropped.
+async function vetted(c: SubagentChild, sessionsRoot: string): Promise<SubagentChild> {
+	if (c.sessionFile === null || (await inSessions(c.sessionFile, sessionsRoot))) return c;
+	return { ...c, sessionFile: null };
 }
 
 // Whether a pid names no process at all (EPERM means it exists but isn't ours).

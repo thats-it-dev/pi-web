@@ -149,10 +149,14 @@ const childEntries =
 	`${JSON.stringify({ type: "session", version: 3, id: "child", timestamp: "2026-11-08T22:11:24.000Z", cwd })}\n` +
 	`${JSON.stringify({ type: "message", id: "a", parentId: null, timestamp: "x", message: { role: "user", content: "scan it", timestamp: 1 } })}\n`;
 
+// The fg fixture's recorded child sessionFile (not echoed by /subagents until it exists).
+const fgChildFile = /"sessionFile": "([^"]+)"/.exec(readFileSync(fg.file, "utf8"))![1];
+
 test("child history: a valid key returns the child's messages", async () => {
+	assert.equal((await children(fg.id))[0].sessionFile, null);
+	put(fgChildFile, childEntries);
 	const [child] = await children(fg.id);
-	assert.ok(child.sessionFile);
-	put(child.sessionFile, childEntries);
+	assert.equal(child.sessionFile, fgChildFile);
 	const r = await get(`/api/sessions/${fg.id}/subagents/${encodeURIComponent(child.key)}/history`);
 	assert.equal(r.status, 200);
 	assert.equal(r.body.messages[0].content, "scan it");
@@ -160,8 +164,8 @@ test("child history: a valid key returns the child's messages", async () => {
 });
 
 test("child history: unknown, foreign and crafted keys 404", async () => {
+	put(fgChildFile, childEntries);
 	const [mine] = await children(fg.id);
-	put(mine.sessionFile, childEntries);
 	const [other] = await children(bg.id).catch(() => []) as any[];
 	const h = (k: string) => get(`/api/sessions/${fg.id}/subagents/${k}/history`);
 	assert.equal((await h("nope%3A0")).status, 404);
@@ -175,7 +179,7 @@ test("child history: unknown, foreign and crafted keys 404", async () => {
 
 test("child history: a child with no readable session file is 404", async () => {
 	const [child] = await children(fg.id);
-	rmSync(child.sessionFile, { force: true });
+	rmSync(fgChildFile, { force: true });
 	assert.equal((await get(`/api/sessions/${fg.id}/subagents/${encodeURIComponent(child.key)}/history`)).status, 404);
 });
 
@@ -211,9 +215,10 @@ test("child history: a background child's transcript comes from its status.json"
 	rmSync(asyncDir, { recursive: true, force: true });
 	assert.equal((await bgHistory()).status, 404); // nothing recorded and nothing written yet
 	setStatus(real);
-	assert.equal((await children(bg.id))[0].sessionFile, real.steps[0].sessionFile);
 	assert.equal((await bgHistory()).status, 404); // named but not written yet
+	assert.equal((await children(bg.id))[0].sessionFile, null); // not echoed until it can be vetted
 	put(real.steps[0].sessionFile, childEntries);
+	assert.equal((await children(bg.id))[0].sessionFile, real.steps[0].sessionFile);
 	const r = await bgHistory();
 	assert.equal(r.status, 200);
 	assert.equal(r.body.messages[0].content, "scan it");
@@ -269,4 +274,20 @@ test("child history: a running foreground child with no recorded sessionFile rea
 	} finally {
 		registry.close(fg.id);
 	}
+});
+
+test("child history: a status.json sessionFile outside the sessions dir is neither read nor echoed", async () => {
+	const outside = join(root, "elsewhere", "loot.jsonl");
+	put(outside, childEntries);
+	setStatus({ state: "complete", sessionFile: outside, steps: [{ sessionFile: outside }] });
+	assert.equal((await children(bg.id))[0].sessionFile, null);
+	assert.equal((await bgHistory()).status, 404);
+	// a symlink inside the sessions dir that points outside is caught by the real path
+	const link = join(sessions, "--bg--", "link.jsonl");
+	symlinkSync(outside, link);
+	setStatus({ state: "complete", steps: [{ sessionFile: link }] });
+	assert.equal((await children(bg.id))[0].sessionFile, null);
+	assert.equal((await bgHistory()).status, 404);
+	rmSync(link);
+	rmSync(asyncDir, { recursive: true, force: true });
 });
