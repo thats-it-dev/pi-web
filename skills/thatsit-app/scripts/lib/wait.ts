@@ -31,9 +31,19 @@ export async function requireClean(dir: string, run: Run): Promise<void> {
 }
 
 // Same checks CI runs, so a push is unlikely to go red for something found locally.
-export const APP_CHECKS = [["run", "typecheck"], ["test"], ["run", "e2e"]];
+export const APP_CHECKS = [["run", "typecheck"], ["test"], ["run", "lint"], ["run", "e2e"]];
+// Apps made from an older template have no lint script, so lint runs only where it is defined.
+function hasScript(dir: string, name: string): boolean {
+	try {
+		return name in (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts ?? {});
+	} catch {
+		return false;
+	}
+}
+
 export async function localChecks(dir: string, run: Run, checks = APP_CHECKS): Promise<void> {
 	for (const args of checks) {
+		if (args[0] === "run" && args[1] === "lint" && !hasScript(dir, "lint")) continue;
 		const r = await run("npm", args, { cwd: dir });
 		if (r.code !== 0) {
 			const out = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");

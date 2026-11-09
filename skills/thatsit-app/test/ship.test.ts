@@ -44,6 +44,15 @@ const shipTable = (over: T = {}): T => ({
 	...over,
 });
 
+test("ship runs lint when the app defines it", async () => {
+	const dir = appDir();
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { lint: "knip" } }));
+	const f = fakeRun(shipTable());
+	await ship(dir, f.run, async () => 200, { clock: clock() });
+	const npm = f.lines().filter((l) => l.startsWith("npm"));
+	assert.deepEqual(npm, ["npm run typecheck", "npm test", "npm run lint", "npm run e2e"]);
+});
+
 test("ship happy path: exact calls in order, production URL", async () => {
 	const f = fakeRun(shipTable());
 	const urls: string[] = [];
