@@ -11,9 +11,9 @@ Cloudflare work goes through one CLI. Do not run `gh repo create`, `cf` or `wran
 
 The CLI prints progress, then one last line `RESULT {...json...}`. Exit 0 means done; exit 1
 means failed, and the reason is on stderr and in `RESULT`; exit 2 means you typed the command
-wrong. `ship`, `pr` and `gateway-pr` wait for CI and can take 20 minutes or more: if your bash
-tool takes a timeout, give it 2400 seconds. Copy URLs from `RESULT` into your reply exactly.
-Never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
+wrong. `ship`, `pr` and `gateway-pr` push and wait for CI, and can take 20 minutes or more: if
+your bash tool takes a timeout, give it 2400 seconds. Never push or wait for CI any other way
+(no `git push`, `sleep` or `gh run`). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
 start every app command with `cd ~/workspace/apps/<name> &&` and edit files by full path.
 
 ## New app
@@ -30,14 +30,13 @@ start every app command with `cd ~/workspace/apps/<name> &&` and edit files by f
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts new <name> --title "<Title>" --description "<one sentence>"`
    Add `--color "#RRGGBB"` only if Michael asked for an icon color; that is the only place a
    hex color is allowed. On success `RESULT` has `dir` and `url`. On exit 1, see "When something fails".
-4. **Write the app** in `~/workspace/apps/<name>` (full paths below):
-   - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html`.
+4. **Write the app** in `~/workspace/apps/<name>`. First read its `AGENTS.md` and follow it. Then:
+   - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html` (only an app with several pages and a menu keeps it and the shell).
    - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the skeleton below).
      Extra modules go in new files under `src/`; unit tests for plain logic go in `test/`.
    - Run `cd ~/workspace/apps/<name> && rm e2e/starter.spec.ts`. Keep `e2e/app.spec.ts`.
    - Add `~/workspace/apps/<name>/e2e/<name>.spec.ts` that tests the app's main behavior (example below).
-   - Only an app with several pages and a menu keeps `data-shell` and the shell.
-5. **Test.** Run `cd ~/workspace/apps/<name> && npm run typecheck && npm test && npm run e2e`; fix and rerun until all three pass.
+5. **Test.** Run `cd ~/workspace/apps/<name> && npm run verify`; fix and rerun until it passes.
 6. **Commit.** `cd ~/workspace/apps/<name> && git add -A && git commit -m "First version of <name>"`
 7. **Ship.** Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/<name>`
 8. **Reply.** If `RESULT` has `"pending":false`, give Michael its `url`. If `"pending":true`, say
@@ -48,14 +47,13 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
 
 ## Change an existing app
 
-1. `cd ~/workspace/apps/<name> && git switch main && git pull`
+1. `cd ~/workspace/apps/<name> && git switch main && git pull`, then read `AGENTS.md` there if it exists and follow it.
 2. `cd ~/workspace/apps/<name> && git switch -c <short-branch>` (e.g. `dark-mode-toggle`). Create the branch (step 2) before editing any file.
-3. Edit files by full path, update or add the e2e test, then run
-   `cd ~/workspace/apps/<name> && npm run typecheck && npm test && npm run e2e` until green.
+3. Edit files by full path, update or add the e2e test, then run `cd ~/workspace/apps/<name> && npm run verify`
+   until green (an app with no `verify` script: `npm run typecheck && npm test && npm run e2e`).
 4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
 5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
-6. Reply with the `pr` and `preview` URLs from `RESULT`.
-Never merge a PR (`gh pr merge`) or push to `main` after the first version.
+6. Reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version.
 
 ## Needs spark data
 

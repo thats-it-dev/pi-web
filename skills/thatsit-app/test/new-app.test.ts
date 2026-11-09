@@ -20,6 +20,8 @@ function table(over: Record<string, Reply | ((c: { args: string[] }) => Reply)> 
 		"gh repo clone": (c: { args: string[] }) => {
 			mkdirSync(join(c.args[3], ".git"), { recursive: true });
 			writeFileSync(join(c.args[3], "app.config.json"), "{}");
+			writeFileSync(join(c.args[3], "package.json"), '{\n\t"name": "app-template"\n}\n');
+			writeFileSync(join(c.args[3], "package-lock.json"), '{\n  "name": "app-template",\n  "packages": {\n    "": { "name": "app-template" }\n  }\n}\n');
 			return {};
 		},
 		npm: {},
@@ -57,6 +59,10 @@ test("runs the seven steps in order with exact arguments", async () => {
 	assert.deepEqual(JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")), {
 		name: "foo", title: "Foo App", description: "Does foo", color: "#FFAA00",
 	});
+	assert.equal(readFileSync(join(dir, "package.json"), "utf8"), '{\n\t"name": "foo"\n}\n');
+	const lock = readFileSync(join(dir, "package-lock.json"), "utf8");
+	assert.match(lock, /^\{\n  "name": "foo"/);
+	assert.equal(JSON.parse(lock).packages[""].name, "foo");
 	for (const c of f.calls.filter((c) => c.cmd === "npm" || c.cmd === "git")) assert.equal(c.cwd, dir);
 });
 

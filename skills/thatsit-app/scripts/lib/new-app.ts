@@ -78,6 +78,7 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	if (!(o.resume && (await configured(dir, name, run)))) {
 		const cfg = { name, title: o.title, description: o.description, color: o.color };
 		writeFileSync(join(dir, "app.config.json"), `${JSON.stringify(cfg, null, "\t")}\n`);
+		renamePackage(dir, name);
 		await must(run, "npm", ["ci"], { cwd: dir });
 		await must(run, "npm", ["run", "icons"], { cwd: dir });
 		await must(run, "git", ["add", "-A"], { cwd: dir });
@@ -111,6 +112,20 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 	}
 
 	return { dir, pagesSubdomain };
+}
+
+// The template's guardrail test requires package.json's name to equal app.config.json's.
+function renamePackage(dir: string, name: string): void {
+	for (const file of ["package.json", "package-lock.json"]) {
+		const path = join(dir, file);
+		if (!existsSync(path)) continue;
+		const text = readFileSync(path, "utf8");
+		const indent = /^\{\n([ \t]+)/.exec(text)?.[1] ?? "\t";
+		const json = JSON.parse(text);
+		json.name = name;
+		if (json.packages?.[""]) json.packages[""].name = name;
+		writeFileSync(path, `${JSON.stringify(json, null, indent)}\n`);
+	}
 }
 
 async function configured(dir: string, name: string, run: Run): Promise<boolean> {
