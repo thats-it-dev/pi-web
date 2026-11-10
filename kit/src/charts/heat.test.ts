@@ -23,8 +23,8 @@ describe("heatLayout", () => {
 		expect(months.map((m) => m.day)).not.toContain("2026-09-01");
 	});
 	it("labels only 1sts inside the grid", () => {
-		const { months } = heatLayout("2026-03-08", 3); // Feb 23 start; Mar 1 in col 0? Mar 1 is Sunday -> col 0
-		expect(months).toEqual([{ col: 0, day: "2026-03-01" }]);
+		const { months } = heatLayout("2026-03-08", 3); // Mar 1 is a Sunday in col 1 (Feb 23 week)
+		expect(months).toEqual([{ col: 1, day: "2026-03-01" }]);
 		const m2 = heatLayout("2026-03-15", 3).months; // starts Mar 2: no 1st
 		expect(m2).toEqual([]);
 	});
