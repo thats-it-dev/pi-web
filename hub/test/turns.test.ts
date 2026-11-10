@@ -85,3 +85,21 @@ test("a run that adds no new assistant message yields nothing; stop() ends watch
 	await run(h);
 	assert.deepEqual(outcomes, []);
 });
+
+test("a run that ends while background jobs run sends no outcome", async () => {
+	const { registry, outcomes } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	h.backgroundJobs = true;
+	await run(h);
+	assert.deepEqual(outcomes, []);
+});
+
+test("the run that ends after they finish sends finished", async () => {
+	const { registry, outcomes } = setup();
+	const h = (await registry.create("/work/proj")) as FakeHandle;
+	h.backgroundJobs = true;
+	await run(h);
+	h.backgroundJobs = false;
+	await run(h, reply("stop", { content: [{ type: "text", text: "CI green" }] }));
+	assert.deepEqual(outcomes, [{ sessionId: "s-1", kind: "finished", messageIndex: 3, text: "CI green" }]);
+});

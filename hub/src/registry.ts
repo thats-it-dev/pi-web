@@ -167,7 +167,7 @@ export class Registry {
 	}
 
 	private isIdle(h: SessionHandle): boolean {
-		return h.subscriberCount() === 0 && !h.isBusy();
+		return h.subscriberCount() === 0 && !h.isBusy() && !h.hasBackgroundJobs();
 	}
 
 	private async launch(o: Parameters<HandleFactory["startRpc"]>[0]): Promise<SessionHandle> {

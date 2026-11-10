@@ -122,6 +122,9 @@ export class RpcHandle implements SessionHandle {
 	isBusy(): boolean {
 		return this.conv.streaming || this.conv.compacting || this.dialogs.size > 0;
 	}
+	hasBackgroundJobs(): boolean {
+		return Boolean(this.statuses["bg-jobs"]);
+	}
 	liveState(): LiveState {
 		if (this.dialogs.size > 0) return "needs_you";
 		return this.conv.streaming || this.conv.compacting ? "running" : "idle";

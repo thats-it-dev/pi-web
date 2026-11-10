@@ -52,6 +52,11 @@ export class FakeHandle implements SessionHandle {
 	observerCount(): number {
 		return this.observers.size;
 	}
+	/** What hasBackgroundJobs() returns. */
+	backgroundJobs = false;
+	hasBackgroundJobs(): boolean {
+		return this.backgroundJobs;
+	}
 	isBusy(): boolean {
 		return this.busy;
 	}
