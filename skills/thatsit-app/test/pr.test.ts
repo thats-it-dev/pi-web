@@ -25,6 +25,8 @@ const table = (over: T = {}): T => ({
 	"gh pr view": { code: 1, stderr: "no pull requests found" },
 	"gh pr create": { stdout: `${PR}\n` },
 	"git rev-parse HEAD": { stdout: `${SHA}\n` },
+	"git fetch origin feat-x": {},
+	"git rev-parse FETCH_HEAD": { stdout: `${SHA}\n` },
 	...over,
 });
 const opts = { title: "Add x", body: "Does x" };
@@ -47,4 +49,17 @@ test("openPr reuses an existing open PR", async () => {
 
 test("waitPr fails with run pr first when the branch has no open PR", async () => {
 	await assert.rejects(waitPr(appDir(), fakeRun(table()).run, { clock: clock() }), /no open PR for this branch; run pr first/);
+});
+
+test("waitPr fails fast when HEAD is not pushed, or the branch never was", async () => {
+	const open = { "gh pr view": { stdout: JSON.stringify({ url: PR, state: "OPEN", body: "x" }) } };
+	const cases: T[] = [
+		{ "git rev-parse FETCH_HEAD": { stdout: "0000000000000000000000000000000000000000\n" } },
+		{ "git fetch origin feat-x": { code: 128, stderr: "fatal: couldn't find remote ref feat-x" } },
+	];
+	for (const over of cases) {
+		const f = fakeRun(table({ ...open, ...over }));
+		await assert.rejects(waitPr(appDir(), f.run, { clock: clock() }), /^Error: HEAD is not pushed; run the same pr command first$/);
+		assert.ok(!f.lines().some((l) => l.startsWith("gh run") || l.startsWith("gh api")));
+	}
 });

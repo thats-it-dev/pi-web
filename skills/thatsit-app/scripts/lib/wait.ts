@@ -39,6 +39,22 @@ export async function headSha(dir: string, run: Run): Promise<string> {
 	return (await must(run, "git", ["rev-parse", "HEAD"], { cwd: dir })).trim();
 }
 
+// CI runs on the pushed commit: waiting after a local commit that was never pushed would watch an old run.
+// Returns the head commit.
+export async function requirePushed(dir: string, run: Run, cmd: "pr" | "gateway-pr"): Promise<string> {
+	const notPushed = new Error(`HEAD is not pushed; run the same ${cmd} command first`);
+	const branch = await branchOf(dir, run);
+	const f = await run("git", ["fetch", "origin", branch], { cwd: dir });
+	if (f.code !== 0) {
+		if (/couldn't find remote ref/i.test(f.stderr)) throw notPushed;
+		await must(run, "git", ["fetch", "origin", branch], { cwd: dir }); // throws with git's error
+	}
+	const remote = (await must(run, "git", ["rev-parse", "FETCH_HEAD"], { cwd: dir })).trim();
+	const sha = await headSha(dir, run);
+	if (remote !== sha) throw notPushed;
+	return sha;
+}
+
 // A run can take a few seconds to show up after a push.
 // `workflow` narrows the lookup to one workflow file of a repo that has several.
 export async function findRun(repo: string, sha: string, run: Run, clock: Clock, timeoutMs = RUN_LOOKUP_MS, workflow?: string): Promise<number> {

@@ -151,6 +151,8 @@ const prTable = (over: T = {}): T => ({
 	"git push -u origin HEAD": {},
 	"gh pr create": { stdout: `https://github.com/${REPO}/pull/5\n` },
 	"git rev-parse HEAD": { stdout: `${SHA}\n` },
+	"git fetch origin feat-x": {},
+	"git rev-parse FETCH_HEAD": { stdout: `${SHA}\n` },
 	"gh run list --repo thats-it-dev/foo --commit": { stdout: JSON.stringify([{ databaseId: 9 }]) },
 	"gh run watch": {},
 	"gh run view": view(),
@@ -181,6 +183,9 @@ test("waitPr returns the preview for the head commit", async () => {
 	assert.deepEqual(r, { pr: `https://github.com/${REPO}/pull/5`, preview: `https://feat-x.${SUB}` });
 	assert.deepEqual(f.lines(), [
 		"gh pr view --json url,state,body",
+		"git rev-parse --abbrev-ref HEAD",
+		"git fetch origin feat-x",
+		"git rev-parse FETCH_HEAD",
 		"git rev-parse HEAD",
 		`gh run list --repo ${REPO} --commit ${SHA} --json databaseId,status,conclusion`,
 		`gh run watch 9 --repo ${REPO} --exit-status`,

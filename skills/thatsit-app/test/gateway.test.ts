@@ -140,6 +140,8 @@ const gwPrTable = (over: T = {}): T => ({
 	"git push -u origin HEAD": {},
 	"gh pr create": { stdout: `https://github.com/${GW}/pull/12\n` },
 	"git rev-parse HEAD": { stdout: `${SHA}\n` },
+	"git fetch origin register-tips": {},
+	"git rev-parse FETCH_HEAD": { stdout: `${SHA}\n` },
 	"gh run list": { stdout: JSON.stringify([{ databaseId: 77 }]) },
 	"gh run watch": {},
 	"gh run view": { stdout: "" },
@@ -282,6 +284,8 @@ const appPrTable = (over: T = {}): T => ({
 	"gh pr create": { stdout: "https://github.com/thats-it-dev/foo/pull/5\n" },
 	"gh pr edit": {},
 	"git rev-parse HEAD": { stdout: `${SHA}\n` },
+	"git fetch origin feat-x": {},
+	"git rev-parse FETCH_HEAD": { stdout: `${SHA}\n` },
 	"gh run list": { stdout: JSON.stringify([{ databaseId: 9 }]) },
 	"gh run watch": {},
 	"gh run view": { stdout: JSON.stringify({ jobs: [{ steps: [{ name: "Deploy to Cloudflare Pages", conclusion: "success" }] }] }) },
@@ -378,4 +382,11 @@ test("gateway-pr diff guard sees a src/ rename and a src/ deletion", async () =>
 		return true;
 	});
 	assert.ok(!f.lines().some((l) => l.startsWith("git push")));
+});
+
+test("waitGatewayPr fails fast when HEAD is not pushed", async () => {
+	const { dir } = gwDir();
+	const f = fakeRun(gwWaitTable({ "git rev-parse FETCH_HEAD": { stdout: "0000000000000000000000000000000000000000\n" } }));
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: clock() }), /^Error: HEAD is not pushed; run the same gateway-pr command first$/);
+	assert.ok(!f.lines().some((l) => l.startsWith("gh run")));
 });

@@ -49,9 +49,9 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
    `cd ~/workspace/apps/<name> && npm run verify` until green (no `verify` script: `npm run typecheck && npm test && npm run e2e`).
 4. **Review.** Write `git diff main...HEAD` to `/tmp/<name>-review.diff` (and samples of generated or progress-based output, first, middle, last stage). Call `subagent` with agent `reviewer`, `async: false`, and a task naming the
    request, `docs/spec.md` and those files. Fix what you confirm, rerun verify, commit (`git add -A && git commit -m "<what changed>"`).
-5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"` in bash (no timeout). Tell Michael the `pr` link from `RESULT`.
-6. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/<name>` with `bg_bash`, then end your turn.
-7. When `bg-bash-done` arrives: `exited 0` means mark every to-do completed or deleted and reply with the `pr` and `preview` URLs from `RESULT` (and `gatewayPreview` if present); anything else means fix the cause, commit, rerun `pr`, then `pr-wait` with `bg_bash`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
+5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"` in bash (no timeout).
+6. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/<name>` with `bg_bash`. Then end your turn with a reply: the `pr` link from `RESULT`, CI is still running, the preview link follows.
+7. When `bg-bash-done` arrives: `exited 0` means mark every to-do completed or deleted and reply with the `pr` and `preview` URLs from `RESULT` (and `gatewayPreview` if present); anything else means fix the cause, commit, rerun the same `pr` command (same `--title`, `--body`, `--gateway-pr`), then `pr-wait` with `bg_bash`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
 
 ## Bring an app up to the template
 
@@ -137,16 +137,15 @@ test("add one increases the count", async ({ page }) => {
   `already exists`, nothing was created: fix it and rerun without `--resume` (a name problem means a new
   name, back to step 1). Any other error came after the repo was made: from then on use `--resume` with
   the same name and never pick a new one. Fix the cause and rerun with `--resume`; twice failed: tell Michael.
-- `npm ... failed; fix it before pushing`: the CLI ran the tests for you. Fix, commit, rerun the same command.
 - `deploy run ... failed in` / `test run ... failed in` / `spark preview ... failed`: the error ends
-  with the last lines of the failing tests. Fix that, commit, and rerun the same `ship`, or `pr` then `pr-wait`
-  (`gateway-pr` then `gateway-pr-wait`), with `bg_bash` for the waits. A rerun of `pr` or `gateway-pr` updates the same PR and its preview comment.
+  with the last lines of the failing tests. Fix that, commit, and rerun the same `ship` command, or rerun the same `pr` command then `pr-wait`
+  (the same `gateway-pr` command then `gateway-pr-wait`), with `bg_bash` for the waits. A rerun of `pr` or `gateway-pr` updates the same PR and its preview comment.
 - `deploy step was skipped`: the org secrets or `app.config.json` need Michael. Stop and tell him; do not rerun.
 - `did not finish within`, `did not report a preview` or `No preview`: give Michael the error's URL; stop.
 - `there are uncommitted changes`: run `cd ~/workspace/apps/<name> && git add -A && git commit -m "..."`, then rerun.
 - `pr will not run on main` / `gateway-pr will not run on main` / `sync-template ... uncommitted`: see Change steps 2 and 4.
 - `ship only works on the main branch`: run `cd ~/workspace/apps/<name> && git switch main`, then rerun.
-- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun `pr`.
+- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr` command.
 - `predates gateway support`: run `sync-template` (see **Bring an app up to the template**), commit, rerun.
 - Stop and tell Michael (quote the reason from `RESULT`) when the same command fails with exit 1
   twice and you can't fix it, or when the error mentions login, permissions, secrets or a token.

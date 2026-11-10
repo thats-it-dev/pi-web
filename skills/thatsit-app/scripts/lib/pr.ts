@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GATEWAY_REPO, gatewayPreviewUrl } from "./names.ts";
 import { must, type Run } from "./run.ts";
-import { appRepo, branchOf, findRun, headSha, realClock, requireClean, stderrLog, watchRun, type Clock, type Log } from "./wait.ts";
+import { appRepo, branchOf, findRun, realClock, requireClean, requirePushed, stderrLog, watchRun, type Clock, type Log } from "./wait.ts";
 
 export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number; log?: Log; progressMs?: number };
 
@@ -100,7 +100,7 @@ export async function waitPr(dir: string, run: Run, opts: PrOpts = {}): Promise<
 	const gwLine = existing.body.split("\n").map((l) => l.trim()).find((l) => /^Gateway: \S+#\d+$/.test(l) && l.startsWith(prefix));
 	const gatewayPrNum = gwLine ? Number(gwLine.slice(prefix.length)) : undefined;
 
-	const sha = await headSha(dir, run);
+	const sha = await requirePushed(dir, run, "pr");
 	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs, "deploy", log, opts.progressMs);
 
 	// The sticky comment is edited in place, so an old one may still name an older commit.

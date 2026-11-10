@@ -4,7 +4,7 @@ import { GATEWAY_REPO, NAME_RE, getPage } from "./names.ts";
 import { ghIdentity, setIdentity } from "./new-app.ts";
 import { openPrOf, parseComments, pushAndOpen, requireAhead } from "./pr.ts";
 import { must, type Run } from "./run.ts";
-import { branchOf, findRun, headSha, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
+import { branchOf, findRun, realClock, requireClean, requirePushed, watchRun, type Clock } from "./wait.ts";
 
 export { gatewayPreviewUrl } from "./names.ts";
 
@@ -109,7 +109,7 @@ export async function waitGatewayPr(dir: string, run: Run, opts: GatewayPrOpts =
 
 	// One 20-minute budget for GitHub CI and the spark's own test + start of the preview.
 	const deadline = clock.now() + (opts.timeoutMs ?? GATEWAY_WAIT_MS);
-	const sha = await headSha(dir, run);
+	const sha = await requirePushed(dir, run, "gateway-pr");
 	await watchRun(repo, await findRun(repo, sha, run, clock, undefined, GATEWAY_WORKFLOW), run, Math.max(deadline - clock.now(), 60_000), "test");
 
 	const minutes = Math.round((opts.timeoutMs ?? GATEWAY_WAIT_MS) / 60_000);
