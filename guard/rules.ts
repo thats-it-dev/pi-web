@@ -97,7 +97,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	return undefined;
 }
 
-const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b/;
+const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 
 /** Files a PR can change without a review: docs, Markdown and CI config. */
 export function reviewFree(path: string): boolean {

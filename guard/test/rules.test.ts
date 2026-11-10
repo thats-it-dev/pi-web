@@ -217,6 +217,16 @@ test("bg_bash may run pr-wait, gateway-pr-wait and ship", () => {
 	for (const command of waits) assert.equal(checkToolCall("bg_bash", { command }, env()), undefined, command);
 });
 
+test("pr-wait and gateway-pr-wait never hit the review gate; pr still does", () => {
+	const unreviewed = { ...env(), reviewed: () => false, codeChanged: () => true };
+	for (const sub of ["pr-wait", "gateway-pr-wait"]) {
+		const command = `cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ${sub} ~/workspace/apps/keeb`;
+		assert.equal(checkToolCall("bg_bash", { command }, unreviewed), undefined, sub);
+	}
+	const pr = "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr . --title x --body y";
+	assert.equal(checkToolCall("bg_bash", { command: pr }, unreviewed)?.reason, REASONS.review);
+});
+
 test("bg_bash commands get the same shell checks as bash", () => {
 	assert.equal(checkToolCall("bg_bash", { command: "cd ~/workspace/apps/x && git push" }, env())?.reason, REASONS.push);
 });
