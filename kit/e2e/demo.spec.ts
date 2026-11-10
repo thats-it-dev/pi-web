@@ -29,7 +29,7 @@ test("phone drawer opens from the header and closes on link or overlay", async (
 });
 
 test("sheet closes on Escape", async ({ page }) => {
-	await page.getByRole("button", { name: "Open sheet" }).click();
+	await page.locator("#open-sheet").click();
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.getByRole("dialog")).toHaveCount(0);

@@ -5,3 +5,4 @@ export { TkSheet } from "./tk-sheet.ts";
 export { TkToasts } from "./tk-toasts.ts";
 export { TkHeader } from "./tk-header.ts";
 export { TkShell } from "./tk-shell.ts";
+export type { Panel, PanelsState } from "./panels.ts";

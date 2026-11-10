@@ -14,7 +14,7 @@
 	</style>
 </head>
 <body>
-	<tk-shell nav-label="Demo pages">
+	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-demo:panels">
 		<nav slot="nav">
 			<a class="u" href="#a">Page A</a>
 			<a class="u" href="#b">Page B</a>
@@ -31,7 +31,18 @@
 				<button class="btn ghost" id="show-toast">Show toast</button>
 			</div>
 		</section>
+		<section slot="aside"><span class="label">details</span><p>Slotted details.</p><button class="btn ghost" id="open-sheet-2">Open sheet</button></section>
 	</tk-shell>
+	<script>
+		// Query switches for the tests; a classic script runs before the deferred kit module upgrades tk-shell.
+		(() => {
+			const q = new URLSearchParams(location.search);
+			const shell = document.querySelector("tk-shell");
+			if (q.get("nav") === "0") shell.querySelector("[slot=nav]")?.remove();
+			if (q.get("aside") === "0") shell.querySelector("[slot=aside]")?.remove();
+			if (q.get("navhidden") === "1") shell.setAttribute("nav-hidden", "");
+		})();
+	</script>
 	<tk-sheet id="sheet" heading="Sheet"><p>Slotted content.</p></tk-sheet>
 	<tk-toasts></tk-toasts>
 	<script type="module">
@@ -39,7 +50,7 @@
 		// Light DOM doesn't get sharedStyles otherwise, so .btn/.seg would be unstyled.
 		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedStyles.styleSheet];
 		const sheet = document.getElementById("sheet");
-		document.getElementById("open-sheet").addEventListener("click", () => (sheet.open = true));
+		for (const id of ["open-sheet", "open-sheet-2"]) document.getElementById(id)?.addEventListener("click", () => (sheet.open = true));
 		sheet.addEventListener("tk-close", () => (sheet.open = false));
 		document.getElementById("show-toast").addEventListener("click", () => toast("Saved"));
 	</script>

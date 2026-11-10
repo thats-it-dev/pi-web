@@ -7,6 +7,7 @@
 	--overlay: rgba(0, 0, 0, 0.45);
 	--radius: 0.15rem;
 	--sidebar-w: 280px;
+	--aside-w: 300px;
 }
 
 @media (prefers-color-scheme: dark) {
