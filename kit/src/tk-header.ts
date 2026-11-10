@@ -83,7 +83,7 @@ export class TkHeader extends LitElement {
 			? html`<button class="menu icon-btn" aria-label=${this.menuLabel} aria-expanded=${String(p.nav.open)} @click=${() => this.toggle("nav")}>${p.nav.docked ? PANEL_LEFT_ICON : MENU_ICON}</button>`
 			: nothing;
 		const right = p.aside.present
-			? html`<button class="aside-toggle icon-btn" aria-label=${this.asideLabel} aria-expanded=${String(p.aside.open)} @click=${() => this.toggle("aside")}>${PANEL_RIGHT_ICON}${this.asideBadge ? html`<span class="badge">${this.asideBadge}</span>` : nothing}</button>`
+			? html`<button class="aside-toggle icon-btn" aria-label=${this.asideBadge ? `${this.asideLabel}, ${this.asideBadge}` : this.asideLabel} aria-expanded=${String(p.aside.open)} @click=${() => this.toggle("aside")}>${PANEL_RIGHT_ICON}${this.asideBadge ? html`<span class="badge">${this.asideBadge}</span>` : nothing}</button>`
 			: nothing;
 		return { left, right };
 	}

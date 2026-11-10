@@ -355,3 +355,8 @@ test("phone: setting the open properties directly keeps one drawer and restores 
 	await expect(page.locator(nav)).toBeHidden();
 	await expect(opener).toBeFocused();
 });
+
+test("the details button's name includes its badge", async ({ page }) => {
+	await ready(page);
+	await expect(page.getByRole("button", { name: "Details, 3/7", exact: true })).toBeVisible();
+});
