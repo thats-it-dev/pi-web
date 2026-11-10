@@ -62,5 +62,26 @@ export function trackViewport(win: Window = window): void {
 	vv.addEventListener("resize", update);
 	vv.addEventListener("scroll", update);
 	win.addEventListener("resize", update);
+	// iOS closes the keyboard while the app is in the background but sends no resize when it comes
+	// back, and may report the new size late: the app stays squeezed until a tap. So leaving drops
+	// focus (the keyboard can't outlive the visit) and returning re-measures a few times.
+	const doc = win.document;
+	const recheck = () => {
+		for (const ms of RECHECK_MS) setTimeout(update, ms);
+	};
+	doc.addEventListener("visibilitychange", () => {
+		if (doc.visibilityState === "hidden") deepActive(doc)?.blur();
+		else recheck();
+	});
+	win.addEventListener("pageshow", recheck);
 	update();
+}
+
+const RECHECK_MS = [0, 300, 1000];
+
+// The focused element, looking inside shadow roots: document.activeElement stops at the host.
+function deepActive(doc: Document): HTMLElement | null {
+	let el = doc.activeElement as (HTMLElement & { shadowRoot?: ShadowRoot | null }) | null;
+	while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
+	return el && typeof el.blur === "function" ? el : null;
 }
