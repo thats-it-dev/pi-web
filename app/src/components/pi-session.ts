@@ -495,7 +495,7 @@ export class PiSession extends LitElement {
 				<pi-header ?hidden=${Boolean(this.childKey)} .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 				<!-- The chat stays mounted under a thread (hidden, so out of the tab order): the draft and scroll position survive. -->
 				${this.childKey
-					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"}></pi-child-thread>`
+					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"} .badge=${label}></pi-child-thread>`
 					: nothing}
 				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll}>
 					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>

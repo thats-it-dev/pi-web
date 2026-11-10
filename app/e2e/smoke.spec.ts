@@ -359,6 +359,7 @@ test("desktop: a subagent row opens its transcript read-only, back to parent ret
 	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await expect(aside.locator(".child")).toHaveAttribute("aria-current", "true"); // the column stays live and marks it
+	await expect(thread.getByRole("button", { name: "Progress, •", exact: true })).toBeVisible(); // the thread's header keeps the badge
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await thread.getByRole("button", { name: "back to parent" }).click();
 	await expect(thread).toHaveCount(0);
@@ -387,6 +388,7 @@ test("phone: badge, row, thread full screen, back returns to the parent chat", a
 	await expect(thread).toContainText("Child task: list the files here");
 	await expect(drawer).not.toBeInViewport();
 	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
+	await expect(thread.getByRole("button", { name: /^Progress/ })).toHaveText("•");
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await page.goBack(); // the drawer's entry was replaced: this lands on the parent chat
 	await expect(thread).toHaveCount(0);
