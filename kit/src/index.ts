@@ -6,3 +6,6 @@ export { TkToasts } from "./tk-toasts.ts";
 export { TkHeader } from "./tk-header.ts";
 export { TkShell } from "./tk-shell.ts";
 export type { Panel, PanelsState } from "./panels.ts";
+export { TkStat } from "./charts/tk-stat.ts";
+export { TkStats } from "./charts/tk-stats.ts";
+export { TkSparkline } from "./charts/tk-sparkline.ts";

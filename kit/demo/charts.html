@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-shell>
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>That's it kit charts</title>
+	<link rel="stylesheet" href="./kit.css" />
+	<script src="./theme-init.js"></script>
+	<script>
+		// ?theme=dark|light overrides the stored/system theme (classic script: runs after theme-init, before first paint).
+		{
+			const t = new URLSearchParams(location.search).get("theme");
+			if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+		}
+	</script>
+	<script type="module">import "./kit.js"</script>
+	<style>
+		section { padding: 18px; display: grid; gap: 14px; align-content: start; overflow-y: auto; }
+		section.main { max-width: 760px; }
+		h2 { margin: 0; font-size: 13px; font-weight: 700; }
+	</style>
+</head>
+<body>
+	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-charts-demo:panels">
+		<tk-header menu-label="Open menu" aside-label="Details"><h1 slot="title">Charts</h1></tk-header>
+		<section class="main" id="main-charts">
+			<h2>history</h2>
+			<tk-stats>
+				<tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks"></tk-stat>
+				<tk-stat label="sessions" value="42"></tk-stat>
+				<tk-stat label="characters" value="18400"></tk-stat>
+				<tk-stat label="practised" value="312" unit="min"></tk-stat>
+				<tk-stat label="streak" value="6" unit="d"></tk-stat>
+			</tk-stats>
+			<tk-sparkline id="spark-main"></tk-sparkline>
+		</section>
+		<section slot="aside" id="aside-charts">
+			<h2>history</h2>
+			<tk-stats>
+				<tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks"></tk-stat>
+				<tk-stat label="sessions" value="42"></tk-stat>
+				<tk-stat label="characters" value="18400"></tk-stat>
+				<tk-stat label="practised" value="312" unit="min"></tk-stat>
+				<tk-stat label="streak" value="6" unit="d"></tk-stat>
+			</tk-stats>
+		</section>
+	</tk-shell>
+	<script>
+		// Deterministic data (mulberry32): 40 days ending 2026-11-09 with some days skipped; later tasks chart it.
+		(() => {
+			let a = 20261110;
+			const rnd = () => {
+				a = (a + 0x6d2b79f5) | 0;
+				let t = Math.imul(a ^ (a >>> 15), 1 | a);
+				t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+				return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+			};
+			const key = (d) => d.toISOString().slice(0, 10);
+			const end = Date.UTC(2026, 10, 9);
+			const days = [];
+			for (let i = 39; i >= 0; i--) {
+				const day = key(new Date(end - i * 86400000));
+				if (rnd() < 0.3) { days.push({ day, wpm: null, typing: null }); continue; }
+				const wpm = Math.round(28 + (39 - i) * 0.2 + rnd() * 10);
+				days.push({ day, wpm, typing: wpm + Math.round(4 + rnd() * 6) });
+			}
+			const keys = "etaonisrhdlu".split("").map((k, i) => ({ key: k, wpm: Math.round(48 - i * 2 - rnd() * 3) }));
+			const cal = [];
+			for (let i = 83; i >= 0; i--) {
+				const day = key(new Date(end - i * 86400000));
+				cal.push({ day, value: rnd() < 0.35 ? 0 : Math.round(rnd() * 60) });
+			}
+			window.demo = { days, keys, cal };
+			const wpms = days.map((d) => d.wpm).filter((v) => v !== null);
+			const set = () => {
+				for (const s of document.querySelectorAll("tk-stat[wide]")) s.trend = wpms;
+				document.getElementById("spark-main").values = wpms;
+			};
+			set();
+		})();
+	</script>
+</body>
+</html>
