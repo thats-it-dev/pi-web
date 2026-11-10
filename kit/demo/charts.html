@@ -53,7 +53,7 @@
 		</section>
 	</tk-shell>
 	<script>
-		// Deterministic data (mulberry32): 40 days ending 2026-11-09 with some days skipped; later tasks chart it.
+		// Deterministic data (mulberry32): 40 days ending 2026-11-09, about 1 day in 9 skipped (as in mockup B).
 		(() => {
 			let a = 20261110;
 			const rnd = () => {
@@ -67,7 +67,7 @@
 			const days = [];
 			for (let i = 39; i >= 0; i--) {
 				const day = key(new Date(end - i * 86400000));
-				if (rnd() < 0.3) { days.push({ day, wpm: null, strokeWpm: null }); continue; }
+				if (rnd() < 1 / 9) { days.push({ day, wpm: null, strokeWpm: null }); continue; }
 				const wpm = Math.round(28 + (39 - i) * 0.2 + rnd() * 10);
 				days.push({ day, wpm, strokeWpm: wpm + Math.round(4 + rnd() * 6) });
 			}

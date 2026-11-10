@@ -1,4 +1,5 @@
-import { type PropertyDeclarations, type PropertyValues, css, html, nothing, svg } from "lit";
+import { type PropertyDeclarations, type PropertyValues, type SVGTemplateResult, css, html, nothing, svg } from "lit";
+import { guard } from "lit/directives/guard.js";
 import { ChartBase } from "./chart-base.ts";
 import { type DayInput, daySlots } from "./days.ts";
 import { compact, formatDay, formatValue, nearestIndex } from "./format.ts";
@@ -9,6 +10,10 @@ import { linearScale, niceTicks, seriesDomain } from "./scale.ts";
 export type TimeseriesSeries = { y: string; label: string; defined?: (row: any) => boolean };
 
 const MAX_SERIES = 4;
+const DEFAULT_HEIGHT = 140;
+
+type Line = TimeseriesSeries & { cls: string };
+type Geometry = { w: number; h: number; centres: number[]; pts: Pt[][]; back: SVGTemplateResult; front: SVGTemplateResult };
 const PAD_TOP = 8; // half a gridline label above the top gridline, and room for a marker
 const PAD_BOTTOM = 6; // a marker (r 4 + ring) at the bottom never clips
 const LABEL_PAD = 4; // gap between the plot and the gridline values
@@ -61,19 +66,18 @@ export class TkTimeseries extends ChartBase {
 	static styles = [
 		ChartBase.styles,
 		css`
-			:host { --tk-chart-surface: var(--bg); }
 			.plot { cursor: crosshair; }
 			svg { display: block; overflow: visible; }
 			text { font-size: 12px; fill: var(--text-secondary); }
 			.tick { text-anchor: end; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
 			.grid { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
 			.goal { stroke: var(--text-primary); stroke-opacity: 0.55; stroke-width: 1; shape-rendering: crispEdges; }
-			.goal-label { font-weight: 700; paint-order: stroke; stroke: var(--tk-chart-surface); stroke-width: 3px; stroke-linejoin: round; }
+			.goal-label { font-weight: 700; paint-order: stroke; stroke: var(--tk-chart-surface, var(--bg)); stroke-width: 3px; stroke-linejoin: round; }
 			.cross { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
 			.s1 { --c: var(--chart-1); } .s2 { --c: var(--chart-2); } .s3 { --c: var(--chart-3); } .s4 { --c: var(--chart-4); }
 			.line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 			.band { stroke: none; }
-			circle { fill: var(--c); stroke: var(--tk-chart-surface); stroke-width: 2; }
+			circle { fill: var(--c); stroke: var(--tk-chart-surface, var(--bg)); stroke-width: 2; }
 			.dates { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-secondary); }
 			.legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-secondary); }
 			.legend span { display: inline-flex; align-items: center; gap: 4px; }
@@ -90,9 +94,13 @@ export class TkTimeseries extends ChartBase {
 
 	private days: string[] = [];
 	private byDay = new Map<string, unknown>();
-	private lines: (TimeseriesSeries & { cls: string })[] = [];
-	// Slot centres of the last render, for hit-testing.
-	private centres: number[] = [];
+	private lines: Line[] = [];
+	// Cached layout, bumped by `version` whenever anything but the active index changes.
+	private version = 0;
+	private geo: Geometry | null = null;
+	private restIndex = -1;
+	private summaryCache: string | undefined;
+	private fontsLoaded = false;
 
 	constructor() {
 		super();
@@ -104,13 +112,16 @@ export class TkTimeseries extends ChartBase {
 		this.bandLabel = "";
 		this.goal = undefined;
 		this.goalLabel = "goal";
-		this.height = 140;
+		this.height = DEFAULT_HEIGHT;
 	}
 
 	connectedCallback(): void {
 		super.connectedCallback();
 		// Tick labels are measured with the body font; re-measure once web fonts have loaded.
-		document.fonts?.ready.then(() => this.requestUpdate());
+		document.fonts?.ready.then(() => {
+			this.fontsLoaded = true;
+			this.requestUpdate();
+		});
 	}
 
 	protected willUpdate(changed: PropertyValues<this>): void {
@@ -123,6 +134,14 @@ export class TkTimeseries extends ChartBase {
 			const list: TimeseriesSeries[] = this.series?.length ? this.series : this.y ? [{ y: this.y, label: "", defined: this.defined }] : [];
 			if (list.length > MAX_SERIES) console.warn(`tk-timeseries: at most ${MAX_SERIES} series are drawn; ignoring ${list.length - MAX_SERIES} more`);
 			this.lines = list.slice(0, MAX_SERIES).map((s, i) => ({ ...s, cls: `s${i + 1}` }));
+		}
+		// Anything but the active index (or a font load) invalidates the cached layout, summary and table.
+		if (this.fontsLoaded || [...changed.keys()].some((k) => k !== "active")) {
+			this.fontsLoaded = false;
+			this.version++;
+			this.restIndex = this.latest();
+			this.summaryCache = undefined;
+			this.geo = this.layout();
 		}
 		super.willUpdate(changed);
 	}
@@ -167,7 +186,7 @@ export class TkTimeseries extends ChartBase {
 	}
 
 	protected readoutText(i: number | null): string {
-		const at = i ?? this.latest();
+		const at = i ?? this.restIndex;
 		if (at < 0) return "";
 		const multi = this.lines.length > 1;
 		const parts = this.lines.map((s) => (multi ? `${s.label} ${this.fmt(this.value(s, at))}` : this.fmt(this.value(s, at))));
@@ -175,7 +194,7 @@ export class TkTimeseries extends ChartBase {
 	}
 
 	protected readoutContent(i: number | null): unknown {
-		const at = i ?? this.latest();
+		const at = i ?? this.restIndex;
 		if (at < 0) return "";
 		const multi = this.lines.length > 1;
 		// Room is tight in a 300px aside: with several series and the default format, the unit is
@@ -202,6 +221,11 @@ export class TkTimeseries extends ChartBase {
 	}
 
 	protected autoSummary(): string {
+		this.summaryCache ??= this.buildSummary();
+		return this.summaryCache;
+	}
+
+	private buildSummary(): string {
 		const n = this.days.length;
 		let withData = 0;
 		for (let i = 0; i < n; i++) if (this.lines.some((s) => this.value(s, i) !== null)) withData++;
@@ -231,8 +255,8 @@ export class TkTimeseries extends ChartBase {
 
 	private indexAt(clientX: number): number {
 		const plot = this.renderRoot.querySelector(".plot");
-		if (!plot || this.centres.length === 0) return -1;
-		return nearestIndex(this.centres, clientX - plot.getBoundingClientRect().left);
+		if (!plot || !this.geo) return -1;
+		return nearestIndex(this.geo.centres, clientX - plot.getBoundingClientRect().left);
 	}
 
 	private onPointer = (e: PointerEvent): void => {
@@ -255,50 +279,30 @@ export class TkTimeseries extends ChartBase {
 		return t.length >= 2 ? t : [lo, hi];
 	}
 
-	render() {
-		if (this.count() === 0 || this.lines.length === 0) return this.renderEmpty();
-		return html`${this.renderReadout()}
-			<div
-				class="plot"
-				part="plot"
-				tabindex="0"
-				role="img"
-				aria-label=${this.plotLabel()}
-				style="height:${this.height}px"
-				@keydown=${this.onPlotKeydown}
-				@blur=${this.onPlotBlur}
-				@pointerdown=${this.onPointer}
-				@pointermove=${this.onPointer}
-				@pointerleave=${this.onPointerOut}
-				@pointercancel=${this.onPointerOut}
-			>${this.width > 0 ? this.renderSvg() : nothing}</div>
-			<div class="dates" part="dates"><span>${formatDay(this.days[0])}</span><span>${formatDay(this.days[this.days.length - 1])}</span></div>
-			${this.renderLegend()}
-			${this.renderTable()}`;
+	/** The plot height: the `height` property when it is a positive number, else 140. */
+	private plotHeight(): number {
+		const h = this.height;
+		return typeof h === "number" && Number.isFinite(h) && h > 0 ? Math.max(24, h) : DEFAULT_HEIGHT;
 	}
 
-	private bandSeries(): [TimeseriesSeries & { cls: string }, TimeseriesSeries & { cls: string }] | null {
+	private bandSeries(): [Line, Line] | null {
 		const [a, b] = (this.band ?? "").trim().split(/\s+/);
 		const sa = this.lines.find((s) => s.y === a);
 		const sb = this.lines.find((s) => s.y === b);
 		return sa && sb && sa !== sb ? [sa, sb] : null;
 	}
 
-	private renderLegend() {
-		const band = this.bandSeries();
-		if (this.lines.length < 2 && !band) return nothing;
-		return html`<div class="legend" part="legend">
-			${this.lines.map((s) => html`<span><i class="sw ${s.cls}"></i>${s.label}</span>`)}
-			${band && this.bandLabel
-				? html`<span><i class="sw wash" style="background:color-mix(in srgb, var(--chart-${band[1].cls.slice(1)}) 12%, transparent)"></i>${this.bandLabel}</span>`
-				: nothing}
-		</div>`;
+	/** The band's wash: the FIRST band series' color at 12%. */
+	private bandFill(band: [Line, Line]): string {
+		return `color-mix(in srgb, var(--chart-${band[0].cls.slice(1)}) 12%, transparent)`;
 	}
 
-	private renderSvg() {
+	/** Everything that doesn't depend on the active index; rebuilt only when `version` moves. */
+	private layout(): Geometry | null {
 		const w = this.width;
-		const h = Math.max(24, this.height || 140);
 		const n = this.days.length;
+		if (w <= 0 || n === 0 || this.lines.length === 0) return null;
+		const h = this.plotHeight();
 		const goal = this.goalValue();
 
 		const all: number[] = [];
@@ -309,16 +313,14 @@ export class TkTimeseries extends ChartBase {
 		const y = linearScale([ticks[0], ticks[ticks.length - 1]], [h - PAD_BOTTOM, PAD_TOP]);
 		const labels = ticks.map((t) => compact(t));
 
-		const cs = getComputedStyle(this);
-		const font = `12px ${cs.fontFamily}`;
+		const font = `12px ${getComputedStyle(this).fontFamily}`;
 		const widest = Math.max(0, ...labels.map((l) => measure(l, font) ?? Number.NaN));
 		const padR = Number.isFinite(widest) && widest > 0 ? Math.ceil(widest) + LABEL_PAD : FALLBACK_PAD;
 		const pw = Math.max(1, w - padR);
 		const slot = pw / n;
-		const cx = (i: number) => (i + 0.5) * slot;
-		this.centres = this.days.map((_, i) => cx(i));
+		const centres = this.days.map((_, i) => (i + 0.5) * slot);
 
-		const pts: Pt[][] = values.map((vs) => vs.map((v, i) => (v === null ? null : { x: cx(i), y: y(v) })));
+		const pts: Pt[][] = values.map((vs) => vs.map((v, i) => (v === null ? null : { x: centres[i], y: y(v) })));
 		const band = this.bandSeries();
 		const bandPath = band ? areaPath(pts[this.lines.indexOf(band[0])], pts[this.lines.indexOf(band[1])]) : "";
 
@@ -329,23 +331,65 @@ export class TkTimeseries extends ChartBase {
 		const gy = goal === undefined ? 0 : Math.round(y(goal)) + 0.5;
 		// Goal label sits just above the line, or below it when there's no room above.
 		const goalLabelY = gy - 4 - 10 >= 0 ? gy - 4 : gy + 13;
-		const a = this.active;
 
-		return svg`<svg width=${w} height=${h} aria-hidden="true">
-			${ticks.map((t, k) => {
-				const ty = Math.round(y(t)) + 0.5;
-				return svg`${goal !== undefined && t === goal ? nothing : svg`<line class="grid" data-v=${t} x1="0" x2=${pw} y1=${ty} y2=${ty}></line>`}
-					<text class="tick" x=${w} y=${ty}>${labels[k]}</text>`;
-			})}
-			${bandPath ? svg`<path class="band" d=${bandPath} style="fill:color-mix(in srgb, var(--chart-${band![1].cls.slice(1)}) 12%, transparent)"></path>` : nothing}
+		const back = svg`${ticks.map((t, k) => {
+			const ty = Math.round(y(t)) + 0.5;
+			return svg`${goal !== undefined && t === goal ? nothing : svg`<line class="grid" data-v=${t} x1="0" x2=${pw} y1=${ty} y2=${ty}></line>`}
+				<text class="tick" x=${w} y=${ty}>${labels[k]}</text>`;
+		})}
+			${bandPath ? svg`<path class="band" d=${bandPath} style=${`fill:${this.bandFill(band!)}`}></path>` : nothing}
 			${goal !== undefined
-				? svg`<line class="goal" x1="0" x2=${pw} y1=${gy} y2=${gy}></line>
-					<text class="goal-label" x="0" y=${goalLabelY}>${this.goalLabel} ${compact(goal)}</text>`
-				: nothing}
-			${a !== null ? svg`<line class="cross" x1=${Math.round(cx(a)) + 0.5} x2=${Math.round(cx(a)) + 0.5} y1="0" y2=${h}></line>` : nothing}
-			${this.lines.map((s, k) => svg`<path class="line ${s.cls}" data-y=${s.y} d=${linePath(pts[k])}></path>`)}
-			${end ? svg`<circle class="end s1" cx=${end.x} cy=${end.y} r="4"></circle>` : nothing}
-			${a !== null ? this.lines.map((s, k) => (pts[k][a] ? svg`<circle class="ring ${s.cls}" cx=${pts[k][a]!.x} cy=${pts[k][a]!.y} r="4"></circle>` : nothing)) : nothing}
+				? svg`<line class="goal" x1="0" x2=${pw} y1=${gy} y2=${gy}></line>`
+				: nothing}`;
+		// The goal label goes over the lines: its surface-colored halo keeps it legible where they cross.
+		const front = svg`${this.lines.map((s, k) => svg`<path class="line ${s.cls}" data-y=${s.y} d=${linePath(pts[k])}></path>`)}
+			${goal !== undefined ? svg`<text class="goal-label" x="0" y=${goalLabelY}>${this.goalLabel} ${compact(goal)}</text>` : nothing}
+			${end ? svg`<circle class="end s1" cx=${end.x} cy=${end.y} r="4"></circle>` : nothing}`;
+		return { w, h, centres, pts, back, front };
+	}
+
+	render() {
+		if (this.count() === 0 || this.lines.length === 0) return this.renderEmpty();
+		const v = this.version;
+		return html`${this.renderReadout()}
+			<div
+				class="plot"
+				part="plot"
+				tabindex="0"
+				role="img"
+				aria-label=${this.plotLabel()}
+				style="height:${this.plotHeight()}px"
+				@keydown=${this.onPlotKeydown}
+				@blur=${this.onPlotBlur}
+				@pointerdown=${this.onPointer}
+				@pointermove=${this.onPointer}
+				@pointerleave=${this.onPointerOut}
+				@pointercancel=${this.onPointerOut}
+			>${this.geo ? this.renderSvg(this.geo) : nothing}</div>
+			${guard([v], () => html`<div class="dates" part="dates"><span>${formatDay(this.days[0])}</span><span>${formatDay(this.days[this.days.length - 1])}</span></div>
+				${this.renderLegend()}
+				${this.renderTable()}`)}`;
+	}
+
+	private renderLegend() {
+		const band = this.bandSeries();
+		if (this.lines.length < 2 && !band) return nothing;
+		return html`<div class="legend" part="legend">
+			${this.lines.map((s) => html`<span><i class="sw ${s.cls}"></i>${s.label}</span>`)}
+			${band && this.bandLabel ? html`<span><i class="sw wash" style=${`background:${this.bandFill(band)}`}></i>${this.bandLabel}</span>` : nothing}
+		</div>`;
+	}
+
+	// Only the crosshair and the rings depend on the active index; the rest is the cached layers.
+	private renderSvg(g: Geometry) {
+		const a = this.active;
+		const v = this.version;
+		const x = a === null ? 0 : Math.round(g.centres[a]) + 0.5;
+		return svg`<svg width=${g.w} height=${g.h} aria-hidden="true">
+			${guard([v], () => g.back)}
+			${a !== null ? svg`<line class="cross" x1=${x} x2=${x} y1="0" y2=${g.h}></line>` : nothing}
+			${guard([v], () => g.front)}
+			${a !== null ? this.lines.map((s, k) => (g.pts[k][a] ? svg`<circle class="ring ${s.cls}" cx=${g.pts[k][a]!.x} cy=${g.pts[k][a]!.y} r="4"></circle>` : nothing)) : nothing}
 		</svg>`;
 	}
 }

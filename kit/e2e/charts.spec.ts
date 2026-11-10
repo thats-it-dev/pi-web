@@ -128,6 +128,7 @@ test("missing days break the line", async ({ page }) => {
 	const finite = (k: string) => (r: any) => typeof r[k] === "number" && Number.isFinite(r[k]);
 	const s1 = await page.locator("#ts-aside path.line.s1").getAttribute("d");
 	const s2 = await page.locator("#ts-aside path.line.s2").getAttribute("d");
+	expect(runCount(days, finite("wpm"))).toBeGreaterThan(1); // the demo really has gaps
 	expect(mCount(s1!)).toBe(runCount(days, finite("wpm")));
 	expect(mCount(s2!)).toBe(runCount(days, (r) => r.strokeWpm > 0));
 	const main = await page.locator("#ts-main path.line.s1").getAttribute("d");
@@ -189,19 +190,26 @@ test("hover updates the readout, leave restores it", async ({ page }, info) => {
 test("keyboard steps and fires tk-readout", async ({ page }) => {
 	await tsReady(page);
 	const days: any[] = await page.evaluate(() => (window as any).demo.days);
+	const n = days.length;
 	await page.evaluate(() => {
 		(window as any).readouts = [];
 		document.addEventListener("tk-readout", (e) => (window as any).readouts.push((e as CustomEvent).detail.index));
 	});
+	const readouts = () => page.evaluate(() => (window as any).readouts as (number | null)[]);
 	const readout = page.locator("#ts-aside .readout");
-	await expect(readout).toContainText(await fmtDay(page, restDay(days)));
+	await expect(readout).not.toBeEmpty();
 	const rest = (await readout.textContent())!;
 	await page.locator("#ts-aside .plot").focus();
+	// End: the last slot, whatever day the rest state shows.
 	await page.keyboard.press("End");
+	await expect(readout).toContainText(await fmtDay(page, days[n - 1].day));
+	await expect.poll(readouts).toEqual([n - 1]);
 	await page.keyboard.press("ArrowLeft");
-	await expect(readout).toContainText(await fmtDay(page, days[days.length - 2].day));
-	expect(await page.evaluate(() => (window as any).readouts)).toContain(days.length - 2);
+	await expect(readout).toContainText(await fmtDay(page, days[n - 2].day));
+	await expect(readout).not.toContainText(await fmtDay(page, days[n - 1].day));
+	await expect.poll(readouts).toEqual([n - 1, n - 2]);
 	await page.keyboard.press("Escape");
+	await expect.poll(readouts).toEqual([n - 1, n - 2, null]);
 	await expect(readout).toHaveText(rest);
 });
 
@@ -228,4 +236,55 @@ test("dark theme uses dark chart colors", async ({ page }) => {
 	await tsReady(page, "/charts.html?theme=dark");
 	expect(await page.locator("#ts-aside path.line.s1").evaluate((p) => getComputedStyle(p).stroke)).toBe("rgb(255, 170, 0)");
 	expect(await page.locator("#ts-aside path.line.s2").evaluate((p) => getComputedStyle(p).stroke)).toBe("rgb(90, 166, 230)");
+});
+
+test("band washes the first band series' color", async ({ page }) => {
+	await tsReady(page);
+	const want = await page.evaluate(() => {
+		const p = document.createElement("span");
+		p.style.color = "color-mix(in srgb, var(--chart-1) 12%, transparent)";
+		document.body.append(p);
+		const c = getComputedStyle(p).color;
+		p.remove();
+		return c;
+	});
+	expect(await page.locator("#ts-aside path.band").evaluate((p) => getComputedStyle(p).fill)).toBe(want);
+	expect(await page.locator("#ts-aside .legend .sw.wash").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(want);
+});
+
+test("single series has no legend; two series do", async ({ page }) => {
+	await tsReady(page);
+	await expect(page.locator("#ts-main path.line")).toHaveCount(1);
+	await expect(page.locator("#ts-main .legend")).toHaveCount(0);
+	await expect(page.locator("#ts-aside .legend")).toHaveCount(1);
+});
+
+test("a fifth series warns and is not drawn", async ({ page }) => {
+	await tsReady(page);
+	const warnings: string[] = [];
+	page.on("console", (m) => {
+		if (m.type() === "warning") warnings.push(m.text());
+	});
+	await page.evaluate(() => {
+		const el = document.createElement("tk-timeseries") as any;
+		el.id = "ts-five";
+		el.series = ["a", "b", "c", "d", "e"].map((y) => ({ y, label: y }));
+		el.data = [0, 1, 2].map((i) => ({ day: `2026-11-0${i + 1}`, a: 1 + i, b: 2 + i, c: 3 + i, d: 4 + i, e: 5 + i }));
+		document.getElementById("main-charts")!.append(el);
+	});
+	await expect(page.locator("#ts-five path.line")).toHaveCount(4);
+	await expect(page.locator("#ts-five path.line.s4")).toHaveCount(1);
+	await expect.poll(() => warnings.filter((w) => w.includes("tk-timeseries")).length).toBeGreaterThan(0);
+});
+
+test("height falls back to 140", async ({ page }) => {
+	await tsReady(page);
+	const plot = page.locator("#ts-main .plot");
+	const h = () => plot.evaluate((p) => p.getBoundingClientRect().height);
+	await expect.poll(h).toBe(140);
+	await page.locator("#ts-main").evaluate((e) => e.setAttribute("height", "90"));
+	await expect.poll(h).toBe(90);
+	await page.locator("#ts-main").evaluate((e) => e.removeAttribute("height"));
+	await expect.poll(h).toBe(140);
+	expect(await plot.getAttribute("style")).not.toContain("null");
 });
