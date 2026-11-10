@@ -286,4 +286,30 @@ test.describe("header buttons", () => {
 		await expect(page.locator("tk-header .menu")).toHaveCount(1);
 		await expect(page.locator("tk-header .aside-toggle")).toHaveCount(0);
 	});
+
+	test("a removed header is released and a re-added one gets panels again", async ({ page }) => {
+		await page.goto("/");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		await expect(page.locator("tk-header .menu")).toHaveCount(1);
+		await page.evaluate(() => {
+			const h = document.querySelector("tk-header") as any;
+			(window as any).__h = h;
+			h.remove();
+		});
+		expect(await page.evaluate(() => (window as any).__h.panels)).toBeNull();
+		// A state change while detached must not reach it.
+		await page.evaluate(() => (document.querySelector("tk-shell") as any).hide("aside"));
+		await page.waitForTimeout(100);
+		expect(await page.evaluate(() => (window as any).__h.panels)).toBeNull();
+		await page.evaluate(() => document.querySelector("tk-shell")!.prepend((window as any).__h));
+		await expect.poll(() => page.evaluate(() => !!(window as any).__h.panels)).toBe(true);
+		await expect(page.locator("tk-header .aside-toggle")).toHaveCount(1);
+	});
+
+	test("a header nested in another component's shadow root gets buttons", async ({ page }) => {
+		await page.goto("/shadow.html");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		await expect(page.locator("x-wrap tk-header .menu")).toHaveCount(1);
+		await expect(page.locator("x-wrap tk-header .aside-toggle")).toHaveCount(1);
+	});
 });

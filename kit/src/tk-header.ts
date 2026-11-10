@@ -51,12 +51,19 @@ export class TkHeader extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		this.dispatchEvent(new CustomEvent("tk-header-connect", { detail: { header: this }, bubbles: true, composed: true }));
+		this.announce();
+		// Upgraded before an enclosing tk-shell was defined: nobody heard the first announcement, so repeat it.
+		if (!this.panels) void customElements.whenDefined("tk-shell").then(() => this.isConnected && !this.panels && this.announce());
 	}
 
 	disconnectedCallback(): void {
-		this.dispatchEvent(new CustomEvent("tk-header-disconnect", { detail: { header: this }, bubbles: true, composed: true }));
+		// Outside a shell there are no panel buttons; a shell stops tracking a header that is no longer connected.
+		this.panels = null;
 		super.disconnectedCallback();
+	}
+
+	private announce(): void {
+		this.dispatchEvent(new CustomEvent("tk-header-connect", { detail: { header: this }, bubbles: true, composed: true }));
 	}
 
 	private openNav(): void {

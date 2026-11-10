@@ -96,10 +96,6 @@ export class TkShell extends LitElement {
 			this.headers.add(header);
 			header.panels = this.state;
 		});
-		this.addEventListener("tk-header-disconnect", (e) => {
-			const header = (e as CustomEvent<{ header?: TkHeader }>).detail?.header;
-			if (header) this.headers.delete(header);
-		});
 		this.addEventListener("tk-hide-panel", (e) => this.withPanel(e, (p) => this.hide(p)));
 	}
 
@@ -262,7 +258,7 @@ export class TkShell extends LitElement {
 		const now = this.state;
 		const prev = this.lastState;
 		this.lastState = now;
-		for (const h of this.headers) h.panels = now;
+		this.pushPanels(now);
 		if (!prev) return;
 		for (const p of PANELS) {
 			if (prev[p].open === now[p].open && prev[p].docked === now[p].docked) continue;
@@ -272,6 +268,24 @@ export class TkShell extends LitElement {
 		const is = drawerOf(now);
 		if (is && is !== was) this.focusInto(is);
 		else if (was && !is) this.restoreFocus(was, now);
+	}
+
+	// Drops headers that left the page or moved under another shell, then hands the rest the current state.
+	private pushPanels(state: PanelsState): void {
+		for (const h of this.headers) {
+			if (!this.owns(h)) this.headers.delete(h);
+			else h.panels = state;
+		}
+	}
+
+	// True when the node is connected and this shell is an ancestor, crossing shadow roots.
+	private owns(node: Node): boolean {
+		if (!node.isConnected) return false;
+		for (let n: Node | null = node; n; ) {
+			if (n === this) return true;
+			n = n.parentNode ?? (n instanceof ShadowRoot ? n.host : null);
+		}
+		return false;
 	}
 
 	private panelEl(panel: Panel): HTMLElement | null {
