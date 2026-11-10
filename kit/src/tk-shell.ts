@@ -41,7 +41,9 @@ export class TkShell extends LitElement {
 			.sidebar { border-right: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
 			.details { border-left: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
 			/* a collapsed column keeps no border, or it would stick out of its 0-wide track */
-			.nav-closed .sidebar, .aside-closed .details { border-width: 0; }
+			@media (min-width: 900px) {
+				.nav-closed .sidebar, .aside-closed .details { border-width: 0; }
+			}
 			.main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 			/* the slot is display: contents, so the app's own children are what flex */
 			::slotted(:not([slot])) { flex: 1; min-height: 0; }
@@ -49,7 +51,7 @@ export class TkShell extends LitElement {
 			@media (max-width: 899px) {
 				.layout, .layout.nav-closed, .layout.aside-closed, .layout.nav-closed.aside-closed { grid-template-columns: minmax(0, 1fr); }
 				.details { display: none; }
-				.sidebar { position: fixed; inset: 0 auto 0 0; width: min(80vw, 360px); z-index: 20; transform: translateX(-100%); transition: transform 0.25s ease; box-shadow: 2px 0 12px rgba(0, 0, 0, 0.2); border-width: 1px; border-left-width: 0; border-top-width: 0; border-bottom-width: 0; }
+				.sidebar { position: fixed; inset: 0 auto 0 0; width: min(80vw, 360px); z-index: 20; transform: translateX(-100%); transition: transform 0.25s ease; box-shadow: 2px 0 12px rgba(0, 0, 0, 0.2); }
 				.nav-open .sidebar { transform: none; }
 				.overlay { display: block; position: fixed; inset: 0; background: var(--overlay); z-index: 10; opacity: 0; pointer-events: none; transition: opacity 0.25s; }
 				.nav-open .overlay { opacity: 1; pointer-events: auto; }
