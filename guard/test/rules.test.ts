@@ -260,3 +260,20 @@ test("reviewFree: docs, Markdown and CI files only", () => {
 	for (const f of ["docs/spec.md", "README.md", "AGENTS.md", ".github/workflows/deploy.yml"]) assert.equal(reviewFree(f), true, f);
 	for (const f of ["src/app-main.ts", "test/a.test.ts", "package.json", "e2e/x.spec.ts"]) assert.equal(reviewFree(f), false, f);
 });
+
+// --- whole-file rewrites ---
+
+test("a write over an existing app file of more than 80 lines is blocked once, then allowed", () => {
+	const rewrites = new Set<string>();
+	const lines = (p: string) => (p.endsWith("big.ts") ? 200 : p.endsWith("small.ts") ? 20 : undefined);
+	const e = env({ lines, rewrites });
+	const big = `${home}/workspace/apps/keeb/src/big.ts`;
+	assert.deepEqual(checkToolCall("write", { path: big, content: "x" }, e), { block: true, reason: REASONS.overwrite });
+	assert.equal(checkToolCall("write", { path: big, content: "x" }, e), undefined, "second try: Michael's agent means it");
+	assert.equal(checkToolCall("write", { path: `${home}/workspace/apps/keeb/src/small.ts`, content: "x" }, e), undefined, "short file");
+	assert.equal(checkToolCall("write", { path: `${home}/workspace/apps/keeb/src/new.ts`, content: "x" }, e), undefined, "new file");
+	assert.equal(checkToolCall("write", { path: `${home}/notes/big.ts`, content: "x" }, e), undefined, "not an app");
+	assert.deepEqual(checkToolCall("write", { path: "~/workspace/apps/keeb/docs/big.ts", content: "x" }, env({ lines, rewrites: new Set() })), { block: true, reason: REASONS.overwrite }, "~ path");
+	assert.deepEqual(checkToolCall("write", { path: "src/big.ts", content: "x" }, env({ cwd: `${home}/workspace/apps/keeb`, lines, rewrites: new Set() })), { block: true, reason: REASONS.overwrite }, "relative path");
+	assert.equal(checkToolCall("write", { path: big, content: "x" }, env()), undefined, "no line counter: not checked");
+});

@@ -1,5 +1,5 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 export type Block = { block: true; reason: string };
 
@@ -12,6 +12,7 @@ export const REASONS = {
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: `Blocked: \`pr\` and \`ship\` push, then wait for CI (usually 3-6 min, sometimes longer) and print progress while they wait. A bash timeout is only a cap; the command returns as soon as CI finishes. Rerun the same command with timeout 2400. If Michael asks why it takes a while, tell him it is waiting on CI.`,
 	review: `Blocked: run the reviewer before opening the PR. Write the diff to a file (\`cd <dir> && git diff main...HEAD > /tmp/<name>-review.diff\`) and, if the app generates content or changes with the user's progress, sample output at the first, a middle and the last stage to another file. Then call the \`subagent\` tool with agent "reviewer", \`async: false\` (so it waits for the review) and a task that names Michael's request, \`docs/spec.md\` and those files (call \`subagents_enable\` first if \`subagent\` is not available). Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 };
 
@@ -59,6 +60,10 @@ export type Env = {
 	reviewed?: () => boolean;
 	/** The branch changes more than docs, Markdown and CI files. */
 	codeChanged?: (dir: string) => boolean;
+	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
+	lines?: (path: string) => number | undefined;
+	/** Paths whose overwrite was already blocked once; the second try goes through. */
+	rewrites?: Set<string>;
 };
 
 const GIT = String.raw`\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+`;
@@ -160,7 +165,21 @@ export function checkToolCall(toolName: string, input: Record<string, unknown>, 
 		if (v) return v;
 	}
 	if (python.some((code) => pythonRewrite(code) && appDir(code, env.cwd, env.home))) return { block: true, reason: REASONS.rewrite };
+	if (toolName === "write" && typeof input.path === "string") return checkOverwrite(input.path, env);
 	return undefined;
+}
+
+export const OVERWRITE_LINES = 80;
+
+// A whole-file write over a long existing app file, blocked once per path.
+function checkOverwrite(raw: string, env: Env): Block | undefined {
+	if (!env.lines || !env.rewrites) return undefined;
+	const expanded = raw.replace(/^~(?=\/)/, env.home);
+	const path = isAbsolute(expanded) ? expanded : join(env.cwd, expanded);
+	if (!path.startsWith(`${join(env.home, "workspace", "apps")}/`)) return undefined;
+	if ((env.lines(path) ?? 0) <= OVERWRITE_LINES || env.rewrites.has(path)) return undefined;
+	env.rewrites.add(path);
+	return { block: true, reason: REASONS.overwrite };
 }
 
 // --- stalled turns ---
