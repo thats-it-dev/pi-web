@@ -92,6 +92,12 @@ A `tk-sheet` opened while a drawer is open stays usable, even if the sheet lives
 - `show(panel)`, `hide(panel)`, `toggle(panel)`: methods, where `panel` is `"nav"` or `"aside"`. They show, hide or toggle a docked column, or open or close a drawer. They do nothing for an empty panel.
 - `tk-panel-change`: event on the shell (bubbles, composed). `detail` is `{ panel: "nav" | "aside", open: boolean, docked: boolean }`. It fires when a panel opens, closes, docks or undocks, not on first render.
 
+- `tk-show-panel`, `tk-hide-panel`, `tk-toggle-panel`: events the shell listens for. Dispatch them from anywhere inside the shell (`bubbles: true, composed: true`) with `detail` `{ panel: "nav" | "aside" }`. They call `show`, `hide` and `toggle`. An event with a missing or unknown panel is ignored. `tk-open-nav` is accepted too and means `show("nav")`. For example, a hide button in the aside's own top row:
+
+```html
+<button onclick="this.dispatchEvent(new CustomEvent('tk-hide-panel', { detail: { panel: 'aside' }, bubbles: true, composed: true }))">Close</button>
+```
+
 `tk-header`:
 
 - `menu-label`: `string`, default `"Open menu"`. The label of the left button.
@@ -99,7 +105,7 @@ A `tk-sheet` opened while a drawer is open stays usable, even if the sheet lives
 - `aside-badge`: `string`, default empty. A short text (a count, for example) shown as a badge on the right button.
 - `tucked`: `boolean`, as before.
 - `panels`: `PanelsState | null` property, set by the enclosing shell. It is `null` outside a shell, where the header keeps its old phone-only menu button.
-- `tk-toggle-panel`: event the header sends when a panel button is pressed. `detail` is `{ panel }`. The shell listens for it. `tk-open-nav` is still sent when the nav panel opens.
+- `tk-toggle-panel`: event the header sends when a panel button is pressed (see above). `tk-open-nav` is still sent when the nav panel opens.
 - `tk-header-connect`: event the header sends when it connects, so the shell can hand it the panel state. `detail` is `{ header }`.
 
 `tk-sheet`:

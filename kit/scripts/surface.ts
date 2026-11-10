@@ -69,11 +69,13 @@ async function sourceTexts(srcDir: string): Promise<string[]> {
 	return out;
 }
 
-/** Custom event names the kit dispatches: `new CustomEvent("x")` literals plus the value of TOAST_EVENT. */
+/** Custom event names the kit dispatches (`new CustomEvent("x")` literals, the value of TOAST_EVENT) or listens for (`addEventListener("tk-x")`). */
 export function eventNames(sources: string[]): string[] {
 	const names: string[] = [];
 	for (const text of sources) {
 		for (const m of text.matchAll(/new CustomEvent(?:<[^>(]*>)?\(\s*["']([^"']+)["']/g)) names.push(m[1]);
+		// Events the kit listens for count too: apps dispatch them (tk-show-panel, tk-hide-panel).
+		for (const m of text.matchAll(/\baddEventListener\(\s*["'](tk-[^"']+)["']/g)) names.push(m[1]);
 		for (const m of text.matchAll(/\bTOAST_EVENT\s*=\s*["']([^"']+)["']/g)) names.push(m[1]);
 	}
 	return names;
