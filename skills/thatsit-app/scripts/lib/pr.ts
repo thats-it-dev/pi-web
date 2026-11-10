@@ -61,8 +61,7 @@ export async function openPr(
 	o: { title: string; body: string; gatewayPr?: number },
 	run: Run,
 	opts: PrOpts = {},
-): Promise<{ pr: string; preview: string; gatewayPreview?: string }> {
-	const clock = opts.clock ?? realClock;
+): Promise<{ pr: string; number: number }> {
 	const log = opts.log ?? stderrLog;
 	const { name, repo } = appRepo(dir);
 	if (o.gatewayPr !== undefined && JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway !== true) {
@@ -85,6 +84,21 @@ export async function openPr(
 	}
 	const { url: prUrl, number: num } = await pushAndOpen(dir, repo, { title: o.title, body }, run, existing);
 	log(`pushed; PR ${prUrl}`);
+	return { pr: prUrl, number: num };
+}
+
+// Waits for the branch's open PR to deploy and post its preview for the head commit.
+export async function waitPr(dir: string, run: Run, opts: PrOpts = {}): Promise<{ pr: string; preview: string; gatewayPreview?: string }> {
+	const clock = opts.clock ?? realClock;
+	const log = opts.log ?? stderrLog;
+	const { repo } = appRepo(dir);
+	const existing = await openPrOf(dir, run);
+	if (!existing) throw new Error("no open PR for this branch; run pr first");
+	const prUrl = existing.url;
+	const num = existing.number;
+	const prefix = `Gateway: ${GATEWAY_REPO}#`;
+	const gwLine = existing.body.split("\n").map((l) => l.trim()).find((l) => /^Gateway: \S+#\d+$/.test(l) && l.startsWith(prefix));
+	const gatewayPrNum = gwLine ? Number(gwLine.slice(prefix.length)) : undefined;
 
 	const sha = await headSha(dir, run);
 	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs, "deploy", log, opts.progressMs);
@@ -98,11 +112,11 @@ export async function openPr(
 		const c = parseComments(out).filter((c) => c.user?.login === "github-actions[bot]" && c.body?.includes("<!-- thatsit-preview -->")).pop();
 		const url = c?.body?.match(/^Preview: (\S+)/m)?.[1];
 		if (url && c?.body?.match(/^Commit (\w+)/m)?.[1] === short) {
-			if (o.gatewayPr === undefined) return { pr: prUrl, preview: url };
+			if (gatewayPrNum === undefined) return { pr: prUrl, preview: url };
 			// Editing the body starts no run, so a deploy from before the Gateway line was added is not wired to it.
-			const gw = gatewayPreviewUrl(o.gatewayPr);
+			const gw = gatewayPreviewUrl(gatewayPrNum);
 			if (!c.body!.split("\n").some((l) => l.trim() === `Gateway preview: ${gw}`)) {
-				throw new Error(`the preview ${url} is not using gateway preview #${o.gatewayPr} (it was deployed before the Gateway line was in the PR body); run cd ${dir} && git commit --allow-empty -m "Use gateway preview #${o.gatewayPr}", then rerun the same pr`);
+				throw new Error(`the preview ${url} is not using gateway preview #${gatewayPrNum} (it was deployed before the Gateway line was in the PR body); run cd ${dir} && git commit --allow-empty -m "Use gateway preview #${gatewayPrNum}", then rerun pr and pr-wait`);
 			}
 			return { pr: prUrl, preview: url, gatewayPreview: gw };
 		}

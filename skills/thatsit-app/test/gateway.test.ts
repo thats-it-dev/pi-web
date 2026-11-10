@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gatewayCheckout, gatewayPr, gatewayRegister, gatewayPreviewUrl } from "../scripts/lib/gateway.ts";
-import { openPr } from "../scripts/lib/pr.ts";
+import { gatewayCheckout, gatewayPr, gatewayRegister, gatewayPreviewUrl, waitGatewayPr } from "../scripts/lib/gateway.ts";
+import { openPr, waitPr } from "../scripts/lib/pr.ts";
 import type { Clock } from "../scripts/lib/wait.ts";
 import { fakeRun, type Reply } from "./helpers.ts";
 
@@ -147,29 +147,45 @@ const gwPrTable = (over: T = {}): T => ({
 	[`gh api repos/${GW}/issues/12/comments`]: comments("hello", okComment()),
 	...over,
 });
+// The branch already has its open PR, as it does once gateway-pr has run.
+const gwWaitTable = (over: T = {}): T => gwPrTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${GW}/pull/12`, state: "OPEN", body: "x" }) }, ...over });
 const gwOpts = { title: "Register tips", body: "Adds tips" };
 
-test("gateway-pr: test workflow, then spark-preview success maps to the preview URL", async () => {
+test("waitGatewayPr: test workflow, then spark-preview success maps to the preview URL", async () => {
 	const { dir } = gwDir();
-	const f = fakeRun(gwPrTable());
-	const r = await gatewayPr(dir, gwOpts, f.run, { clock: clock() });
+	const f = fakeRun(gwWaitTable());
+	const r = await waitGatewayPr(dir, f.run, { clock: clock() });
 	assert.deepEqual(r, { pr: `https://github.com/${GW}/pull/12`, number: 12, preview: PREVIEW });
 	const l = f.lines();
 	assert.ok(!l.some((x) => x.startsWith("npm")));
 	assert.ok(!l.includes("npm run e2e"));
-	assert.ok(l.includes(`gh pr create --repo ${GW} --title Register tips --body Adds tips`));
+	assert.ok(!l.some((x) => x.startsWith("git push") || x.startsWith("gh pr create")));
 	assert.ok(l.includes(`gh run list --repo ${GW} --commit ${SHA} --workflow test.yml --json databaseId,status,conclusion`));
 	assert.ok(l.indexOf(`gh run watch 77 --repo ${GW} --exit-status`) < l.indexOf(`gh api repos/${GW}/commits/${SHA}/status`));
 	assert.ok(!l.some((x) => x.startsWith("gh pr merge")));
 });
 
-test("gateway-pr: spark-preview failure exits with the comment's test output tail", async () => {
+test("gateway-pr returns right after opening, without waiting for CI", async () => {
 	const { dir } = gwDir();
-	const f = fakeRun(gwPrTable({
+	const f = fakeRun(gwPrTable());
+	const r = await gatewayPr(dir, gwOpts, f.run, { clock: clock() });
+	assert.deepEqual(r, { pr: `https://github.com/${GW}/pull/12`, number: 12 });
+	assert.ok(f.lines().includes(`gh pr create --repo ${GW} --title Register tips --body Adds tips`));
+	assert.ok(!f.lines().some((l) => l.startsWith("gh run") || l.startsWith("gh api")));
+});
+
+test("waitGatewayPr fails when the branch has no open PR", async () => {
+	const { dir } = gwDir();
+	await assert.rejects(waitGatewayPr(dir, fakeRun(gwPrTable()).run, { clock: clock() }), /no open PR for this branch; run gateway-pr first/);
+});
+
+test("waitGatewayPr: spark-preview failure exits with the comment's test output tail", async () => {
+	const { dir } = gwDir();
+	const f = fakeRun(gwWaitTable({
 		[`gh api repos/${GW}/commits/${SHA}/status`]: status("failure"),
 		[`gh api repos/${GW}/issues/12/comments`]: comments(failComment),
 	}));
-	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: clock() }), (e: Error) => {
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /spark preview .*failed/);
 		assert.match(e.message, /tests failed/);
 		assert.match(e.message, /out 1\b/);
@@ -183,36 +199,36 @@ test("gateway-pr: waits through pending and a stale comment until the head sha i
 	const { dir } = gwDir();
 	let s = 0;
 	let c = 0;
-	const f = fakeRun(gwPrTable({
+	const f = fakeRun(gwWaitTable({
 		[`gh api repos/${GW}/commits/${SHA}/status`]: () => (++s < 3 ? (s === 1 ? { stdout: JSON.stringify({ statuses: [] }) } : status("pending")) : status("success")),
 		[`gh api repos/${GW}/issues/12/comments`]: () => comments(++c < 3 ? okComment("0".repeat(40)) : okComment()),
 	}));
-	const r = await gatewayPr(dir, gwOpts, f.run, { clock: clock() });
+	const r = await waitGatewayPr(dir, f.run, { clock: clock() });
 	assert.equal(r.preview, PREVIEW);
 });
 
 test("gateway-pr: a No preview comment exits 1 with that message", async () => {
 	const { dir } = gwDir();
-	const f = fakeRun(gwPrTable({
-		"gh pr create": { stdout: `https://github.com/${GW}/pull/512\n` },
+	const f = fakeRun(gwWaitTable({
+		"gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${GW}/pull/512`, state: "OPEN", body: "" }) },
 		[`gh api repos/${GW}/commits/${SHA}/status`]: { stdout: JSON.stringify({ statuses: [] }) },
 		[`gh api repos/${GW}/issues/512/comments`]: comments("<!-- spark-preview -->\nNo preview: PR numbers above 499 have no preview port."),
 	}));
-	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: clock() }), /No preview: PR numbers above 499/);
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: clock() }), /No preview: PR numbers above 499/);
 });
 
 test("gateway-pr: a red test workflow fails before waiting for the spark", async () => {
 	const { dir } = gwDir();
-	const f = fakeRun(gwPrTable({ "gh run watch": { code: 1 }, "gh run view": { stdout: "boom line" } }));
-	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: clock() }), /test run 77 failed.*\n[\s\S]*boom line/);
+	const f = fakeRun(gwWaitTable({ "gh run watch": { code: 1 }, "gh run view": { stdout: "boom line" } }));
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: clock() }), /test run 77 failed.*\n[\s\S]*boom line/);
 	assert.ok(!f.lines().some((l) => l.includes("/status")));
 });
 
 test("gateway-pr: gives up after 20 minutes without a spark-preview result", async () => {
 	const { dir } = gwDir();
 	const c = clock();
-	const f = fakeRun(gwPrTable({ [`gh api repos/${GW}/commits/${SHA}/status`]: status("pending") }));
-	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: c }), /20 min/);
+	const f = fakeRun(gwWaitTable({ [`gh api repos/${GW}/commits/${SHA}/status`]: status("pending") }));
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: c }), /20 min/);
 	assert.ok(c.t >= 20 * 60_000 && c.t <= 21 * 60_000);
 });
 
@@ -273,13 +289,16 @@ const appPrTable = (over: T = {}): T => ({
 	...over,
 });
 
-test("pr --gateway-pr 12 puts the Gateway line in the body and returns the gateway preview", async () => {
+test("pr --gateway-pr 12 puts the Gateway line in the body; waitPr returns the gateway preview", async () => {
 	const f = fakeRun(appPrTable());
 	const r = await openPr(appDir(), { title: "Use gateway", body: "Reads models", gatewayPr: 12 }, f.run, { clock: clock() });
-	assert.deepEqual(r, { pr: "https://github.com/thats-it-dev/foo/pull/5", preview: `https://feat-x.${SUB}`, gatewayPreview: PREVIEW });
+	assert.deepEqual(r, { pr: "https://github.com/thats-it-dev/foo/pull/5", number: 5 });
 	const create = f.calls.find((c) => c.cmd === "gh" && c.args[0] === "pr" && c.args[1] === "create")!;
 	const body = create.args[create.args.indexOf("--body") + 1];
 	assert.match(body, /^Reads models\n\nGateway: thats-it-dev\/spark-gateway#12$/);
+	const w = fakeRun(appPrTable({ "gh pr view": { stdout: JSON.stringify({ url: "https://github.com/thats-it-dev/foo/pull/5", state: "OPEN", body } ) } }));
+	const rw = await waitPr(appDir(), w.run, { clock: clock() });
+	assert.deepEqual(rw, { pr: "https://github.com/thats-it-dev/foo/pull/5", preview: `https://feat-x.${SUB}`, gatewayPreview: PREVIEW });
 });
 
 test("pr --gateway-pr on a reused PR edits the body before pushing", async () => {
@@ -311,21 +330,21 @@ test("pr --gateway-pr refuses an app that predates gateway support, before pushi
 test("gateway-pr: a failure status without a comment for the head fails after a minute with the status description", async () => {
 	const { dir } = gwDir();
 	const c = clock();
-	const f = fakeRun(gwPrTable({
+	const f = fakeRun(gwWaitTable({
 		[`gh api repos/${GW}/commits/${SHA}/status`]: { stdout: JSON.stringify({ statuses: [{ context: "spark-preview", state: "failure", description: "health check failed" }] }) },
 		[`gh api repos/${GW}/issues/12/comments`]: comments(okComment("0".repeat(40))),
 	}));
-	await assert.rejects(gatewayPr(dir, gwOpts, f.run, { clock: c }), /failed \(health check failed\)/);
+	await assert.rejects(waitGatewayPr(dir, f.run, { clock: c }), /failed \(health check failed\)/);
 	assert.ok(c.t >= 60_000 && c.t < 2 * 60_000);
 });
 
-test("pr --gateway-pr fails when the app preview was not deployed with the Gateway line", async () => {
+test("waitPr fails when the app preview was not deployed with the Gateway line", async () => {
 	const f = fakeRun(appPrTable({
-		"gh pr view": { stdout: JSON.stringify({ url: "https://github.com/thats-it-dev/foo/pull/5", state: "OPEN", body: "Old body" }) },
+		"gh pr view": { stdout: JSON.stringify({ url: "https://github.com/thats-it-dev/foo/pull/5", state: "OPEN", body: "Old body\n\nGateway: thats-it-dev/spark-gateway#12" }) },
 		"gh api": { stdout: JSON.stringify([{ user: { login: "github-actions[bot]" }, body: appComment(false) }]) },
 	}));
 	const dir = appDir();
-	await assert.rejects(openPr(dir, { title: "t", body: "b", gatewayPr: 12 }, f.run, { clock: clock() }), (e: Error) => {
+	await assert.rejects(waitPr(dir, f.run, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /not using gateway preview #12/);
 		assert.ok(e.message.includes(`cd ${dir} && git commit --allow-empty -m "Use gateway preview #12"`), e.message);
 		return true;

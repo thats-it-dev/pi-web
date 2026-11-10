@@ -82,9 +82,8 @@ export async function gatewayPr(
 	dir: string,
 	o: { title: string; body: string },
 	run: Run,
-	opts: GatewayPrOpts = {},
-): Promise<{ pr: string; number: number; preview: string }> {
-	const clock = opts.clock ?? realClock;
+	_opts: GatewayPrOpts = {},
+): Promise<{ pr: string; number: number }> {
 	const repo = GATEWAY_REPO;
 	await requireGatewayClone(dir, run);
 	if ((await branchOf(dir, run)) === "main") throw new Error("gateway-pr will not run on main; create one with git switch -c <name>, commit, then run gateway-pr");
@@ -95,7 +94,18 @@ export async function gatewayPr(
 	if (bad.length) throw new Error(`gateway-pr only sends apps.json and apps/<app>/ changes; this branch also changes: ${bad.join(", ")}. Undo those (never edit src/)`);
 
 	const existing = await openPrOf(dir, run);
-	const { url: prUrl, number: n } = await pushAndOpen(dir, repo, o, run, existing);
+	const { url, number } = await pushAndOpen(dir, repo, o, run, existing);
+	return { pr: url, number };
+}
+
+// Waits for the open PR's GitHub CI and then the spark's own test + start of the preview.
+export async function waitGatewayPr(dir: string, run: Run, opts: GatewayPrOpts = {}): Promise<{ pr: string; number: number; preview: string }> {
+	const clock = opts.clock ?? realClock;
+	const repo = GATEWAY_REPO;
+	await requireGatewayClone(dir, run);
+	const existing = await openPrOf(dir, run);
+	if (!existing) throw new Error("no open PR for this branch; run gateway-pr first");
+	const { url: prUrl, number: n } = existing;
 
 	// One 20-minute budget for GitHub CI and the spark's own test + start of the preview.
 	const deadline = clock.now() + (opts.timeoutMs ?? GATEWAY_WAIT_MS);

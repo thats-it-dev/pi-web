@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ship } from "../scripts/lib/ship.ts";
-import { openPr } from "../scripts/lib/pr.ts";
+import { openPr, waitPr } from "../scripts/lib/pr.ts";
 import type { Clock } from "../scripts/lib/wait.ts";
 import { fakeRun, type Reply } from "./helpers.ts";
 
@@ -159,23 +159,40 @@ const prTable = (over: T = {}): T => ({
 	...over,
 });
 const opts = { title: "Add x", body: "Does x" };
+// The branch already has its open PR, as it does once pr has run.
+const waitTable = (over: T = {}): T => prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/5`, state: "OPEN", body: "" }) }, ...over });
 
-test("pr happy path: exact calls and preview URL", async () => {
+test("openPr happy path: pushes and opens, returns the PR without watching", async () => {
 	const f = fakeRun(prTable());
-	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
-	assert.deepEqual(r, { pr: `https://github.com/${REPO}/pull/5`, preview: `https://feat-x.${SUB}` });
+	const r = await openPr(appDir(), opts, f.run, { clock: clock(), log: () => {} });
+	assert.deepEqual(r, { pr: `https://github.com/${REPO}/pull/5`, number: 5 });
 	assert.deepEqual(f.lines().filter((l) => !l.startsWith("git status") && !l.startsWith("git fetch")), [
 		"git rev-parse --abbrev-ref HEAD",
 		"git rev-list --count origin/main..HEAD",
 		"gh pr view --json url,state,body",
 		"git push -u origin HEAD",
 		`gh pr create --repo ${REPO} --title Add x --body Does x`,
+	]);
+});
+
+test("waitPr returns the preview for the head commit", async () => {
+	const f = fakeRun(waitTable());
+	const r = await waitPr(appDir(), f.run, { clock: clock(), log: () => {} });
+	assert.deepEqual(r, { pr: `https://github.com/${REPO}/pull/5`, preview: `https://feat-x.${SUB}` });
+	assert.deepEqual(f.lines(), [
+		"gh pr view --json url,state,body",
 		"git rev-parse HEAD",
 		`gh run list --repo ${REPO} --commit ${SHA} --json databaseId,status,conclusion`,
 		`gh run watch 9 --repo ${REPO} --exit-status`,
 		`gh run view 9 --repo ${REPO} --json jobs`,
 		`gh api repos/${REPO}/issues/5/comments --paginate`,
 	]);
+});
+
+test("waitPr fails with run pr first when the branch has no open PR", async () => {
+	const f = fakeRun(waitTable({ "gh pr view": { code: 1, stderr: "no pull requests found" } }));
+	await assert.rejects(waitPr(appDir(), f.run, { clock: clock() }), /^Error: no open PR for this branch; run pr first$/);
+	assert.ok(!f.lines().some((l) => l.startsWith("gh run")));
 });
 
 test("pr refuses on main, dirty tree, and no commits ahead", async () => {
@@ -191,11 +208,11 @@ test("pr refuses on main, dirty tree, and no commits ahead", async () => {
 });
 
 test("pr red run: error carries the log tail, old preview is not returned", async () => {
-	const f = fakeRun(prTable({
+	const f = fakeRun(waitTable({
 		"gh run watch": { code: 1 },
 		"gh run view": view("failure", Array.from({ length: 50 }, (_, i) => `row ${i + 1}`).join("\n")),
 	}));
-	await assert.rejects(openPr(appDir(), opts, f.run, { clock: clock() }), (e: Error) => {
+	await assert.rejects(waitPr(appDir(), f.run, { clock: clock() }), (e: Error) => {
 		assert.match(e.message, /row 50/);
 		assert.doesNotMatch(e.message, /row 10\b/);
 		assert.doesNotMatch(e.message, /Preview/);
@@ -206,24 +223,24 @@ test("pr red run: error carries the log tail, old preview is not returned", asyn
 
 test("pr stale comment SHA counts as no preview and fails after the bounded retry", async () => {
 	const c = clock();
-	const f = fakeRun(prTable({ "gh api": { stdout: JSON.stringify([comment("0000000")]) } }));
-	await assert.rejects(openPr(appDir(), opts, f.run, { clock: c }), /preview/i);
+	const f = fakeRun(waitTable({ "gh api": { stdout: JSON.stringify([comment("0000000")]) } }));
+	await assert.rejects(waitPr(appDir(), f.run, { clock: c }), /preview/i);
 	assert.ok(c.t >= 60000 && c.t <= 70000);
 	assert.ok(f.lines().filter((l) => l.startsWith("gh api")).length > 1);
 });
 
 test("pr picks up the comment once it is updated to the head SHA", async () => {
 	let n = 0;
-	const f = fakeRun(prTable({ "gh api": () => ({ stdout: JSON.stringify([comment(++n < 3 ? "0000000" : "83a7f06")]) }) }));
-	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
+	const f = fakeRun(waitTable({ "gh api": () => ({ stdout: JSON.stringify([comment(++n < 3 ? "0000000" : "83a7f06")]) }) }));
+	const r = await waitPr(appDir(), f.run, { clock: clock() });
 	assert.equal(r.preview, `https://feat-x.${SUB}`);
 });
 
 test("pr ignores a marker comment from a non-bot user and handles concatenated pages", async () => {
-	const f = fakeRun(prTable({
+	const f = fakeRun(waitTable({
 		"gh api": { stdout: `${JSON.stringify([comment("83a7f06", "mallory")])}${JSON.stringify([comment("83a7f06")])}` },
 	}));
-	const r = await openPr(appDir(), opts, f.run, { clock: clock() });
+	const r = await waitPr(appDir(), f.run, { clock: clock() });
 	assert.equal(r.preview, `https://feat-x.${SUB}`);
 });
 
@@ -242,8 +259,8 @@ test("ship: a skipped-deploy success on main does not count as already shipped",
 });
 
 test("pr: a skipped deploy step is an error, not 'no preview'", async () => {
-	const f = fakeRun(prTable({ "gh run view": view("skipped") }));
-	await assert.rejects(openPr(appDir(), opts, f.run, { clock: clock() }), /deploy step was skipped/);
+	const f = fakeRun(waitTable({ "gh run view": view("skipped") }));
+	await assert.rejects(waitPr(appDir(), f.run, { clock: clock() }), /deploy step was skipped/);
 	assert.ok(!f.lines().some((l) => l.startsWith("gh api")));
 });
 
@@ -275,7 +292,7 @@ test("pr: an existing OPEN PR is reused; a branch whose PR was merged is refused
 });
 
 test("pr reports progress: the PR, then the CI step it is waiting on", async () => {
-	const f = fakeRun(prTable({
+	const f = fakeRun(waitTable({
 		"gh run view": (c) => (c.args.includes("--json") ? { stdout: JSON.stringify({ jobs: [{ steps: [{ name: "Run npm run e2e", status: "in_progress" }, { name: "Deploy to Cloudflare Pages", conclusion: "success" }] }] }) } : { stdout: "" }),
 	}));
 	// gh run watch blocks for a while, as it does on a real run.
@@ -284,8 +301,10 @@ test("pr reports progress: the PR, then the CI step it is waiting on", async () 
 		return f.run(cmd, args, o);
 	};
 	const lines: string[] = [];
-	await openPr(appDir(), opts, slow, { clock: clock(), log: (l) => lines.push(l), progressMs: 10 });
+	const dir = appDir();
+	await openPr(dir, opts, f.run, { clock: clock(), log: (l) => lines.push(l) });
+	assert.ok(lines.some((l) => /pushed; PR .*pull\/5/.test(l)), lines.join("\n"));
+	await waitPr(dir, slow, { clock: clock(), log: (l) => lines.push(l), progressMs: 10 });
 	assert.ok(!lines.some((l) => /local check/.test(l)), lines.join("\n"));
-	assert.ok(lines.some((l) => /pull\/5/.test(l)), lines.join("\n"));
 	assert.ok(lines.some((l) => /waiting for CI.*Run npm run e2e/.test(l)), lines.join("\n"));
 });
