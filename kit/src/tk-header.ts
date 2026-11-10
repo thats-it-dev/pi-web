@@ -62,6 +62,11 @@ export class TkHeader extends LitElement {
 		super.disconnectedCallback();
 	}
 
+	protected updated(changed: Map<PropertyKey, unknown>): void {
+		// The enclosing shell draws its home-screen top line on phones only while the header is tucked away.
+		if (changed.has("tucked")) this.dispatchEvent(new CustomEvent("tk-header-tuck", { bubbles: true, composed: true }));
+	}
+
 	private announce(): void {
 		this.dispatchEvent(new CustomEvent("tk-header-connect", { detail: { header: this }, bubbles: true, composed: true }));
 	}

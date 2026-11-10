@@ -42,7 +42,11 @@ export class TkShell extends LitElement {
 			/* Home-screen app: a line under the system status bar, so the panels' side borders meet
 			   something at the top instead of stopping in mid-air. Above headers, below drawers and the dim. */
 			@media (display-mode: standalone) {
-				:host::before { content: ""; position: absolute; left: 0; right: 0; top: env(safe-area-inset-top); height: 1px; background: var(--line); z-index: 6; pointer-events: none; }
+				:host::before { content: ""; position: absolute; left: 0; right: 0; top: env(safe-area-inset-top); height: 1px; background: var(--line); z-index: 6; pointer-events: none; transition: opacity 0.2s ease; }
+			}
+			/* On a phone the header's own bottom border does the job until the header tucks away. */
+			@media (display-mode: standalone) and (max-width: 899px) {
+				:host(:not([header-tucked]))::before { opacity: 0; }
 			}
 			/* Fixed tracks, so a hidden (absent) panel never shifts the main area into its column. */
 			.layout { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--aside-w); height: 100%; transition: grid-template-columns 0.25s ease; }
@@ -102,7 +106,9 @@ export class TkShell extends LitElement {
 			if (!header) return;
 			this.headers.add(header);
 			header.panels = this.state;
+			this.syncTucked();
 		});
+		this.addEventListener("tk-header-tuck", () => this.syncTucked());
 		this.addEventListener("tk-hide-panel", (e) => this.withPanel(e, (p) => this.hide(p)));
 	}
 
@@ -296,6 +302,12 @@ export class TkShell extends LitElement {
 	}
 
 	// True when the node is connected and this shell is an ancestor, crossing shadow roots.
+	// header-tucked: some header of this shell is tucked away (a phone scrolling down). A header that left
+	// the page while tucked stops counting the next time any header connects or tucks.
+	private syncTucked(): void {
+		this.toggleAttribute("header-tucked", [...this.headers].some((h) => this.owns(h) && h.tucked));
+	}
+
 	private owns(node: Node): boolean {
 		if (!node.isConnected) return false;
 		for (let n: Node | null = node; n; ) {

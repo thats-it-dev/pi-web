@@ -338,10 +338,13 @@ test("phone: scrolling down tucks the header away completely, scrolling up bring
 	const scroller = page.locator("pi-session .scroll");
 	await scroller.evaluate((el) => el.scrollBy(0, 300));
 	await expect(header).not.toBeInViewport();
+	const shell = page.locator("tk-shell");
+	await expect(shell).toHaveAttribute("header-tucked", ""); // a home-screen app draws its top line now
 	// No band left where the header was: the chat itself reaches the top of the screen.
 	expect(await scroller.evaluate((el) => el.getBoundingClientRect().top)).toBeLessThanOrEqual(1);
 	await scroller.evaluate((el) => el.scrollBy(0, -10));
 	await expect(header).toBeInViewport();
+	await expect(shell).not.toHaveAttribute("header-tucked");
 });
 
 test("phone: finished subagents still get a badge", async ({ page, isMobile }) => {
