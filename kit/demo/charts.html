@@ -35,6 +35,8 @@
 			<tk-sparkline id="spark-main"></tk-sparkline>
 			<h2>speed</h2>
 			<tk-timeseries id="ts-main" y="wpm" goal="40" unit="wpm"></tk-timeseries>
+			<h2>keys, no goal</h2>
+			<tk-bars id="bars-nogoal" label="key" value="wpm" unit="wpm"></tk-bars>
 			<h2>empty</h2>
 			<tk-timeseries id="ts-empty" y="wpm" unit="wpm"></tk-timeseries>
 			<h2>one day</h2>
@@ -50,6 +52,10 @@
 				<tk-stat label="streak" value="6" unit="d"></tk-stat>
 			</tk-stats>
 			<tk-timeseries id="ts-aside" x="day" band="wpm strokeWpm" band-label="pausing" goal="40" unit="wpm"></tk-timeseries>
+			<h2>slowest keys</h2>
+			<tk-bars id="bars-aside" label="key" value="wpm" goal="40" unit="wpm"></tk-bars>
+			<h2>time between keys</h2>
+			<tk-bars id="bars-ms" label="key" value="ms" goal="200" lower unit="ms"></tk-bars>
 		</section>
 	</tk-shell>
 	<script>
@@ -81,7 +87,9 @@
 				const day = key(new Date(end - i * 86400000));
 				cal.push({ day, value: rnd() < 0.35 ? 0 : Math.round(rnd() * 60) });
 			}
-			window.demo = { days, keys, cal };
+			// Latency per key (ms, lower is better): 200 sits exactly on the goal.
+			const ms = [["e", 170], ["t", 190], ["a", 200], ["o", 225], ["n", 260], ["i", 310], ["s", 400]].map(([key, ms]) => ({ key, ms }));
+			window.demo = { days, keys, cal, ms };
 			const wpms = days.map((d) => d.wpm).filter((v) => v !== null);
 			const set = () => {
 				for (const s of document.querySelectorAll("tk-stat[wide]")) s.trend = wpms;
@@ -93,6 +101,9 @@
 				];
 				aside.data = days;
 				document.getElementById("ts-main").data = days;
+				document.getElementById("bars-aside").data = keys;
+				document.getElementById("bars-nogoal").data = keys;
+				document.getElementById("bars-ms").data = ms;
 				document.getElementById("ts-empty").data = [];
 				document.getElementById("ts-one").data = [days[days.length - 1].wpm !== null ? days[days.length - 1] : days.find((d) => d.wpm !== null)];
 			};

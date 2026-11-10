@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Every chart element on the demo page. Later tasks append their tags here so the text-size test covers them.
-const CHART_TAGS = ["tk-stat", "tk-sparkline", "tk-timeseries"];
+const CHART_TAGS = ["tk-stat", "tk-sparkline", "tk-timeseries", "tk-bars"];
 
 /** Computed font-size (px) of every element that has direct text, walking open shadow roots under `selector`. */
 export async function textSizes(page: Page, selector: string): Promise<number[]> {
@@ -103,7 +103,7 @@ test("no chart text under 12px", async ({ page }) => {
 	await openAside(page);
 	for (const tag of CHART_TAGS) {
 		const sizes = await textSizes(page, tag);
-		if (tag === "tk-stat" || tag === "tk-timeseries") expect(sizes.length, tag).toBeGreaterThan(0);
+		if (tag === "tk-stat" || tag === "tk-timeseries" || tag === "tk-bars") expect(sizes.length, tag).toBeGreaterThan(0);
 		for (const s of sizes) expect(s, tag).toBeGreaterThanOrEqual(12);
 	}
 });
@@ -287,4 +287,72 @@ test("height falls back to 140", async ({ page }) => {
 	await page.locator("#ts-main").evaluate((e) => e.removeAttribute("height"));
 	await expect.poll(h).toBe(140);
 	expect(await plot.getAttribute("style")).not.toContain("null");
+});
+
+// ---- tk-bars ----
+
+const barsReady = async (page: Page, url = "/charts.html") => {
+	await ready(page, url);
+	await openAside(page);
+	await page.waitForFunction(() => customElements.get("tk-bars"));
+	await expect(page.locator("#bars-aside .row")).not.toHaveCount(0);
+	await expect(page.locator("#bars-ms .row")).not.toHaveCount(0);
+};
+
+test("bars: goal tick at the same x on every row", async ({ page }) => {
+	await barsReady(page);
+	const xs = await page.locator("#bars-aside .tick").evaluateAll((ts) => ts.map((t) => ({ x: t.getBoundingClientRect().left, tw: t.parentElement!.getBoundingClientRect().width, tx: t.parentElement!.getBoundingClientRect().left })));
+	expect(xs.length).toBeGreaterThan(3);
+	for (const t of xs) {
+		expect(Math.abs(t.x - xs[0].x)).toBeLessThanOrEqual(0.5);
+		expect(Math.abs(t.x - t.tx - t.tw * 0.8)).toBeLessThanOrEqual(1.5);
+	}
+});
+
+test("bars: under-goal fill is --chart-2", async ({ page }) => {
+	await barsReady(page);
+	const keys: any[] = await page.evaluate(() => (window as any).demo.keys);
+	const fills = await page.locator("#bars-aside .fill").evaluateAll((fs) => fs.map((f) => getComputedStyle(f).backgroundColor));
+	expect(keys.some((k) => k.wpm < 40) && keys.some((k) => k.wpm >= 40)).toBe(true);
+	keys.forEach((k, i) => expect(fills[i], k.key).toBe(k.wpm >= 40 ? "rgb(230, 149, 0)" : "rgb(0, 110, 184)"));
+	// With no goal every fill is --chart-1.
+	const none = await page.locator("#bars-nogoal .fill").evaluateAll((fs) => fs.map((f) => getComputedStyle(f).backgroundColor));
+	expect(none.length).toBe(keys.length);
+	for (const c of none) expect(c).toBe("rgb(230, 149, 0)");
+});
+
+test("lower: faster gets the longer bar", async ({ page }) => {
+	await barsReady(page);
+	const ms: any[] = await page.evaluate(() => (window as any).demo.ms);
+	const rows = await page.locator("#bars-ms .row").evaluateAll((rs) => rs.map((r) => ({ w: r.querySelector(".fill")!.getBoundingClientRect().width, tick: r.querySelector(".tick")!.getBoundingClientRect().left - r.querySelector(".track")!.getBoundingClientRect().left })));
+	const sorted = ms.map((m, i) => ({ v: m.ms, ...rows[i] })).sort((a, b) => a.v - b.v);
+	for (let i = 1; i < sorted.length; i++) expect(sorted[i].w, `${sorted[i].v}ms`).toBeLessThan(sorted[i - 1].w);
+	const at = sorted.find((r) => r.v === 200)!;
+	expect(Math.abs(at.w - at.tick)).toBeLessThanOrEqual(1);
+});
+
+test("bars readout: rest summary, hover, keyboard", async ({ page }, info) => {
+	await barsReady(page);
+	const keys: any[] = await page.evaluate(() => (window as any).demo.keys);
+	const readout = page.locator("#bars-aside .readout");
+	const atGoal = keys.filter((k) => k.wpm >= 40).length;
+	await expect(readout).toHaveText(`${atGoal} of ${keys.length} at goal`);
+	await expect(page.locator("#bars-nogoal .readout")).toHaveText("");
+	const h = (l: string) => page.locator(l).evaluate((e) => e.getBoundingClientRect().height);
+	expect(await h("#bars-nogoal .readout")).toBeGreaterThan(10);
+	const status = (k: any) => (k.wpm >= 40 ? "at goal" : "below goal");
+	const want = (k: any) => `${k.key} · ${k.wpm} wpm · ${status(k)}`;
+	if (info.project.name !== "phone") {
+		await page.locator("#bars-aside .row").nth(2).hover();
+		await expect(readout).toHaveText(want(keys[2]));
+		await page.mouse.move(2, 2);
+		await expect(readout).toHaveText(`${atGoal} of ${keys.length} at goal`);
+	}
+	await page.locator("#bars-aside .plot").focus();
+	await page.keyboard.press("End");
+	await expect(readout).toHaveText(want(keys[keys.length - 1]));
+	await page.keyboard.press("ArrowLeft");
+	await expect(readout).toHaveText(want(keys[keys.length - 2]));
+	await page.keyboard.press("ArrowDown");
+	await expect(readout).toHaveText(want(keys[keys.length - 2]));
 });
