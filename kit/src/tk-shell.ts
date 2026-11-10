@@ -109,6 +109,7 @@ export class TkShell extends LitElement {
 		const sheet = e.composedPath()[0];
 		if ((e as CustomEvent<{ open?: unknown }>).detail?.open) this.openSheets.add(sheet);
 		else this.openSheets.delete(sheet);
+		// A removed sheet reports from document: the recount drops it as disconnected.
 		this.countSheets();
 	};
 	private countSheets(): void {
@@ -148,7 +149,8 @@ export class TkShell extends LitElement {
 		document.addEventListener("tk-sheet-toggle", this.onSheet);
 		window.addEventListener("keydown", this.onKeyCapture, true);
 		document.addEventListener("keydown", this.onKey);
-		// Sheets already open (open is reflected) before this shell connected.
+		// Sheets already open (open is reflected) before this shell connected; nothing tracked earlier carries over.
+		this.openSheets.clear();
 		for (const sh of document.querySelectorAll("tk-sheet[open]")) this.openSheets.add(sh);
 		this.countSheets();
 		this.phoneMq.addEventListener("change", this.onMode);

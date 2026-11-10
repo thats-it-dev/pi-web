@@ -50,6 +50,8 @@ export class TkSheet extends LitElement {
 
 	disconnectedCallback(): void {
 		document.removeEventListener("keydown", this.onKey);
+		// Removed while open: tell tk-shell it is gone. Dispatched on document, since a detached sheet's events reach no one.
+		if (this.open) document.dispatchEvent(new CustomEvent("tk-sheet-toggle", { detail: { open: false } }));
 		super.disconnectedCallback();
 	}
 

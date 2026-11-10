@@ -222,3 +222,17 @@ test("tk-*-panel events with a missing or unknown panel are ignored", async ({ p
 	});
 	expect(errors).toEqual([]);
 });
+
+test("a sheet removed from the page while open stops counting: the drawer traps focus again", async ({ page }, info) => {
+	test.skip(info.project.name !== "phone");
+	await ready(page);
+	await call(page, "show", "aside");
+	await page.locator("#open-sheet-2").click();
+	await expect(page.getByRole("dialog")).toBeVisible();
+	const mainInert = () => page.locator(shell).evaluate((s) => s.shadowRoot!.querySelector("main")!.inert);
+	await expect.poll(mainInert).toBe(false);
+	await page.locator("#sheet").evaluate((el) => el.remove());
+	await expect.poll(mainInert).toBe(true);
+	await page.keyboard.press("Escape");
+	await expect(page.locator(aside)).toBeHidden();
+});
