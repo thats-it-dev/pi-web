@@ -31,6 +31,14 @@ describe.skipIf(!existsSync(dist) && !process.env.CI)("kit dist (run `npm run bu
 		expect(css).toMatch(/--primary\s*:/);
 		expect(css).toMatch(/--panel\s*:/);
 	});
+	it("kit.css defines the chart palette", () => {
+		const css = read("kit.css");
+		const light = ["#e69500", "#006eb8", "#00978d", "#8a2f7a"];
+		const dark = ["#ffaa00", "#5aa6e6", "#3cc9a8", "#b85aa6"];
+		light.forEach((hex, i) => expect(css).toMatch(new RegExp(`--chart-${i + 1}\\s*:\\s*${hex}`)));
+		// Once in the prefers-color-scheme block, once in :root[data-theme="dark"].
+		dark.forEach((hex, i) => expect(css.split(`--chart-${i + 1}: ${hex}`).length - 1).toBe(2));
+	});
 	it("_headers allows cross-origin use", () => {
 		expect(read("_headers")).toMatch(/^\/\*\n\s+Access-Control-Allow-Origin: \*/);
 	});
