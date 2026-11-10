@@ -89,3 +89,14 @@ test("needsPr: dirty tree, unpushed commits and never-pushed branches need a PR;
 	assert.equal(needsPr(dir), false);
 	assert.equal(needsPr(join(dir, "missing")), false);
 });
+
+test("compaction leaves re-injected rule messages out of the summary input", () => {
+	const rules = { role: "custom", customType: "i-have-adhd-rules", content: "ADHD MODE ACTIVE…", display: false };
+	const task = { role: "user", content: "Make keeb teach like keybr" };
+	const nudge = { role: "custom", customType: NUDGE_TYPE, content: "continue" };
+	const preparation = { messagesToSummarize: [rules, task, nudge, { ...rules }], turnPrefixMessages: [{ ...rules }, task] };
+	const r = load().session_before_compact({ preparation, reason: "threshold" }, { cwd: "/" });
+	assert.equal(r, undefined, "pi's own summarizer still writes the summary");
+	assert.deepEqual(preparation.messagesToSummarize, [task, nudge]);
+	assert.deepEqual(preparation.turnPrefixMessages, [task]);
+});

@@ -45,6 +45,14 @@ At most 2 per user prompt.
 A bash call that runs the skill's `pr`, `ship` or `gateway-pr` with a timeout under 2400 s is blocked: those wait
 for CI (usually 3-6 min) and print progress while they do, and a short cap kills them mid-wait.
 
+## Compaction summaries
+
+i-have-adhd adds its rules as a message at session start and again after every compaction. pi's
+summarizer read that message as the user's first request and made it the summary's goal, so the real
+task could be lost. Before compaction the guard removes those messages (`REINJECTED_TYPES` in
+`rules.ts`) from what pi summarizes; pi's own summarizer still writes the summary. This relies on pi
+summarizing the same `preparation` object it passes to `session_before_compact` (true in pi 1.0.2).
+
 ## Where the numbers come from
 
 Replaying the 6-day keeb session (Nov 3-8 2026, 2,600 model calls) through these rules: it would have

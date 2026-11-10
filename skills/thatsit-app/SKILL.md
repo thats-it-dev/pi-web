@@ -45,7 +45,7 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
 
 1. `cd ~/workspace/apps/<name> && git switch main && git pull`, then read `AGENTS.md` there if it exists and follow it.
 2. `cd ~/workspace/apps/<name> && git switch -c <short-branch>` (e.g. `dark-mode-toggle`). Create the branch (step 2) before editing any file.
-3. Edit files by full path, update or add the e2e test, then run `cd ~/workspace/apps/<name> && npm run verify`
+3. Edit files by full path, update or add the e2e test (generated or progress-based output: check every stage, AGENTS.md), then run `cd ~/workspace/apps/<name> && npm run verify`
    until green (an app with no `verify` script: `npm run typecheck && npm test && npm run e2e`).
 4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
 5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`

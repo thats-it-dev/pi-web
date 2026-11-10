@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appsNeedingPr, checkToolCall, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, checkToolCall, dropReinjected, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
@@ -48,6 +48,13 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const home = homedir();
 
 	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript, dirty }));
+
+	// Filter in place and return nothing: pi's default summarizer then runs on the same preparation object.
+	pi.on("session_before_compact", (event) => {
+		dropReinjected(event.preparation?.messagesToSummarize);
+		dropReinjected(event.preparation?.turnPrefixMessages);
+		return undefined;
+	});
 
 	pi.on("agent_before_settle", (event, ctx) => {
 		// context.canContinue describes the context before these entries: it is false whenever the run ended on an
