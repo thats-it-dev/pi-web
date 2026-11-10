@@ -54,10 +54,10 @@ export class PiProgressPanel extends LitElement {
 		this.syncTicker();
 	};
 
-	// Re-render once a second while a subagent runs, so its elapsed time moves.
+	// Re-render once a second while a subagent or the run is going, so elapsed times move.
 	private syncTicker(): void {
 		const v = this.watched?.view;
-		const running = Boolean(v && v.subagents.recent.concat(v.subagents.earlier).some((c) => c.state === "running"));
+		const running = Boolean(v && (v.subagents.recent.concat(v.subagents.earlier).some((c) => c.state === "running") || (v.activity === "working" && v.runs)));
 		if (running && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
 		if (!running) {
 			clearInterval(this.ticker);

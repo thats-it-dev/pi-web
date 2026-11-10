@@ -1,10 +1,11 @@
 import { nothing } from "lit";
 import { describe, expect, it, vi } from "vitest";
 import type { SubagentChild, Todo } from "../../../shared/src/progress.ts";
+import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { ProgressView } from "../lib/progress-store.ts";
 import { badgeLabel, renderProgress } from "./progress.ts";
 
-const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, activity: "idle", empty: true });
+const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, activity: "idle", runs: null, empty: true });
 const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({
 	key: "t:0", toolCallId: "t", index: 0, agent: "worker", task: "do it", state: "done", background: false, turn: 0, startedAt: 1000, endedAt: 13_000, sessionFile: null, asyncDir: null, runId: null, ...over,
 });
@@ -124,5 +125,37 @@ describe("badgeLabel", () => {
 		const ticked = mount({ ...empty(), empty: false, plan: { ...plan, tasks: [{ title: "One", done: 1, total: 2 }, plan.tasks[1]], current: 0 } }).f;
 		expect(ticked.text).not.toContain("no steps ticked yet");
 		expect(ticked.html).toContain("plan-task current");
+	});
+});
+
+describe("run section", () => {
+	const run = (over: Partial<RunReport> = {}): RunReport => ({
+		label: "Make keeb teach like keybr", startedAt: 0, elapsedMs: 5_886_000, modelMs: 4_850_000, toolMs: 762_000, toolCalls: 298,
+		rejected: 24, rejectedBy: { "edit retries": 14, "guard blocks": 3, "failed commands": 2, other: 5 }, nudges: { stall: 2 }, compactions: [251_325], reviewedAt: null, ...over,
+	});
+	const withRuns = (current: RunReport, extra: Partial<ProgressView> = {}): ProgressView => ({ ...empty(), empty: false, runs: { current, earlier: [run({ label: "earlier one", elapsedMs: 65_000 })], fetchedAt: 100_000 }, ...extra });
+
+	it("shows the time split, counts, nudges, compactions and reviewer status", () => {
+		const { f } = mount(withRuns(run()));
+		expect(f.text).toContain("run 1h 38m");
+		expect(f.text).toContain("model 1h 20m");
+		expect(f.text).toContain("tools 12m 42s");
+		expect(f.text).toContain("tool calls 298");
+		expect(f.text).toContain("rejected 24 edit retries 14 guard blocks 3 failed commands 2 other 5");
+		expect(f.text).toContain("nudges 2 stall");
+		expect(f.text).toContain("compactions 1 · at 251k");
+		expect(f.text).toContain("reviewer not yet");
+		expect(f.text).toContain("earlier runs (1)");
+		expect(f.text).toContain("earlier one 1m 5s");
+	});
+
+	it("a working run keeps counting between fetches; an idle one does not", () => {
+		const r = run({ elapsedMs: 60_000, modelMs: 50_000, toolMs: 10_000 });
+		expect(mount(withRuns(r, { activity: "working" }), { now: 130_000 }).f.text).toContain("run 1m 30s");
+		expect(mount(withRuns(r, { activity: "idle" }), { now: 130_000 }).f.text).toContain("run 1m 0s");
+	});
+
+	it("no runs, no section", () => {
+		expect(mount({ ...empty(), empty: false, todos: [todo(1, "pending")] }).f.text).not.toContain("tool calls");
 	});
 });

@@ -1,4 +1,5 @@
 import type { Goal } from "../../../shared/src/goal.ts";
+import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { SubagentChild } from "../../../shared/src/progress.ts";
 import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
@@ -73,6 +74,9 @@ export class HubApi {
 	}
 	files(id: string, q: string, signal?: AbortSignal) {
 		return this.req<{ files: FileEntry[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/files?q=${encodeURIComponent(q)}`, undefined, signal);
+	}
+	runs(id: string) {
+		return this.req<{ runs: RunReport[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/runs`);
 	}
 	goal(id: string) {
 		return this.req<{ goal: Goal | null }>("GET", `/api/sessions/${encodeURIComponent(id)}/goal`);

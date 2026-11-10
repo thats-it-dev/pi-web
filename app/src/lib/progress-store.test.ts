@@ -1,3 +1,4 @@
+import type { RunReport } from "../../../shared/src/run-report.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Goal } from "../../../shared/src/goal.ts";
 import type { SubagentChild } from "../../../shared/src/progress.ts";
@@ -23,12 +24,13 @@ const subCall = (id: string, background: boolean) => ({
 	content: [{ type: "toolCall" as const, id, name: "subagent", arguments: { agent: "scout", task: "look", async: background } }],
 });
 
-function setup(api: Partial<Record<"goal" | "plan" | "subagents", unknown>> = {}) {
+function setup(api: Partial<Record<"goal" | "plan" | "subagents" | "runs", unknown>> = {}) {
 	const session = new SessionStore("s1");
 	const fake = {
 		goal: vi.fn(async () => ({ goal })),
 		plan: vi.fn(async (_id: string, path: string) => ({ path, text: "# P\n### Task 1: A\n- [ ] x\n", mtimeMs: 1 })),
 		subagents: vi.fn(async () => ({ children: [] as SubagentChild[] })),
+		runs: vi.fn(async () => ({ runs: [] as RunReport[] })),
 		...api,
 	};
 	const store = new ProgressStore(fake as never, session);
@@ -52,6 +54,27 @@ describe("ProgressStore", () => {
 		expect(store.view.activity).toBe("waiting");
 		session.apply({ type: "dialog_closed", id: "d1" });
 		expect(store.view.activity).toBe("working");
+		store.stop();
+	});
+
+	it("runs: fetched with the goal; the latest is current, the rest newest first; no tool calls means no section", async () => {
+		const r = (label: string, toolCalls: number) => ({ label, toolCalls }) as RunReport;
+		const runs = vi.fn(async () => ({ runs: [r("one", 3), r("two", 5), r("three", 7)] }));
+		const { session, store } = setup({ runs });
+		session.apply({ type: "snapshot", snapshot: snap() });
+		store.start();
+		await flush();
+		expect(runs).toHaveBeenCalledTimes(1);
+		expect(store.view.runs?.current.label).toBe("three");
+		expect(store.view.runs?.earlier.map((e) => e.label)).toEqual(["two", "one"]);
+		expect(store.view.empty).toBe(false);
+		ev(session, { type: "agent_start" });
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(runs).toHaveBeenCalledTimes(2);
+		runs.mockResolvedValueOnce({ runs: [r("fresh", 0)] });
+		ev(session, { type: "agent_settled" });
+		await flush();
+		expect(store.view.runs).toBeNull();
 		store.stop();
 	});
 

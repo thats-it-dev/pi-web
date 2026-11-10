@@ -97,10 +97,43 @@ function subagentSection(view: ProgressView, opts: ProgressOpts) {
 	</section>`;
 }
 
+// "1h 38m" past an hour; the shared "m s" form below it.
+function runTime(ms: number): string {
+	return ms >= 3_600_000 ? `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m` : formatElapsed(ms);
+}
+
+const REJECT_ORDER = ["edit retries", "guard blocks", "failed commands", "other"] as const;
+
+function runSection(view: ProgressView, now: number) {
+	const runs = view.runs;
+	if (!runs) return nothing;
+	const r = runs.current;
+	// Between fetches a working run keeps counting; the split catches up on the next fetch.
+	const elapsed = r.elapsedMs + (view.activity === "working" ? Math.max(0, now - runs.fetchedAt) : 0);
+	const pct = (ms: number) => (elapsed > 0 ? `${Math.min(100, (100 * ms) / elapsed)}%` : "0%");
+	const nudges = Object.entries(r.nudges).map(([k, n]) => `${n} ${k}`).join(", ");
+	return html`<section class="run">
+		<h2 class="label">run <span class="count">${runTime(elapsed)}</span></h2>
+		<div class="bar" role="img" aria-label=${`model ${runTime(r.modelMs)}, tools ${runTime(r.toolMs)}`}>
+			<span class="model" style="width:${pct(r.modelMs)}"></span><span class="tools" style="width:${pct(r.toolMs)}"></span>
+		</div>
+		<div class="legend"><span><i class="model"></i>model ${runTime(r.modelMs)}</span><span><i class="tools"></i>tools ${runTime(r.toolMs)}</span></div>
+		<div class="stat"><span class="txt">tool calls</span><span class="n">${r.toolCalls}</span></div>
+		<div class="stat"><span class="txt">rejected</span><span class="n ${r.rejected ? "warn" : ""}">${r.rejected}</span></div>
+		${REJECT_ORDER.filter((k) => r.rejectedBy[k]).map((k) => html`<div class="stat sub"><span class="txt">${k}</span><span class="n">${r.rejectedBy[k]}</span></div>`)}
+		${nudges ? html`<div class="stat"><span class="txt">nudges</span><span class="n">${nudges}</span></div>` : nothing}
+		<div class="stat"><span class="txt">compactions</span><span class="n">${r.compactions.length ? `${r.compactions.length} · at ${r.compactions.map((t) => `${Math.round(t / 1000)}k`).join(", ")}` : 0}</span></div>
+		<div class="stat"><span class="txt">reviewer</span><span class="n ${r.reviewedAt ? "ok" : ""}">${r.reviewedAt ? `ran ${new Date(r.reviewedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "not yet"}</span></div>
+		${runs.earlier.length
+			? html`<details><summary>earlier runs (${runs.earlier.length})</summary>${runs.earlier.map((e) => html`<div class="stat sub"><span class="txt">${e.label}</span><span class="n">${runTime(e.elapsedMs)}</span></div>`)}</details>`
+			: nothing}
+	</section>`;
+}
+
 export function renderProgress(view: ProgressView, opts: ProgressOpts): TemplateResult {
 	return html`<div class="progress">
 		<div class="activity ${view.activity}" role="status">${ACTIVITY[view.activity]}</div>
-		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${subagentSection(view, opts)}
+		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${subagentSection(view, opts)}${runSection(view, opts.now)}
 	</div>`;
 }
 
@@ -135,5 +168,14 @@ export const progressStyles = css`
 	.progress .more, .progress .open-plan { padding: 4px 16px; font-size: 0.72rem; color: var(--text-muted); }
 	.progress .open-plan { color: var(--primary); }
 	.progress details { margin-top: 2px; }
+	.progress .bar { display: flex; height: 6px; margin: 6px 16px 2px; border-radius: 999px; overflow: hidden; background: var(--panel); }
+	.progress .bar .model, .progress .legend i.model { background: var(--primary); }
+	.progress .bar .tools, .progress .legend i.tools { background: var(--text-muted); }
+	.progress .legend { display: flex; gap: 12px; padding: 2px 16px 6px; font-size: 0.72rem; color: var(--text-secondary); }
+	.progress .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+	.progress .stat { display: flex; align-items: baseline; gap: 8px; padding: 4px 16px; font-size: 0.9rem; min-width: 0; }
+	.progress .stat.sub { padding-left: 28px; font-size: 0.82rem; color: var(--text-secondary); }
+	.progress .n.warn { color: var(--accent); }
+	.progress .n.ok { color: var(--success); }
 	.progress summary { cursor: pointer; padding: 5px 16px; font-size: 0.85rem; color: var(--text-secondary); }
 `;
