@@ -4,6 +4,7 @@
 import type { Goal } from "../../../shared/src/goal.ts";
 import { type PlanDoc, parsePlan } from "../../../shared/src/plan.ts";
 import { type Progress, type SubagentChild, type Todo, deriveProgress, groupSubagents } from "../../../shared/src/progress.ts";
+import type { RunReport } from "../../../shared/src/run-report.ts";
 import { HubError, type HubApi } from "./api.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -14,6 +15,8 @@ export interface ProgressView {
 	todos: Todo[] | null;
 	subagents: { recent: SubagentChild[]; earlier: SubagentChild[] };
 	activity: Activity;
+	/** The current run (since Michael's last message) and the ones before it; null until fetched. */
+	runs: { current: RunReport; earlier: RunReport[]; fetchedAt: number } | null;
 	empty: boolean; // nothing in any section
 }
 
@@ -32,7 +35,7 @@ export function relPlanPath(path: string, cwd: string | null | undefined): strin
 }
 
 export class ProgressStore extends EventTarget {
-	private api: Pick<HubApi, "goal" | "plan" | "subagents">;
+	private api: Pick<HubApi, "goal" | "plan" | "subagents" | "runs">;
 	private session: SessionStore;
 	private goal: Goal | null = null;
 	private plan: (PlanDoc & { path: string }) | null = null;
@@ -48,6 +51,8 @@ export class ProgressStore extends EventTarget {
 	private childTimer: ReturnType<typeof setInterval> | null = null;
 	private prog: Progress | null = null; // deriveProgress once per session change
 	private goalSeq = 0;
+	private runsSeq = 0;
+	private runs: ProgressView["runs"] = null;
 	private planSeq = 0;
 	private childSeq = 0;
 	private childBusy = false;
@@ -57,7 +62,7 @@ export class ProgressStore extends EventTarget {
 		this.update();
 	};
 
-	constructor(api: Pick<HubApi, "goal" | "plan" | "subagents">, session: SessionStore) {
+	constructor(api: Pick<HubApi, "goal" | "plan" | "subagents" | "runs">, session: SessionStore) {
 		super();
 		this.api = api;
 		this.session = session;
@@ -86,6 +91,7 @@ export class ProgressStore extends EventTarget {
 	stop(): void {
 		this.running = false;
 		this.goalSeq++;
+		this.runsSeq++;
 		this.planSeq++;
 		this.childSeq++;
 		this.childBusy = false;
@@ -122,8 +128,9 @@ export class ProgressStore extends EventTarget {
 		const activity: Activity = snapshot && (snapshot.dialogs.length > 0 || snapshot.terminalPrompt || this.session.dialogs.length > 0) ? "waiting" : conv.streaming ? "working" : "idle";
 		const subagents = groupSubagents(this.children());
 		const plan = this.plan && this.plan.path === planPath ? this.plan : null;
-		const empty = !this.goal && !plan && !todos?.length && !subagents.recent.length && !subagents.earlier.length;
-		return { goal: this.goal, plan, todos, subagents, activity, empty };
+		const runs = this.runs && this.runs.current.toolCalls > 0 ? this.runs : null;
+		const empty = !this.goal && !plan && !todos?.length && !subagents.recent.length && !subagents.earlier.length && !runs;
+		return { goal: this.goal, plan, todos, subagents, activity, runs, empty };
 	}
 
 	private update(): void {
@@ -194,7 +201,21 @@ export class ProgressStore extends EventTarget {
 		}
 	}
 
+	// The run report is read from the session file, so it moves on the goal's schedule: on start, every
+	// GOAL_POLL_MS while a turn streams, and when it settles.
+	private async fetchRuns(): Promise<void> {
+		const n = ++this.runsSeq;
+		try {
+			const { runs } = await this.api.runs(this.session.id);
+			if (!this.running || n !== this.runsSeq) return;
+			const current = runs.at(-1);
+			this.runs = current ? { current, earlier: runs.slice(0, -1).reverse(), fetchedAt: Date.now() } : null;
+			this.changed();
+		} catch {} // keep the last good value
+	}
+
 	private async fetchGoal(): Promise<void> {
+		void this.fetchRuns();
 		const n = ++this.goalSeq;
 		try {
 			const { goal } = await this.api.goal(this.session.id);

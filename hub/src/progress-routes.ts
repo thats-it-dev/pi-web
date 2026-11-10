@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { goalFromEntries } from "../../shared/src/goal.ts";
+import { runReportsFromEntries } from "../../shared/src/run-report.ts";
 import { type ChildState, type SubagentChild, deriveProgress } from "../../shared/src/progress.ts";
 import { createConversation } from "../../shared/src/reducer.ts";
 import { branchEntries } from "../../shared/src/session-file.ts";
@@ -47,7 +48,7 @@ const STATE: Record<string, ChildState> = {
 
 export async function routeProgress(req: IncomingMessage, res: ServerResponse, url: URL, deps: ProgressDeps): Promise<boolean> {
 	if (req.method !== "GET") return false;
-	const m = url.pathname.match(/^\/api\/sessions\/([\w.-]+)\/(goal|plan|subagents)$/);
+	const m = url.pathname.match(/^\/api\/sessions\/([\w.-]+)\/(goal|plan|subagents|runs)$/);
 	const hm = url.pathname.match(/^\/api\/sessions\/([\w.-]+)\/subagents\/([^/]+)\/history$/);
 	if (!m && !hm) return false;
 	const { registry, index, cors } = deps;
@@ -77,6 +78,10 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 			let goal = null;
 			if (file) goal = goalFromEntries(branchEntries(await readFile(file, "utf8").catch(() => "")));
 			sendJson(res, 200, { goal }, cors);
+		} else if (kind === "runs") {
+			const { file } = await located(id);
+			const entries = file ? branchEntries(await readFile(file, "utf8").catch(() => "")) : [];
+			sendJson(res, 200, { runs: runReportsFromEntries(entries, { now: Date.now(), streaming: registry.get(id)?.snapshot().conv.streaming ?? false }) }, cors);
 		} else if (kind === "plan") {
 			const { cwd } = await located(id);
 			sendJson(res, 200, await readPlan(cwd, url.searchParams.get("path")), cors);

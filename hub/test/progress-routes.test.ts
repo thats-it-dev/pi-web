@@ -82,6 +82,17 @@ test("goal: the complete goal, null for a session without one, 404 for an unknow
 	assert.equal((await get("/api/sessions/nope/goal")).status, 404);
 });
 
+test("runs: one report per user message, from the session file; 404 for an unknown id", async () => {
+	const r = await get(`/api/sessions/${todo.id}/runs`);
+	assert.equal(r.status, 200);
+	assert.ok(Array.isArray(r.body.runs) && r.body.runs.length >= 1);
+	const last = r.body.runs.at(-1);
+	assert.equal(typeof last.label, "string");
+	assert.ok(last.toolCalls > 0, "the todo fixture calls the todo tool");
+	assert.ok(last.modelMs + last.toolMs <= last.elapsedMs);
+	assert.equal((await get("/api/sessions/nope/runs")).status, 404);
+});
+
 test("progress routes need the same auth as other routes", async () => {
 	assert.equal((await call(port, "GET", `/api/sessions/${goal.id}/goal`, { ...GOOD, "tailscale-user-login": undefined })).status, 403);
 });

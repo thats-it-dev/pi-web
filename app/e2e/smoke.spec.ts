@@ -249,6 +249,8 @@ test("desktop: the progress column shows to-dos and subagents beside the chat", 
 	const aside = page.locator("tk-shell [slot=aside]");
 	await expect(aside).toContainText("to-dos");
 	await expect(aside).toContainText("3/3");
+	await expect(aside.locator("section.run")).toContainText("tool calls");
+	await expect(aside.locator("section.run")).toContainText(/reviewer\s*not yet/);
 	const button = page.getByRole("button", { name: "Progress" });
 	await expect(button).toHaveAttribute("aria-expanded", "true");
 	await button.click();
