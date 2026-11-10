@@ -312,4 +312,14 @@ test.describe("header buttons", () => {
 		await expect(page.locator("x-wrap tk-header .menu")).toHaveCount(1);
 		await expect(page.locator("x-wrap tk-header .aside-toggle")).toHaveCount(1);
 	});
+
+	test("icons draw: svg children are in the SVG namespace", async ({ page }) => {
+		await page.goto("/");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		const width = (sel: string) => page.locator(sel).first().evaluate((el: any) => el.getBBox().width);
+		expect(await width("tk-header .aside-toggle svg rect")).toBeGreaterThan(0);
+		expect(await width("tk-header .menu svg rect, tk-header .menu svg path")).toBeGreaterThan(0);
+		await page.locator("#open-sheet").click();
+		expect(await width("tk-sheet .x svg path")).toBeGreaterThan(0);
+	});
 });
