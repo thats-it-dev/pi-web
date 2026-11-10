@@ -10,6 +10,7 @@ export const REASONS = {
 	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). \`${SKILL_CLI} pr\` and \`ship\` already wait for CI and print the failing log lines; rerun the same command after a fix.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
+	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 };
 
 // The app a command works in: from a path to ~/workspace/apps/<name> in the command, else the session cwd.
@@ -45,7 +46,19 @@ export function pythonRewrite(code: string): boolean {
 	return /\bopen\([^)]*,\s*["'][wa]\+?b?["']|\.write_text\(|\.write_bytes\(/.test(code);
 }
 
-export type Env = { cwd: string; home: string; hasScript: (dir: string, name: string) => boolean };
+export type Env = { cwd: string; home: string; hasScript: (dir: string, name: string) => boolean; dirty: (dir: string) => boolean };
+
+const GIT = String.raw`\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+`;
+
+// Commands that overwrite working-tree files with a committed version.
+export function discards(command: string): boolean {
+	for (const seg of command.split(/;|&&|\|\||\||\n/)) {
+		if (new RegExp(`${GIT}checkout\\b.*\\s--(\\s|$)`).test(seg)) return true;
+		if (new RegExp(`${GIT}restore\\b`).test(seg) && !(/\s(?:-S|--staged)\b/.test(seg) && !/\s(?:-W|--worktree)\b/.test(seg))) return true;
+		if (new RegExp(`${GIT}reset\\b.*\\s--hard\\b`).test(seg)) return true;
+	}
+	return false;
+}
 
 export function checkShell(command: string, env: Env): Block | undefined {
 	const dir = appDir(command, env.cwd, env.home);
@@ -60,6 +73,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 		return { block: true, reason: REASONS.rewrite };
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
+	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
 	return undefined;
 }
 

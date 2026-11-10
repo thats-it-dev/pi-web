@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, checkToolCall, fullE2e, MAX_NUDGES, NUDGE_TYPE, REASONS, shouldNudge, type Env } from "../rules.ts";
+import { appDir, checkToolCall, discards, fullE2e, MAX_NUDGES, NUDGE_TYPE, REASONS, shouldNudge, type Env } from "../rules.ts";
 
 const home = "/home/m";
-const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, ...over });
+const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
 const bash = (command: string, e = env()) => checkToolCall("bash", { command }, e)?.reason;
 const app = "cd ~/workspace/apps/keeb && ";
 
@@ -97,4 +97,26 @@ test("nudges are capped per prompt and reset by the next user message", () => {
 
 test("a reply right after a nudge ends the run", () => {
 	assert.equal(shouldNudge([user, edit, result, say(""), nudge, say("Done: PR #4 is green.")]), false);
+});
+
+test("discards spots commands that overwrite working-tree files", () => {
+	for (const c of [
+		"git checkout origin/main -- src/stats/stats.ts",
+		"git checkout -- .",
+		"git checkout HEAD -- src/a.ts src/b.ts && npm test",
+		"git restore src/stats/stats.ts",
+		"git restore --source=main --staged --worktree src/a.ts",
+		"git reset --hard HEAD",
+		"git -C ~/workspace/apps/keeb checkout main -- src/a.ts",
+	]) assert.equal(discards(c), true, c);
+	for (const c of ["git checkout main", "git checkout -b fix/x", "git switch main", "git restore --staged src/a.ts", "git show main:src/a.ts", "git reset --soft HEAD~1", "git diff -- src/a.ts"]) {
+		assert.equal(discards(c), false, c);
+	}
+});
+
+test("discarding is blocked only while the app has uncommitted changes", () => {
+	const revert = `${app}git checkout origin/main -- src/stats/stats.ts && npx vitest run`;
+	assert.equal(bash(revert), REASONS.discard);
+	assert.equal(bash(revert, env({ dirty: () => false })), undefined);
+	assert.equal(bash("cd ~/workspace/pi-web && git checkout -- ."), undefined);
 });
