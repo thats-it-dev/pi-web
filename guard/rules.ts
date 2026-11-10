@@ -224,3 +224,17 @@ export function prNudge(apps: string[]): string {
 	const cmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/${name(d)} --title "<short title>" --body "<what and why>"`).join("\n");
 	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run (bash timeout 2400):\n${cmds}\nIf Michael said not to open a PR, say so in one line instead.`;
 }
+
+// Compaction. Some extensions inject their rules as a message at session start and again after every
+// compaction (i-have-adhd). pi's summarizer reads that message as the user's first request and makes it the
+// summary's goal, so the real task is lost when a compaction falls between turns. They are re-added anyway.
+export const REINJECTED_TYPES: ReadonlySet<string> = new Set(["i-have-adhd-rules", "i-have-adhd-disabled"]);
+
+/** Remove re-injected rule messages from `messages` in place; pi summarizes the same array after the hook. */
+export function dropReinjected(messages: unknown[] | undefined): void {
+	if (!messages) return;
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const m = messages[i] as { role?: string; customType?: string };
+		if (m?.role === "custom" && REINJECTED_TYPES.has(m.customType ?? "")) messages.splice(i, 1);
+	}
+}
