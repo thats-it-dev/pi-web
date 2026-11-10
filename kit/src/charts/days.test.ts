@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { addDays, dayKey, daySlots, parseDay } from "./days.ts";
 
 test("dayKey", () => {
@@ -40,4 +40,16 @@ test("years outside 1000-9999 are invalid and daySlots terminates", () => {
 test("TZ is pinned to a DST zone", () => {
 	expect(new Date(2026, 2, 8, 12).getTimezoneOffset()).toBe(420);
 	expect(new Date(2026, 0, 8, 12).getTimezoneOffset()).toBe(480);
+});
+
+test("daySlots caps the span at 3660 days, keeping the latest, and warns once", () => {
+	const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+	const t0 = performance.now();
+	const { days, byDay } = daySlots([{ d: "1990-01-01" }, { d: "2026-11-09" }], (r) => r.d);
+	expect(days).toHaveLength(3660);
+	expect(days[days.length - 1]).toBe("2026-11-09");
+	expect(byDay.has("2026-11-09")).toBe(true);
+	expect(performance.now() - t0).toBeLessThan(500);
+	expect(warn).toHaveBeenCalledTimes(1);
+	warn.mockRestore();
 });

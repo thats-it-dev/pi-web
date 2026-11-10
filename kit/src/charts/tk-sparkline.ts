@@ -11,7 +11,7 @@ export class TkSparkline extends LitElement {
 		:host { display: block; width: 110px; height: 40px; }
 		svg { display: block; width: 100%; height: 100%; overflow: visible; }
 		path { fill: none; stroke: var(--chart-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-		circle { fill: var(--chart-1); stroke: var(--tk-spark-ring, var(--bg)); stroke-width: 2; }
+		circle { fill: var(--chart-1); stroke: var(--tk-chart-surface, var(--bg)); stroke-width: 2; }
 	`;
 
 	private ro?: ResizeObserver;

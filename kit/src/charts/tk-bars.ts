@@ -2,6 +2,8 @@ import { type PropertyDeclarations, type PropertyValues, css, html, nothing } fr
 import { ChartBase } from "./chart-base.ts";
 import { GOAL_AT, atGoal, barFraction } from "./bars.ts";
 import { formatValue } from "./format.ts";
+import { warnMissingFields } from "./fields.ts";
+import { optionalNumber } from "./optional-number.ts";
 
 type Row = { label: string; value: number | null; raw: unknown };
 
@@ -21,7 +23,7 @@ export class TkBars extends ChartBase {
 		empty: {},
 		label: {},
 		value: {},
-		goal: { type: Number },
+		goal: { converter: optionalNumber },
 		lower: { type: Boolean },
 	};
 	declare label: string;
@@ -45,7 +47,7 @@ export class TkBars extends ChartBase {
 			.dim .row.on .fill { opacity: 1; }
 			.on .name, .on .val { color: var(--text-primary); }
 			@media (forced-colors: active) {
-				.fill { background: Highlight; } .track { background: GrayText; } .tick { background: CanvasText; }
+				.fill, .fill.under { background: Highlight; } .track { background: GrayText; } .tick { background: CanvasText; }
 			}
 		`,
 	];
@@ -68,6 +70,7 @@ export class TkBars extends ChartBase {
 			const v = rec[this.value];
 			return { label: String(rec[this.label] ?? ""), value: typeof v === "number" && Number.isFinite(v) ? v : null, raw: r };
 		});
+		if (changed.has("data") || changed.has("label") || changed.has("value")) warnMissingFields("tk-bars", this.data ?? [], { label: this.label, value: this.value });
 		this.maxValue = Math.max(0, ...this.rows.map((r) => r.value ?? 0));
 		super.willUpdate(changed);
 	}
@@ -100,14 +103,24 @@ export class TkBars extends ChartBase {
 		return this.rows.filter((r) => r.value !== null && this.reached(r)).length;
 	}
 
+	private counted(): number {
+		return this.rows.filter((r) => r.value !== null).length;
+	}
+
+	/** "at goal" / "below goal", or "" when there is no goal or the row has no number. */
+	private statusOf(r: Row): string {
+		if (this.goalValue() === undefined || r.value === null) return "";
+		return this.reached(r) ? "at goal" : "below goal";
+	}
+
 	private parts(i: number | null): { text: string; value: string; status: string } | null {
 		if (i === null) {
 			if (this.goalValue() === undefined) return null;
-			return { text: `${this.atGoalCount()} of ${this.rows.length} at goal`, value: "", status: "" };
+			return { text: `${this.atGoalCount()} of ${this.counted()} at goal`, value: "", status: "" };
 		}
 		const r = this.rows[i];
 		if (!r) return null;
-		const status = this.goalValue() === undefined ? "" : this.reached(r) ? "at goal" : "below goal";
+		const status = this.statusOf(r);
 		return { text: [r.label, this.fmt(r.value), status].filter(Boolean).join(" · "), value: this.fmt(r.value), status };
 	}
 
@@ -127,7 +140,7 @@ export class TkBars extends ChartBase {
 		const goal = this.goalValue() !== undefined;
 		return {
 			head: [this.label, this.unit || this.value, ...(goal ? ["Goal"] : [])],
-			rows: this.rows.map((r) => [r.label, this.fmt(r.value), ...(goal ? [this.reached(r) ? "at goal" : "below goal"] : [])]),
+			rows: this.rows.map((r) => [r.label, this.fmt(r.value), ...(goal ? [this.statusOf(r) || "—"] : [])]),
 		};
 	}
 
@@ -177,7 +190,7 @@ export class TkBars extends ChartBase {
 			>
 				${this.rows.map((r, i) => {
 					const f = r.value === null ? 0 : barFraction(r.value, { goal, lower: this.lower, max: this.maxValue });
-					const under = goal !== undefined && !this.reached(r);
+					const under = goal !== undefined && r.value !== null && !this.reached(r);
 					return html`<div
 						class="row ${a === i ? "on" : ""}"
 						@pointerdown=${() => this.onEnter(i)}
@@ -185,7 +198,7 @@ export class TkBars extends ChartBase {
 						@pointermove=${() => this.onEnter(i)}
 					>
 						<div class="head"><span class="name">${r.label}</span><span class="val">${this.fmt(r.value)}</span></div>
-						<div class="track"><div class="fill ${under ? "under" : ""}" style="width:${(f * 100).toFixed(2)}%"></div>${goal !== undefined ? html`<div class="tick" style="left:${GOAL_AT * 100}%"></div>` : nothing}</div>
+						<div class="track">${r.value === null ? nothing : html`<div class="fill ${under ? "under" : ""}" style="width:${(f * 100).toFixed(2)}%"></div>`}${goal !== undefined ? html`<div class="tick" style="left:${GOAL_AT * 100}%"></div>` : nothing}</div>
 					</div>`;
 				})}
 			</div>

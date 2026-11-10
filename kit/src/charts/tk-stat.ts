@@ -25,7 +25,7 @@ export class TkStat extends LitElement {
 		:host {
 			display: block; box-sizing: border-box; min-width: 0;
 			background: var(--panel); border-radius: var(--radius); padding: 8px 10px;
-			color: var(--text-primary); --tk-spark-ring: var(--panel);
+			color: var(--text-primary); --tk-chart-surface: var(--panel);
 		}
 		:host([wide]) { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 		.text { min-width: 0; }

@@ -32,6 +32,11 @@ export function linePath(points: readonly Pt[]): string {
 		.join("");
 }
 
+/** The points that are a run of one (a day with a value on both sides missing); a path draws those as nothing visible. */
+export function isolated(points: readonly Pt[]): { x: number; y: number }[] {
+	return runs(points).filter((run) => run.length === 1).map((run) => points[run[0]]!);
+}
+
 export function areaPath(top: readonly Pt[], bottom: readonly Pt[]): string {
 	return runs(top, bottom)
 		.filter((run) => run.length >= 2)

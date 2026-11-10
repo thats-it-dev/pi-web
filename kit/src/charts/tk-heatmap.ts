@@ -1,6 +1,7 @@
 import { type PropertyDeclarations, type PropertyValues, css, html, nothing } from "lit";
 import { ChartBase } from "./chart-base.ts";
 import { dayKey } from "./days.ts";
+import { warnMissingFields } from "./fields.ts";
 import { formatDay, formatValue } from "./format.ts";
 import { type HeatCell, fitWeeks, heatLayout, heatLevel } from "./heat.ts";
 
@@ -100,9 +101,10 @@ export class TkHeatmap extends ChartBase {
 			const d = dayKey(rec[this.x] as string | Date | number | null);
 			const v = rec[this.value];
 			if (d === null || typeof v !== "number" || !Number.isFinite(v)) continue;
-			this.values.set(d, (this.values.get(d) ?? 0) + v);
+			this.values.set(d, v); // last row for a day wins, like daySlots; the app aggregates
 			this.rows.set(d, r);
 		}
+		if (changed.has("data") || changed.has("x") || changed.has("value")) warnMissingFields("tk-heatmap", this.data ?? [], { x: this.x, value: this.value });
 		this.maxValue = Math.max(0, ...this.cells.map((c) => this.values.get(c.day) ?? 0));
 		super.willUpdate(changed);
 		this.activeDay = this.active === null ? "" : (this.cells[this.active]?.day ?? "");
@@ -146,7 +148,7 @@ export class TkHeatmap extends ChartBase {
 	protected tableRows(): { head: string[]; rows: string[][] } {
 		return {
 			head: [this.x, this.unit || this.value],
-			rows: this.cells.map((c) => [c.day, this.values.has(c.day) ? this.fmt(this.values.get(c.day)!) : "none"]),
+			rows: this.cells.map((c) => [c.day, (this.values.get(c.day) ?? 0) > 0 ? this.fmt(this.values.get(c.day)!) : "none"]),
 		};
 	}
 

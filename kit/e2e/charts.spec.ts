@@ -525,8 +525,146 @@ test("forced colors keep marks visible", async ({ page }) => {
 	const stroke = await page.locator("#ts-aside path.line.s1").evaluate((p) => getComputedStyle(p).stroke);
 	expect(stroke).not.toBe("none");
 	expect(stroke).not.toMatch(/transparent|rgba\(0, 0, 0, 0\)/);
-	const fill = await page.locator("#bars-aside .fill").first().evaluate((e) => getComputedStyle(e).backgroundColor);
-	expect(fill).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
-	const cell = await page.locator("#cal-aside .cell.l4").first().evaluate((e) => getComputedStyle(e).backgroundColor);
-	expect(cell).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+	const canvas = await page.evaluate(() => {
+		const p = document.createElement("span");
+		p.style.color = "Canvas";
+		document.body.append(p);
+		const c = getComputedStyle(p).color;
+		p.remove();
+		return c;
+	});
+	// Every bar fill, the under-goal ones included, is a visible system color (not Canvas, not transparent).
+	const fills = await page.locator("#bars-aside .fill").evaluateAll((fs) => fs.map((f) => ({ c: getComputedStyle(f).backgroundColor, under: f.classList.contains("under") })));
+	expect(fills.some((f) => f.under)).toBe(true);
+	for (const f of fills) {
+		expect(f.c).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+		expect(f.c, `under=${f.under}`).not.toBe(canvas);
+	}
+	const level = async (l: number) => {
+		const cell = page.locator(`#cal-aside .cell.l${l}`).first();
+		await expect(cell, `l${l}`).toHaveCount(1);
+		return cell.evaluate((e) => getComputedStyle(e).backgroundColor);
+	};
+	for (const l of [1, 4]) {
+		const c = await level(l);
+		expect(c, `l${l}`).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+		expect(c, `l${l}`).not.toBe(canvas);
+	}
+});
+
+test("goal attribute empty means no goal", async ({ page }) => {
+	await tsReady(page);
+	await barsReady(page);
+	await expect(page.locator("#ts-aside line.goal")).toHaveCount(1);
+	await page.locator("#ts-aside").evaluate((e) => e.setAttribute("goal", ""));
+	await expect(page.locator("#ts-aside line.goal")).toHaveCount(0);
+	expect(await page.locator("#ts-aside").evaluate((e) => e.shadowRoot!.textContent)).not.toContain("goal 0");
+	await page.locator("#bars-aside").evaluate((e) => e.setAttribute("goal", ""));
+	await expect(page.locator("#bars-aside .tick")).toHaveCount(0);
+	await expect(page.locator("#bars-aside .readout")).toHaveText("");
+	expect(await page.locator("#bars-aside").evaluate((e) => e.shadowRoot!.textContent)).not.toMatch(/goal 0|at goal|below goal/);
+});
+
+test("one surface property colors the end dot ring", async ({ page }) => {
+	await ready(page);
+	await openAside(page);
+	const ring = (sel: string) => page.locator(sel).evaluate((e) => getComputedStyle(e.shadowRoot!.querySelector("circle")!).stroke);
+	expect(await ring("#spark-main")).toBe(await resolveColor(page, "--bg"));
+	// tk-stat sets the surface to its own --panel.
+	await expect.poll(() => page.locator("tk-stat[wide] tk-sparkline").first().evaluate((e) => getComputedStyle(e.shadowRoot!.querySelector("circle")!).stroke)).toBe(await resolveColor(page, "--panel"));
+	await page.locator("#spark-main").evaluate((e) => ((e as HTMLElement).style.setProperty("--tk-chart-surface", "rgb(1, 2, 3)")));
+	expect(await ring("#spark-main")).toBe("rgb(1, 2, 3)");
+});
+
+test("heatmap: duplicate days, the last row wins everywhere", async ({ page }) => {
+	await calReady(page);
+	await page.locator("#cal-aside").evaluate((e: any) => {
+		const seen: any[] = [];
+		e.addEventListener("tk-readout", (ev: CustomEvent) => seen.push(ev.detail.datum));
+		(window as any).seenDatums = seen;
+		e.data = [
+			{ day: "2026-11-08", value: 5 },
+			{ day: "2026-11-08", value: 20 },
+			{ day: "2026-11-07", value: 0 },
+		];
+	});
+	const cell = page.locator('#cal-aside .cell[data-day="2026-11-08"]');
+	await expect(cell).toHaveCount(1);
+	await cell.dispatchEvent("pointerenter");
+	await expect(page.locator("#cal-aside .readout")).toHaveText(/20 min$/);
+	const table = page.locator("#cal-aside tbody tr", { has: page.locator('th:text-is("2026-11-08")') });
+	await expect(table.locator("td")).toHaveText("20 min");
+	expect(await page.evaluate(() => (window as any).seenDatums.at(-1))).toEqual({ day: "2026-11-08", value: 20 });
+	// A zero day reads "none" in the readout and in the table.
+	await expect(page.locator("#cal-aside tbody tr", { has: page.locator('th:text-is("2026-11-07")') }).locator("td")).toHaveText("none");
+});
+
+test("bars: a row without a number has no status", async ({ page }) => {
+	await barsReady(page);
+	await page.evaluate(() => {
+		const el = document.createElement("tk-bars") as any;
+		el.id = "bars-null";
+		el.setAttribute("label", "key");
+		el.setAttribute("value", "wpm");
+		el.setAttribute("goal", "40");
+		el.setAttribute("unit", "wpm");
+		el.data = [{ key: "a", wpm: 50 }, { key: "b", wpm: null }, { key: "c", wpm: 10 }];
+		document.getElementById("aside-charts")!.append(el);
+	});
+	const readout = page.locator("#bars-null .readout");
+	await expect(readout).toHaveText("1 of 2 at goal");
+	const bad = page.locator("#bars-null .row").nth(1);
+	await expect(bad.locator(".fill")).toHaveCount(0);
+	await page.locator("#bars-null .plot").focus();
+	await page.keyboard.press("Home");
+	await page.keyboard.press("ArrowRight");
+	await expect(readout).toHaveText("b · —");
+	const cells = await page.locator("#bars-null tbody tr").nth(1).locator("th, td").allTextContents();
+	expect(cells[0]).toBe("b");
+	expect(cells[1]).toBe("—");
+	expect(cells.join(" ")).not.toMatch(/goal/);
+	// The two real rows keep their status.
+	expect(await page.locator("#bars-null tbody tr").nth(0).textContent()).toContain("at goal");
+	expect(await page.locator("#bars-null tbody tr").nth(2).textContent()).toContain("below goal");
+});
+
+test("a field name that matches no row warns", async ({ page }) => {
+	await ready(page);
+	const warnings: string[] = [];
+	page.on("console", (m) => {
+		if (m.type() === "warning") warnings.push(m.text());
+	});
+	await page.evaluate(() => {
+		const host = document.getElementById("main-charts")!;
+		const add = (tag: string, attrs: Record<string, string>, data: unknown[]) => {
+			const el = document.createElement(tag) as any;
+			for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+			el.data = data;
+			host.append(el);
+		};
+		add("tk-bars", { id: "w-bars", label: "name", value: "wpm" }, [{ key: "a", wpm: 1 }]);
+		add("tk-heatmap", { id: "w-heat", value: "minutes" }, [{ day: "2026-11-08", value: 1 }]);
+		add("tk-timeseries", { id: "w-ts", y: "wpm", x: "date" }, [{ day: "2026-11-08", wpm: 1 }]);
+		add("tk-timeseries", { id: "w-none" }, [{ day: "2026-11-08", wpm: 1 }]);
+	});
+	for (const [tag, field] of [["tk-bars", "label"], ["tk-heatmap", "value"], ["tk-timeseries", "x"], ["tk-timeseries", "y"]]) {
+		await expect.poll(() => warnings.filter((w) => w.includes(tag) && w.includes(`"${field}"`)).length, `${tag} ${field}`).toBe(1);
+	}
+	// The demo's own charts name real fields and stay quiet.
+	expect(warnings.filter((w) => /field/.test(w)).length).toBe(4);
+});
+
+test("timeseries: an isolated day is drawn as a dot", async ({ page }) => {
+	await tsReady(page);
+	await page.evaluate(() => {
+		const el = document.createElement("tk-timeseries") as any;
+		el.id = "ts-iso";
+		el.setAttribute("y", "wpm");
+		el.data = [{ day: "2026-11-01", wpm: 30 }, { day: "2026-11-03", wpm: 32 }, { day: "2026-11-04", wpm: 33 }];
+		document.getElementById("main-charts")!.append(el);
+	});
+	const dots = page.locator("#ts-iso circle.dot");
+	await expect(dots).toHaveCount(1);
+	expect(await dots.getAttribute("r")).toBe("2");
+	expect(await dots.evaluate((c) => getComputedStyle(c).fill)).toBe(await resolveColor(page, "--chart-1"));
 });

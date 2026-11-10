@@ -3,7 +3,9 @@ import { guard } from "lit/directives/guard.js";
 import { ChartBase } from "./chart-base.ts";
 import { type DayInput, daySlots } from "./days.ts";
 import { compact, formatDay, formatValue, nearestIndex } from "./format.ts";
-import { areaPath, linePath, type Pt } from "./path.ts";
+import { areaPath, isolated, linePath, type Pt } from "./path.ts";
+import { warnMissingFields } from "./fields.ts";
+import { optionalNumber } from "./optional-number.ts";
 import { linearScale, niceTicks, seriesDomain } from "./scale.ts";
 
 /** One line of a time series: the row field, its legend/readout label and an optional "is measured" test. */
@@ -49,7 +51,7 @@ export class TkTimeseries extends ChartBase {
 		series: { attribute: false },
 		band: {},
 		bandLabel: { attribute: "band-label" },
-		goal: { type: Number },
+		goal: { converter: optionalNumber },
 		goalLabel: { attribute: "goal-label" },
 		height: { type: Number },
 	};
@@ -77,6 +79,7 @@ export class TkTimeseries extends ChartBase {
 			.s1 { --c: var(--chart-1); } .s2 { --c: var(--chart-2); } .s3 { --c: var(--chart-3); } .s4 { --c: var(--chart-4); }
 			.line { fill: none; stroke: var(--c); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 			.band { stroke: none; }
+			circle.dot { stroke: none; }
 			circle { fill: var(--c); stroke: var(--tk-chart-surface, var(--bg)); stroke-width: 2; }
 			.dates { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-secondary); }
 			.legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-secondary); }
@@ -134,6 +137,12 @@ export class TkTimeseries extends ChartBase {
 			const list: TimeseriesSeries[] = this.series?.length ? this.series : this.y ? [{ y: this.y, label: "", defined: this.defined }] : [];
 			if (list.length > MAX_SERIES) console.warn(`tk-timeseries: at most ${MAX_SERIES} series are drawn; ignoring ${list.length - MAX_SERIES} more`);
 			this.lines = list.slice(0, MAX_SERIES).map((s, i) => ({ ...s, cls: `s${i + 1}` }));
+		}
+		if (changed.has("data") || changed.has("x") || changed.has("y") || changed.has("series")) {
+			const rows = this.data ?? [];
+			if (rows.length > 0 && this.lines.length === 0) console.warn('tk-timeseries: rows but neither "y" nor "series" names a field to plot, so nothing is drawn');
+			warnMissingFields("tk-timeseries", rows, { x: this.x });
+			for (const s of this.lines) warnMissingFields("tk-timeseries", rows, { [this.series?.length ? "series" : "y"]: s.y });
 		}
 		// Anything but the active index (or a font load) invalidates the cached layout, summary and table.
 		if (this.fontsLoaded || [...changed.keys()].some((k) => k !== "active")) {
@@ -342,7 +351,7 @@ export class TkTimeseries extends ChartBase {
 				? svg`<line class="goal" x1="0" x2=${pw} y1=${gy} y2=${gy}></line>`
 				: nothing}`;
 		// The goal label goes over the lines: its surface-colored halo keeps it legible where they cross.
-		const front = svg`${this.lines.map((s, k) => svg`<path class="line ${s.cls}" data-y=${s.y} d=${linePath(pts[k])}></path>`)}
+		const front = svg`${this.lines.map((s, k) => svg`<path class="line ${s.cls}" data-y=${s.y} d=${linePath(pts[k])}></path>${isolated(pts[k]).map((p) => svg`<circle class="dot ${s.cls}" cx=${p.x} cy=${p.y} r="2"></circle>`)}`)}
 			${goal !== undefined ? svg`<text class="goal-label" x="0" y=${goalLabelY}>${this.goalLabel} ${compact(goal)}</text>` : nothing}
 			${end ? svg`<circle class="end s1" cx=${end.x} cy=${end.y} r="4"></circle>` : nothing}`;
 		return { w, h, centres, pts, back, front };
