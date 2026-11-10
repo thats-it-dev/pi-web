@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { clampIndex, stepIndex } from "./chart-base.ts";
+import { clampIndex, stepIndex } from "./step.ts";
 
 test("stepIndex: first key from rest starts at the latest point", () => {
 	expect(stepIndex(null, "ArrowRight", 5)).toBe(4);

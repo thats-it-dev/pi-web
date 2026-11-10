@@ -24,7 +24,7 @@ export const chartBaseStyles = [
 			white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 		}
 		.readout b { font-weight: 600; color: var(--text-primary); }
-		.plot { position: relative; outline: none; }
+		.plot { position: relative; outline: none; touch-action: pan-y; }
 		.plot:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 2px; }
 		.empty { margin: 0; font-size: 13px; color: var(--text-secondary); }
 		@media (prefers-reduced-motion: reduce) {
@@ -114,6 +114,12 @@ export abstract class ChartBase extends LitElement {
 		const next = clampIndex(i, this.count());
 		if (next === this.active) return;
 		this.active = next;
+		this.announce();
+	}
+
+	// Fires tk-readout for the current `active` and schedules the live text.
+	private announce(): void {
+		const next = this.active;
 		const detail: ReadoutDetail = { index: next, datum: next === null ? null : this.datum(next) };
 		this.dispatchEvent(new CustomEvent<ReadoutDetail>("tk-readout", { detail, bubbles: true, composed: true }));
 		this.scheduleLive();
@@ -187,8 +193,12 @@ export abstract class ChartBase extends LitElement {
 		this.liveTimer = undefined;
 	}
 
-	// Clamp before render (not in updated()) so a shrunk data set never renders a stale index.
-	protected willUpdate(changed: PropertyValues<this>): void {
-		if (changed.has("data")) this.active = clampIndex(this.active, this.count());
+	// Clamp before every render (count() may derive from any prop), so a shrunk data set never
+	// renders a stale index. If the clamp moves the index, listeners hear about it.
+	protected willUpdate(_changed: PropertyValues<this>): void {
+		const next = clampIndex(this.active, this.count());
+		if (next === this.active) return;
+		this.active = next;
+		this.announce();
 	}
 }
