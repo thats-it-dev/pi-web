@@ -48,7 +48,11 @@ Everything is published at https://kit.thatsit.app/ with `access-control-allow-o
 </tk-shell>
 ```
 
-An empty slot means no panel: no column, no landmark and no header button. A shell with neither slot filled behaves as before.
+An empty slot means no panel: no column, no landmark and no header button. Existing apps need no changes, but they look a little different:
+
+- A shell with neither slot filled no longer draws an empty 280px column on desktops or shows a menu button that opens an empty drawer on phones.
+- A shell with a nav panel gets a panel button on desktops too, left of the title, so the title moves right. The phone menu button draws a menu icon instead of the ☰ character.
+- The phone nav drawer is `min(85vw, 360px)` wide instead of `min(80vw, 360px)`, and its shadow uses `--shadow-color`.
 
 ### Breakpoints
 
@@ -88,7 +92,8 @@ A `tk-sheet` opened while a drawer is open stays usable, even if the sheet lives
 - `store-key`: `string | null`, default `null`. See above.
 - `nav-hidden`, `aside-hidden`: `boolean`, default `false`. See above.
 - `navOpen`: `boolean` property. Whether the nav drawer is open. Set it to open or close the drawer.
-- `asideOpen`: `boolean` property. Whether the details drawer is open.
+- `asideOpen`: `boolean` property. Whether the details drawer is open. Set it to open or close the drawer.
+- Only one drawer is open at a time: opening one, by property or method, closes the other. Prefer `show`, `hide` and `toggle`, which also work on docked columns.
 - `show(panel)`, `hide(panel)`, `toggle(panel)`: methods, where `panel` is `"nav"` or `"aside"`. They show, hide or toggle a docked column, or open or close a drawer. They do nothing for an empty panel.
 - `tk-panel-change`: event on the shell (bubbles, composed). `detail` is `{ panel: "nav" | "aside", open: boolean, docked: boolean }`. It fires when a panel opens, closes, docks or undocks, not on first render.
 
