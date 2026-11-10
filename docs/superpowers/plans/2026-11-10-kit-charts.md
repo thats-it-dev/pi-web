@@ -229,7 +229,7 @@ export function fitWeeks(width: number, wanted: number, o?: { cell?: number; gap
   - **`TkStats`** (`tk-stats`): a two-column grid with a 6px gap. `::slotted(tk-stat[wide]) { grid-column: 1 / -1 }`.
   - **`TkSparkline`** (`tk-sparkline`), with `values: number[]` (`attribute: false`).
     - The default size is `:host { display:block; width:110px; height:40px }`, and CSS can override it.
-    - It draws a 2px `--chart-1` line and an end dot (r 3.5, a 2px ring in `var(--tk-spark-ring, var(--bg))`). In a tile, the ring is set to `--panel`.
+    - It draws a 2px `--chart-1` line and an end dot (r 3.5, a 2px ring in `var(--tk-chart-surface, var(--bg))`). In a tile, the ring is set to `--panel`.
   - **`demo/charts.html`:** a `tk-shell` with an `aside` slot section that holds every chart, plus a full-width copy in main.
     - The page reads `?theme=dark|light` and sets `document.documentElement.dataset.theme`.
     - Its data is deterministic (a seeded PRNG, 40 days ending 2026-11-09, with skipped days).
@@ -475,7 +475,7 @@ export abstract class ChartBase extends LitElement {
   - Link `https://kit.thatsit.app/charts.html`.
 - [ ] **Step 4: Run full verification.**
   - Run `npm run build -w kit && npm test -w kit && npm run typecheck -w kit && npm run e2e -w kit`. Expected: all PASS.
-  - Run `npm run check-api -w kit`. Expected: it reports only additions, which are the new `elements`, `exports`, `attributes`, `cssProps` (`--chart-*`, `--tk-spark-ring`), the `events` entry (`tk-readout`) and `files` (none: `charts.html` is not an entry file). Paste the output into the PR body.
+  - Run `npm run check-api -w kit`. Expected: it reports only additions, which are the new `elements`, `exports`, `attributes`, `cssProps` (`--chart-*`, `--tk-chart-surface`), the `events` entry (`tk-readout`) and `files` (none: `charts.html` is not an entry file). Paste the output into the PR body.
   - Record `wc -c kit/dist/kit.js` before (23,875 bytes on master) and after, for the PR.
 - [ ] **Step 5: Take screenshots for the PR.** Use the aside at 300px and the full width, light and dark, saved to `docs/superpowers/specs/2026-11-10-kit-charts-mockups/built-*.png`. **Look at them**, comparing against `density.png` panel B: label collisions, cramped gridline values, the readout's height.
 - [ ] **Step 6: Commit** with `git add kit docs && git commit -m "docs(kit): charts README; a11y pass"`.

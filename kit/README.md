@@ -150,7 +150,7 @@ Data is always set as a property (`el.data = rows`), never as an attribute. The 
 `tk-stat`:
 
 - `label`: `string`. The small caption.
-- `value`: `string | number`. Numbers (and numeric strings) are compacted: `18400` shows as `18.4K`. Other strings show as written.
+- `value`: `string | number`. Numbers (and numeric strings) are compacted: `18400` shows as `18.4K`. Other strings show as written. `tk-stat` has no `format`: pass a preformatted `value` (for example `"1h 20m"`).
 - `unit`: `string`. Shown after the value.
 - `change`: `string`. A line under the value, for example `"+5 vs previous 2 weeks"`.
 - `good`: `"up" | "down"`. The change line is green (`--success`) or red (`--accent`) only when `change` starts with `+` or `-`/`−` and `good` says which direction is good. Without `good` the line stays neutral, because "up" is not always good.
@@ -165,7 +165,7 @@ Data is always set as a property (`el.data = rows`), never as an attribute. The 
 ```
 
 - `values`: `number[]` property. Non-finite values are dropped. It draws one 2px line in `--chart-1` with an end dot, has no axes or text and is hidden from assistive tech (put the number next to it). Default size is 110 x 40; size it with CSS.
-- `--tk-spark-ring`: CSS custom property. The color of the ring around the end dot, default `--bg`. `tk-stat` sets it to `--panel`.
+- `--tk-chart-surface`: CSS custom property. The color of the ring around the end dot. Set it to the color the chart sits on, e.g. `var(--panel)` inside a card. Default `--bg`. `tk-stat` sets it to `--panel` for its sparkline. `tk-timeseries` uses the same property for its end-dot rings and the goal label halo.
 
 ### Shared by tk-timeseries, tk-bars and tk-heatmap
 
@@ -173,9 +173,11 @@ These three share one base, so they behave alike.
 
 - `data`: `object[]` property. The rows.
 - `unit`: `string`. Appended to values (`34 wpm`).
-- `format`: `(n: number) => string` property. Replaces the default number formatting.
+- `format`: `(n: number) => string` property. Replaces the default number formatting, and the unit too: with a `format`, `unit` is not appended, so include it in what you return.
 - `summary`: `string`. Replaces the generated description (`aria-label`) of the plot.
 - `empty`: `string`, default `"No data yet"`. Shown as one quiet line instead of the plot when there is no data.
+
+**Field names.** On `tk-timeseries`, `tk-bars` and `tk-heatmap`, `x`, `y`, `label` and `value` name fields of your rows; they are not display text. If rows exist but no row has the named field, the element logs a console warning (once per data change).
 
 **Readout.** A one-line readout above the plot shows the value under the pointer, the touch point or the keyboard cursor, and a summary when nothing is active. The line has a fixed height, so the layout never jumps. Touch drag scrubs horizontally and still lets the page scroll vertically.
 
@@ -201,13 +203,13 @@ A day-by-day line chart with up to four series, an optional band between two ser
 </script>
 ```
 
-- `x`: `string`, default `"day"`. The row field with the day, as `YYYY-MM-DD`.
+- `x`: `string`, default `"day"`. The row field with the day: a `"YYYY-MM-DD"` string, a `Date` or milliseconds, bucketed to the local day. Don't use `toISOString()` to make day keys, it shifts days in UTC. Spans longer than 3660 days keep the latest 3660 (with a console warning).
 - `y`: `string`. Single-series shorthand: the row field to plot.
 - `defined`: `(row) => boolean` property. Single-series shorthand for the series' `defined`.
-- `series`: `{ y, label, defined? }[]` property. Up to four series; more are ignored with a console warning. Series 1 to 4 use `--chart-1` to `--chart-4`. With two or more series the chart shows a legend and the readout names each series.
+- `series`: `{ y, label, defined? }[]` property. Up to four series; more are ignored with a console warning. When both `series` and `y` are set, `series` wins. Series 1 to 4 use `--chart-1` to `--chart-4`. With two or more series the chart shows a legend and the readout names each series.
 - `band`: `string`, two field names separated by a space. Washes the area between those two series. The wash uses the color of the first band series.
 - `band-label`: `string`. The legend name of the band.
-- `goal`: `number`. Draws a goal line.
+- `goal`: `number`. Draws a goal line. An empty or non-numeric attribute means no goal.
 - `goal-label`: `string`, default `"goal"`. The word before the goal value on the line.
 - `height`: `number`, default `140`. The plot height in px.
 
@@ -228,8 +230,10 @@ A list of labelled bars with an optional goal. Rows keep the data order, and eve
 
 - `label`: `string`, default `"label"`. The row field for the name.
 - `value`: `string`, default `"value"`. The row field for the number.
-- `goal`: `number`. The goal; rows that reach it are `--chart-1`, rows below it are `--chart-2`. Without a goal every bar is `--chart-1`. Status is also written in words (`at goal`, `below goal`) in the readout and the table.
+- `goal`: `number`. An empty or non-numeric attribute means no goal. The goal; rows that reach it are `--chart-1`, rows below it are `--chart-2`. Without a goal every bar is `--chart-1`. Status is also written in words (`at goal`, `below goal`) in the readout and the table.
 - `lower`: `boolean`. Lower is better (time between keys). Only applies with a `goal`.
+
+A row whose value is not a finite number has no status: an empty bar, `—` in the readout and table, and it is not counted in "N of M at goal".
 
 A longer bar always means better. With `lower` the scale flips, so the fastest key gets the longest bar, and a value equal to the goal sits exactly on the tick.
 
@@ -241,13 +245,13 @@ A calendar heatmap. Weeks are columns and days are rows.
 <tk-heatmap id="practice" x="day" value="minutes" unit="min" weeks="12" legend></tk-heatmap>
 ```
 
-- `x`: `string`, default `"day"`. The row field with the day, as `YYYY-MM-DD`.
+- `x`: `string`, default `"day"`. The row field with the day: a `"YYYY-MM-DD"` string, a `Date` or milliseconds, bucketed to the local day. Don't use `toISOString()` to make day keys, it shifts days in UTC.
 - `value`: `string`, default `"value"`. The row field with the number.
 - `weeks`: `number`, default `12`. How many week columns to show at most.
 - `end`: `string` (`YYYY-MM-DD`), default today. The last day shown, which is the last cell.
 - `legend`: `boolean`. Shows a "less to more" legend.
 
-Weeks start on Monday. Cells shrink to fit but never below 10px; after that the oldest weeks are dropped, so the grid never overflows. Color has five levels (empty, then four), and levels are relative to the maximum of the visible cells, so a quiet window still shows contrast. A day with no row and a day with value `0` look the same.
+Weeks start on Monday. Cells shrink to fit but never below 10px; after that the oldest weeks are dropped, so the grid never overflows. Color has five levels (empty, then four), and levels are relative to the maximum of the visible cells, so a quiet window still shows contrast. A day with no row and a day with value `0` look the same, and both read "none". If several rows share a day, the last one wins (aggregate in your app).
 
 ### Colors
 

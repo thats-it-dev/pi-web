@@ -39,4 +39,4 @@ Palette (dark, surface #171717, categorical): 4 slots
 
 ```
 
-Accepted: orange contrast WARN (light), orange lightness-band FAIL (dark).
+Accepted: orange contrast WARN (light), orange lightness-band FAIL (dark), and the dark lightness-band misses for `#5aa6e6` (spec-mandated) and `#3cc9a8` (a tradeoff for colorblind separation).
