@@ -57,3 +57,9 @@ test("SKILL.md points at the kit charts", () => {
 		assert.ok(sec.includes(s), `style rules do not name ${s}`);
 	}
 });
+
+test("SKILL.md sends CI waits through bg_bash and sets no timeouts", () => {
+	assert.ok(m);
+	assert.doesNotMatch(m[2], /2400|timeout \d/);
+	for (const re of [/bg_bash/, /pr-wait/, /gateway-pr-wait/, /bg-bash-done/]) assert.match(m[2], re);
+});
