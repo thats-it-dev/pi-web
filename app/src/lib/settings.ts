@@ -53,3 +53,15 @@ export function setTheme(pref: ThemePref): void {
 	document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 	for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", dark ? "#171717" : "#f1f1f1"); // the status bar's color, as in theme-init.js
 }
+
+// Experimental iOS keyboard workarounds (Settings → keyboard experiments), off by default:
+// the inputmode trick against the ✓ row, and autocorrect off while a hardware keyboard types.
+const KEYBOARD_TRICKS_KEY = "pi-web:keyboard-tricks";
+
+export function getKeyboardTricks(): boolean {
+	return read(KEYBOARD_TRICKS_KEY) === "on";
+}
+
+export function setKeyboardTricks(on: boolean): void {
+	write(KEYBOARD_TRICKS_KEY, on ? "on" : null);
+}

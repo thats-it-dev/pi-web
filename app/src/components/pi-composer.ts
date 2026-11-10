@@ -5,6 +5,8 @@ import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { type MentionEntry, applyMention, mentionAt } from "../lib/mention.ts";
 import { checkImageFile } from "../lib/images.ts";
 import { UNAVAILABLE_IN_TERMINAL } from "../render/sheets.ts";
+import { enterSends, hardwareKeyboard } from "../lib/mobile.ts";
+import { getKeyboardTricks } from "../lib/settings.ts";
 
 export interface SubmitDetail {
 	text: string;
@@ -14,6 +16,7 @@ export interface SubmitDetail {
 
 const LONG_PRESS_MS = 500;
 const FILE_SEARCH_DELAY_MS = 120;
+const INPUTMODE_TRICK_MS = 100;
 
 export type FileSearch = (query: string, signal: AbortSignal) => Promise<MentionEntry[]>;
 
@@ -253,10 +256,31 @@ export class PiComposer extends LitElement {
 				return;
 			}
 		}
-		if (e.key === "Enter" && !e.shiftKey && !e.isComposing && matchMedia("(pointer: fine)").matches) {
+		const onScreenKeyboard = document.documentElement.hasAttribute("data-keyboard");
+		if (getKeyboardTricks()) this.syncAssist(e.target as HTMLTextAreaElement, hardwareKeyboard({ coarse: matchMedia("(pointer: coarse)").matches, onScreenKeyboard }));
+		if (e.keyCode !== 229 && enterSends(e, { finePointer: matchMedia("(pointer: fine)").matches, onScreenKeyboard })) {
 			e.preventDefault();
 			this.submit(this.streaming ? "steer" : "send");
 		}
+	};
+
+	// Keyboard experiment: with a hardware keyboard, no autocorrect or predictions, which may shrink
+	// iOS's floating shortcut bar. The on-screen keyboard gets them back.
+	private syncAssist(ta: HTMLTextAreaElement, hardware: boolean): void {
+		if (hardware === (ta.getAttribute("autocorrect") === "off")) return;
+		for (const [name, off] of [["autocorrect", "off"], ["autocomplete", "off"], ["spellcheck", "false"]] as const) {
+			if (hardware) ta.setAttribute(name, off);
+			else ta.removeAttribute(name);
+		}
+	}
+
+	// Keyboard experiment: focus with inputmode none, then text, which sometimes keeps iOS from
+	// adding its ✓ row above the keyboard.
+	private onFocus = (e: FocusEvent) => {
+		if (!getKeyboardTricks() || !matchMedia("(pointer: coarse)").matches) return;
+		const ta = e.target as HTMLTextAreaElement;
+		ta.inputMode = "none";
+		setTimeout(() => (ta.inputMode = "text"), INPUTMODE_TRICK_MS);
 	};
 
 	private onPressStart = () => {
@@ -352,7 +376,7 @@ export class PiComposer extends LitElement {
 					)}</div>`
 				: nothing}
 			<div class="box">
-				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu ? "true" : "false"} aria-activedescendant=${menu ? `slash-opt-${Math.min(this.menuIndex, menu.items.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, / for commands, @ for files"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey} @keyup=${this.onCaret} @click=${this.onCaret}></textarea>
+				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu ? "true" : "false"} aria-activedescendant=${menu ? `slash-opt-${Math.min(this.menuIndex, menu.items.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, / for commands, @ for files"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey} @keyup=${this.onCaret} @click=${this.onCaret} @focus=${this.onFocus}></textarea>
 				<div class="row">
 					<button class="icon" aria-label="Chat options" @click=${() => this.openSheet("menu")}>${PLUS_ICON}</button>
 					<input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" @change=${this.onFiles} />

@@ -16,6 +16,7 @@ import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
+import { nextTucked } from "../lib/mobile.ts";
 import { badgeLabel } from "../render/progress.ts";
 import { markdownStyles } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
@@ -30,6 +31,7 @@ type Sheet = "model" | "stats" | "fork" | "menu" | "plan";
 const SHEET_TITLES: Record<Sheet, string> = { model: "model", stats: "session", fork: "fork from…", menu: "this chat", plan: "plan" };
 const EDGE = 24; // a swipe from this close to the right edge opens the progress drawer
 const SWIPE = 60;
+const DRAG_DISMISS_PX = 10; // a finger moving the chat this far puts the keyboard away
 const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])";
 
 export class PiSession extends LitElement {
@@ -63,6 +65,8 @@ export class PiSession extends LitElement {
 	private streamId: string | null = null;
 	private atBottom = true;
 	private lastScrollTop = 0;
+	private autoScrollTop = -1; // where the last stick-to-bottom left the chat
+	private dragFromY: number | null = null;
 	private ticker: ReturnType<typeof setInterval> | undefined;
 	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
@@ -443,8 +447,29 @@ export class PiSession extends LitElement {
 		const el = e.target as HTMLElement;
 		this.atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 		const delta = el.scrollTop - this.lastScrollTop;
-		if (Math.abs(delta) > 8) this.tucked = delta > 0 && el.scrollTop > 60 && !this.atBottom;
 		this.lastScrollTop = el.scrollTop;
+		if (el.scrollTop === this.autoScrollTop) return; // our own stick-to-bottom, not the person scrolling
+		this.tucked = nextTucked(this.tucked, { top: el.scrollTop, delta });
+	};
+
+	// Dragging the chat puts the on-screen keyboard away, as in Messages.
+	private onDragStart = {
+		handleEvent: (e: TouchEvent) => {
+			this.dragFromY = e.touches.length === 1 ? (e.touches[0]?.clientY ?? null) : null;
+		},
+		passive: true,
+	};
+
+	private onDragMove = {
+		handleEvent: (e: TouchEvent) => {
+			const y = e.touches[0]?.clientY;
+			if (this.dragFromY === null || y === undefined || Math.abs(y - this.dragFromY) < DRAG_DISMISS_PX) return;
+			this.dragFromY = null;
+			if (!document.documentElement.hasAttribute("data-keyboard")) return;
+			const ta = this.composer?.renderRoot.querySelector("textarea");
+			if (ta && this.composer?.shadowRoot?.activeElement === ta) ta.blur();
+		},
+		passive: true,
 	};
 
 	updated(changed: PropertyValues<this>): void {
@@ -452,7 +477,10 @@ export class PiSession extends LitElement {
 			const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 			void messages?.updateComplete.then(() => {
 				const el = this.renderRoot.querySelector<HTMLElement>(".scroll");
-				if (el && this.atBottom) el.scrollTop = el.scrollHeight;
+				if (el && this.atBottom) {
+					el.scrollTop = el.scrollHeight;
+					this.autoScrollTop = el.scrollTop;
+				}
 			});
 		}
 		this.syncFocus();
@@ -492,12 +520,13 @@ export class PiSession extends LitElement {
 		const label = this.announced ? badgeLabel(this.announced.view) : null;
 		return html`
 			<div class="chat">
-				<pi-header ?hidden=${Boolean(this.childKey)} .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 				<!-- The chat stays mounted under a thread (hidden, so out of the tab order): the draft and scroll position survive. -->
 				${this.childKey
 					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"} .badge=${label}></pi-child-thread>`
 					: nothing}
-				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll}>
+				<!-- The header scrolls with the chat (sticky at the top) so tucking it frees its space for messages. -->
+				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll} @touchstart=${this.onDragStart} @touchmove=${this.onDragMove}>
+					<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
 				</div>
 				${this.childKey ? nothing : this.renderTray(snap)}

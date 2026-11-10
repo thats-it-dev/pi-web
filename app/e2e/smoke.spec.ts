@@ -11,7 +11,7 @@ async function startChat(page: Page, text: string, folder = WORKDIR) {
 	await page.goto("/#/new");
 	await pickFolder(page, folder);
 	await page.getByLabel("Message").fill(text);
-	await page.getByRole("button", { name: "send" }).click(); // Enter doesn't send on the phone
+	await page.getByRole("button", { name: "send" }).click(); // the on-screen keyboard's Return makes a new line
 	await expect(page).toHaveURL(/#\/s\//);
 }
 
@@ -327,6 +327,21 @@ test("phone: a badge opens the progress drawer; Escape, the dimmed area and Back
 	await page.goBack();
 	await expect(drawer).not.toBeInViewport();
 	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
+});
+
+test("phone: scrolling down tucks the header away completely, scrolling up brings it back", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone flow");
+	await page.goto(`/#/s/${TODO_SESSION}`);
+	const header = page.locator("pi-session tk-header");
+	await expect(header).toBeInViewport();
+	await page.locator("pi-messages").evaluate((el) => ((el as HTMLElement).style.minHeight = "4000px")); // room to scroll
+	const scroller = page.locator("pi-session .scroll");
+	await scroller.evaluate((el) => el.scrollBy(0, 300));
+	await expect(header).not.toBeInViewport();
+	// No band left where the header was: the chat itself reaches the top of the screen.
+	expect(await scroller.evaluate((el) => el.getBoundingClientRect().top)).toBeLessThanOrEqual(1);
+	await scroller.evaluate((el) => el.scrollBy(0, -10));
+	await expect(header).toBeInViewport();
 });
 
 test("phone: finished subagents still get a badge", async ({ page, isMobile }) => {
