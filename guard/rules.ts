@@ -11,6 +11,7 @@ export const REASONS = {
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: `Blocked: \`pr\` and \`ship\` push, then wait for CI (usually 3-6 min, sometimes longer) and print progress while they wait. A bash timeout is only a cap; the command returns as soon as CI finishes. Rerun the same command with timeout 2400. If Michael asks why it takes a while, tell him it is waiting on CI.`,
+	review: `Blocked: run the reviewer before opening the PR. Write the diff to a file (\`cd <dir> && git diff main...HEAD > /tmp/<name>-review.diff\`) and, if the app generates content or changes with the user's progress, sample output at the first, a middle and the last stage to another file. Then call the \`subagent\` tool with agent "reviewer", \`async: false\` (so it waits for the review) and a task that names Michael's request, \`docs/spec.md\` and those files (call \`subagents_enable\` first if \`subagent\` is not available). Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 };
 
@@ -49,7 +50,16 @@ export function pythonRewrite(code: string): boolean {
 	return /\bopen\([^)]*,\s*["'][wa]\+?b?["']|\.write_text\(|\.write_bytes\(/.test(code);
 }
 
-export type Env = { cwd: string; home: string; hasScript: (dir: string, name: string) => boolean; dirty: (dir: string) => boolean };
+export type Env = {
+	cwd: string;
+	home: string;
+	hasScript: (dir: string, name: string) => boolean;
+	dirty: (dir: string) => boolean;
+	/** A reviewer subagent finished since Michael's last message. Absent: not checked. */
+	reviewed?: () => boolean;
+	/** The branch changes more than docs, Markdown and CI files. */
+	codeChanged?: (dir: string) => boolean;
+};
 
 const GIT = String.raw`\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+`;
 
@@ -77,7 +87,49 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
+	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed() && (env.codeChanged?.(dir) ?? true)) return { block: true, reason: REASONS.review };
 	return undefined;
+}
+
+const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b/;
+
+/** Files a PR can change without a review: docs, Markdown and CI config. */
+export function reviewFree(path: string): boolean {
+	return /^(?:docs|\.github)\//.test(path) || /\.md$/i.test(path);
+}
+
+// --- review before PR ---
+
+type Entry = { type?: string; message?: { role?: string; content?: unknown; toolCallId?: string; isError?: boolean } };
+type ToolCallPart = { type?: string; id?: string; name?: string; arguments?: Record<string, unknown> };
+
+/** A reviewer subagent call that waits for the review (`async: false`; by default subagent returns a receipt
+ *  and reviews in the background): direct (`agent: "reviewer"`) or inside a workflow script in the same reply. */
+function reviewerCall(call: ToolCallPart, replyText: string): boolean {
+	if (call.type !== "toolCall" || call.name !== "subagent" || call.arguments?.async !== false) return false;
+	if (call.arguments?.agent === "reviewer") return true;
+	return call.arguments?.workflow !== undefined && /agent:\s*["']reviewer["']/.test(replyText);
+}
+
+/** True when a reviewer subagent returned without error after Michael's last message on the branch. */
+export function reviewedSinceUser(branch: Iterable<unknown>): boolean {
+	let reviewed = false;
+	const pending = new Set<string>();
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "user") {
+			reviewed = false;
+			pending.clear();
+		} else if (m.role === "assistant" && Array.isArray(m.content)) {
+			const text = m.content.map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
+			for (const c of m.content as ToolCallPart[]) if (reviewerCall(c, text) && c.id) pending.add(c.id);
+		} else if (m.role === "toolResult" && m.toolCallId && pending.has(m.toolCallId) && !m.isError) {
+			reviewed = true;
+		}
+	}
+	return reviewed;
 }
 
 // The shell commands and Python code a tool call would run, for bash and context-mode's ctx_* tools.
