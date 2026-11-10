@@ -180,10 +180,10 @@ test("pr happy path: exact calls and preview URL", async () => {
 	assert.deepEqual(f.lines().filter((l) => !l.startsWith("git status") && !l.startsWith("git fetch")), [
 		"git rev-parse --abbrev-ref HEAD",
 		"git rev-list --count origin/main..HEAD",
+		"gh pr view --json url,state,body",
 		"npm run typecheck",
 		"npm test",
 		"npm run e2e",
-		"gh pr view --json url,state,body",
 		"git push -u origin HEAD",
 		`gh pr create --repo ${REPO} --title Add x --body Does x`,
 		"git rev-parse HEAD",
@@ -280,13 +280,29 @@ test("a stuck run watch times out with the run URL", async () => {
 	await assert.rejects(ship(appDir(), run, async () => 200, { clock: clock(), watchTimeoutMs: 60_000 }), /actions\/runs\/42/);
 });
 
-test("pr: an existing OPEN PR is reused, a merged one is not", async () => {
+test("pr: an existing OPEN PR is reused; a branch whose PR was merged is refused before pushing", async () => {
 	const url = `https://github.com/${REPO}/pull/5`;
 	const open = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url, state: "OPEN" }) } }));
 	await openPr(appDir(), opts, open.run, { clock: clock() });
 	assert.ok(!open.lines().some((l) => l.startsWith("gh pr create")));
 	const merged = fakeRun(prTable({ "gh pr view": { stdout: JSON.stringify({ url: `https://github.com/${REPO}/pull/2`, state: "MERGED" }) } }));
-	const r = await openPr(appDir(), opts, merged.run, { clock: clock() });
-	assert.ok(merged.lines().some((l) => l.startsWith("gh pr create")));
-	assert.equal(r.pr, url);
+	await assert.rejects(openPr(appDir(), opts, merged.run, { clock: clock() }), /PR #2 .*already merged.*git switch main/s);
+	assert.ok(!merged.lines().some((l) => l.startsWith("git push") || l.startsWith("gh pr create")));
+});
+
+test("pr reports progress: each local check, then the CI step it is waiting on", async () => {
+	const f = fakeRun(prTable({
+		"gh run view": (c) => (c.args.includes("--json") ? { stdout: JSON.stringify({ jobs: [{ steps: [{ name: "Run npm run e2e", status: "in_progress" }, { name: "Deploy to Cloudflare Pages", conclusion: "success" }] }] }) } : { stdout: "" }),
+	}));
+	// gh run watch blocks for a while, as it does on a real run.
+	const slow: typeof f.run = async (cmd, args, o) => {
+		if (cmd === "gh" && args[1] === "watch") await new Promise((r) => setTimeout(r, 60));
+		return f.run(cmd, args, o);
+	};
+	const lines: string[] = [];
+	await openPr(appDir(), opts, slow, { clock: clock(), log: (l) => lines.push(l), progressMs: 10 });
+	assert.ok(lines.some((l) => /npm run typecheck/.test(l)), lines.join("\n"));
+	assert.ok(lines.some((l) => /npm run e2e/.test(l)));
+	assert.ok(lines.some((l) => /pull\/5/.test(l)), lines.join("\n"));
+	assert.ok(lines.some((l) => /waiting for CI.*Run npm run e2e/.test(l)), lines.join("\n"));
 });

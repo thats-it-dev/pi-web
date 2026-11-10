@@ -7,6 +7,11 @@ export type Clock = { now: () => number; sleep: (ms: number) => Promise<void> };
 export const realClock: Clock = { now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
 
 export const RUN_LOOKUP_MS = 60_000;
+export const PROGRESS_MS = 30_000;
+
+// Progress goes to stderr, so a long wait shows what it is waiting on; RESULT stays the last stdout line.
+export type Log = (line: string) => void;
+export const stderrLog: Log = (line) => void process.stderr.write(`${line}\n`);
 export const LOG_TAIL_LINES = 40;
 
 export function appRepo(dir: string): { name: string; repo: string } {
@@ -41,9 +46,10 @@ function hasScript(dir: string, name: string): boolean {
 	}
 }
 
-export async function localChecks(dir: string, run: Run, checks = APP_CHECKS): Promise<void> {
+export async function localChecks(dir: string, run: Run, checks = APP_CHECKS, log: Log = stderrLog): Promise<void> {
 	for (const args of checks) {
 		if (args[0] === "run" && args[1] === "lint" && !hasScript(dir, "lint")) continue;
+		log(`local check: npm ${args.join(" ")}`);
 		const r = await run("npm", args, { cwd: dir });
 		if (r.code !== 0) {
 			const out = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
@@ -85,16 +91,47 @@ export async function deployStepOk(repo: string, id: number, run: Run): Promise<
 	return jobs.some((j) => j.steps?.some((s) => s.name === DEPLOY_STEP && s.conclusion === "success"));
 }
 
+// The step a running job is on, for progress lines.
+export function currentStep(viewJson: string): string {
+	try {
+		const jobs: { steps?: { name: string; status?: string }[] }[] = JSON.parse(viewJson || "{}").jobs ?? [];
+		return jobs.flatMap((j) => j.steps ?? []).find((s) => s.status === "in_progress")?.name ?? "starting";
+	} catch {
+		return "starting";
+	}
+}
+
+const mmss = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
+
 // Blocks until the run ends; on failure the error carries the tail of the failing step logs.
-// kind "test" is a plain CI run (no deploy step to check).
-export async function watchRun(repo: string, id: number, run: Run, timeoutMs = WATCH_TIMEOUT_MS, kind: "deploy" | "test" = "deploy"): Promise<void> {
-	const r = await run("gh", ["run", "watch", String(id), "--repo", repo, "--exit-status"], { timeoutMs });
+// kind "test" is a plain CI run (no deploy step to check). Every progressMs it logs the step CI is on.
+export async function watchRun(
+	repo: string,
+	id: number,
+	run: Run,
+	timeoutMs = WATCH_TIMEOUT_MS,
+	kind: "deploy" | "test" = "deploy",
+	log: Log = stderrLog,
+	progressMs = PROGRESS_MS,
+): Promise<void> {
+	const started = Date.now();
+	log(`waiting for CI: ${kind} run ${id} (https://github.com/${repo}/actions/runs/${id}); usually 3-6 min`);
+	const ticker = setInterval(() => {
+		void run("gh", ["run", "view", String(id), "--repo", repo, "--json", "jobs"]).then((v) => log(`waiting for CI (${mmss(Date.now() - started)}): ${currentStep(v.stdout)}`));
+	}, progressMs);
+	ticker.unref?.();
+	let r;
+	try {
+		r = await run("gh", ["run", "watch", String(id), "--repo", repo, "--exit-status"], { timeoutMs });
+	} finally {
+		clearInterval(ticker);
+	}
 	if (r.timedOut) throw new Error(`${kind} run ${id} did not finish within ${Math.ceil(timeoutMs / 60_000)} min; it may be queued or stuck: https://github.com/${repo}/actions/runs/${id}`);
 	if (r.code === 0) {
 		if (kind === "deploy" && !(await deployStepOk(repo, id, run))) throw new Error(`deploy run ${id} finished green but the ${SKIPPED}`);
 		return;
 	}
-	const log = await run("gh", ["run", "view", String(id), "--repo", repo, "--log-failed"]);
-	const tail = log.stdout.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
+	const failed = await run("gh", ["run", "view", String(id), "--repo", repo, "--log-failed"]);
+	const tail = failed.stdout.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
 	throw new Error(`${kind} run ${id} failed in ${repo}. Last lines of the failing step:\n${tail || r.stderr.trim()}`);
 }

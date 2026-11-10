@@ -2,9 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GATEWAY_REPO, gatewayPreviewUrl } from "./names.ts";
 import { must, type Run } from "./run.ts";
-import { appRepo, branchOf, findRun, headSha, localChecks, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
+import { appRepo, branchOf, findRun, headSha, localChecks, realClock, requireClean, stderrLog, watchRun, type Clock, type Log } from "./wait.ts";
 
-export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number };
+export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number; log?: Log; progressMs?: number };
 
 export type Comment = { user?: { login?: string }; body?: string };
 
@@ -19,10 +19,14 @@ export async function requireAhead(dir: string, run: Run): Promise<void> {
 	if (!(ahead > 0)) throw new Error("this branch has no commits ahead of origin/main; commit your change first");
 }
 
-// The branch's PR, if one is open. `gh pr view` also finds closed/merged PRs for the branch; only an open one is reused.
+// The branch's PR, if one is open. `gh pr view` also finds closed/merged PRs for the branch: an open one is reused,
+// and a merged one means the branch is spent, since its next PR would carry the old history under the old name.
 export async function openPrOf(dir: string, run: Run): Promise<{ url: string; number: number; body: string } | undefined> {
 	const r = await run("gh", ["pr", "view", "--json", "url,state,body"], { cwd: dir });
 	const info = r.code === 0 ? JSON.parse(r.stdout) : undefined;
+	if (info?.state === "MERGED") {
+		throw new Error(`this branch's PR #${prNumber(info.url)} was already merged; start a new branch from main for this change: git stash or commit, then git switch main && git pull && git switch -c <short-name>, bring the change over (git cherry-pick <commit> or redo it), and rerun pr`);
+	}
 	return info?.state === "OPEN" ? { url: info.url, number: prNumber(info.url), body: info.body ?? "" } : undefined;
 }
 
@@ -59,6 +63,7 @@ export async function openPr(
 	opts: PrOpts = {},
 ): Promise<{ pr: string; preview: string; gatewayPreview?: string }> {
 	const clock = opts.clock ?? realClock;
+	const log = opts.log ?? stderrLog;
 	const { name, repo } = appRepo(dir);
 	if (o.gatewayPr !== undefined && JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway !== true) {
 		throw new Error('--gateway-pr needs "gateway": true in app.config.json; set it, commit, then rerun');
@@ -69,10 +74,11 @@ export async function openPr(
 	if ((await branchOf(dir, run)) === "main") throw new Error("pr will not run on main; create one with git switch -c <name>, commit, then run pr");
 	await requireClean(dir, run);
 	await requireAhead(dir, run);
-	await localChecks(dir, run);
+	// Before the local checks, so a spent branch fails in seconds, not after the e2e suite.
+	const existing = await openPrOf(dir, run);
+	await localChecks(dir, run, undefined, log);
 
 	// App CI reads the Gateway line from the PR body of the pull_request event, so it must be there before the push.
-	const existing = await openPrOf(dir, run);
 	const line = o.gatewayPr === undefined ? undefined : gatewayLine(o.gatewayPr);
 	const body = line ? `${o.body}\n\n${line}` : o.body;
 	if (existing && line && !existing.body.split("\n").some((l) => l.trim() === line)) {
@@ -80,9 +86,10 @@ export async function openPr(
 		await must(run, "gh", ["pr", "edit", String(existing.number), "--repo", repo, "--body", `${kept}\n\n${line}`], { cwd: dir });
 	}
 	const { url: prUrl, number: num } = await pushAndOpen(dir, repo, { title: o.title, body }, run, existing);
+	log(`pushed; PR ${prUrl}`);
 
 	const sha = await headSha(dir, run);
-	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs);
+	await watchRun(repo, await findRun(repo, sha, run, clock), run, opts.watchTimeoutMs, "deploy", log, opts.progressMs);
 
 	// The sticky comment is edited in place, so an old one may still name an older commit.
 	const short = sha.slice(0, 7);
