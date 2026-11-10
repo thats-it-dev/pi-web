@@ -436,3 +436,19 @@ test("heatmap keyboard: ArrowUp moves a week", async ({ page }) => {
 	await page.keyboard.press("ArrowLeft");
 	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-01");
 });
+
+test("heatmap: readout keeps its day when the layout shrinks", async ({ page }) => {
+	await calReady(page);
+	const readout = page.locator("#cal-aside .readout");
+	await page.locator("#cal-aside .plot").scrollIntoViewIfNeeded();
+	await page.locator("#cal-aside .plot").focus();
+	await page.keyboard.press("End");
+	await page.keyboard.press("ArrowLeft");
+	const nov8 = await fmtDay(page, "2026-11-08");
+	await expect(readout).toHaveText(new RegExp(`^${nov8} · `));
+	const before = await readout.textContent();
+	await page.locator("#cal-aside").evaluate((e) => { e.style.width = "100px"; });
+	await expect.poll(() => page.locator("#cal-aside .cell").count()).toBeLessThan(78);
+	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-08");
+	expect(await readout.textContent()).toBe(before);
+});

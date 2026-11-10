@@ -64,14 +64,16 @@ export class TkHeatmap extends ChartBase {
 	private cellPx = 18;
 	private values = new Map<string, number>();
 	private rows = new Map<string, unknown>();
-	private maxValue = 0;
+	private maxValue = 0; // levels are relative to the max over the visible cells
+	private activeDay = "";
+	private monthFmt = new Intl.DateTimeFormat(undefined, { month: "short" });
 
 	constructor() {
 		super();
 		this.x = "day";
 		this.value = "value";
 		this.weeks = 12;
-		this.end = dayKey(new Date()) ?? "";
+		this.end = ""; // empty = today, resolved at layout time so it never goes stale
 		this.legend = false;
 	}
 
@@ -79,8 +81,17 @@ export class TkHeatmap extends ChartBase {
 		// count() derives from the layout, so compute before the base clamps `active`.
 		const fitted = fitWeeks(this.width, Math.max(1, Math.floor(this.weeks) || 12));
 		this.cellPx = fitted.cell;
-		const lay = this.width > 0 && (this.data?.length ?? 0) > 0 ? heatLayout(this.end, fitted.weeks) : { cells: [], months: [] };
+		const end = this.end || (dayKey(new Date()) ?? "");
+		const lay = this.width > 0 && (this.data?.length ?? 0) > 0 ? heatLayout(end, fitted.weeks) : { cells: [], months: [] };
+		const prev = this.cells;
+		const same = prev.length === lay.cells.length && prev[0]?.day === lay.cells[0]?.day;
 		this.cells = lay.cells;
+		// A rebuilt layout renumbers the cells: keep the readout on the same day, or drop it if that day left the grid.
+		if (!same && this.active !== null && this.activeDay) {
+			const at = this.cells.findIndex((c) => c.day === this.activeDay);
+			if (at < 0) this.setActive(null);
+			else this.active = at;
+		}
 		this.months = lay.months;
 		this.values = new Map();
 		this.rows = new Map();
@@ -94,6 +105,7 @@ export class TkHeatmap extends ChartBase {
 		}
 		this.maxValue = Math.max(0, ...this.cells.map((c) => this.values.get(c.day) ?? 0));
 		super.willUpdate(changed);
+		this.activeDay = this.active === null ? "" : (this.cells[this.active]?.day ?? "");
 	}
 
 	private fmt(v: number): string {
@@ -176,7 +188,7 @@ export class TkHeatmap extends ChartBase {
 				@pointerleave=${this.onLeave}
 				@pointercancel=${this.onLeave}
 			>
-				<div class="months" aria-hidden="true">${this.months.map((m) => html`<span class=${m.col === cols - 1 ? "last" : ""} style="grid-column:${m.col + 1} / span ${m.col === cols - 1 ? 1 : 2}">${new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(+m.day.slice(0, 4), +m.day.slice(5, 7) - 1, 1, 12))}</span>`)}</div>
+				<div class="months" aria-hidden="true">${this.months.map((m) => html`<span class=${m.col === cols - 1 ? "last" : ""} style="grid-column:${m.col + 1} / span ${m.col === cols - 1 ? 1 : 2}">${this.monthFmt.format(new Date(+m.day.slice(0, 4), +m.day.slice(5, 7) - 1, 1, 12))}</span>`)}</div>
 				<div class="grid">
 					${this.cells.map(
 						(c, i) => html`<div
