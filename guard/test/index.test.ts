@@ -1,11 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard from "../index.ts";
-import { NUDGE_TYPE, REASONS, TODO_NUDGE_TYPE } from "../rules.ts";
+import piGuard, { needsPr } from "../index.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, TODO_NUDGE_TYPE } from "../rules.ts";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
+import { join } from "node:path";
 
-function load() {
+function load(gitNeedsPr: (dir: string) => boolean = () => false) {
 	const handlers: Record<string, (event: any, ctx: any) => any> = {};
-	piGuard({ on: (event, handler) => void (handlers[event] = handler) });
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, gitNeedsPr);
 	return handlers;
 }
 
@@ -47,4 +51,41 @@ test("a finished run with open to-dos on the branch gets the to-do nudge", () =>
 	assert.equal(r.entries[0].customType, TODO_NUDGE_TYPE);
 	assert.match(r.entries[0].content, /#2 b \(in progress\)/);
 	assert.equal(load().agent_before_settle({ outcome: "completed", context: { contextMessages: finished } }, { cwd: "/", sessionManager: { getBranch: () => [] } }), undefined);
+});
+
+test("a finished run that changed an app and left it unpublished gets the PR nudge", () => {
+	const keeb = join(homedir(), "workspace", "apps", "keeb");
+	const finished = [
+		{ role: "user", content: "use the kit panel" },
+		{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "edit", arguments: { path: `${keeb}/src/app-main.ts` } }] },
+		{ role: "toolResult", content: [{ type: "text", text: "ok" }] },
+		{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done. Next: open the PR with these commands. " + "x".repeat(400) }] },
+	];
+	const ctx = { cwd: "/", sessionManager: { getBranch: () => [] } };
+	const r = load((d) => d === keeb).agent_before_settle({ outcome: "completed", context: { contextMessages: finished } }, ctx);
+	assert.equal(r.entries[0].customType, PR_NUDGE_TYPE);
+	assert.match(r.entries[0].content, /apps\/keeb/);
+	assert.equal(load(() => false).agent_before_settle({ outcome: "completed", context: { contextMessages: finished } }, ctx), undefined);
+});
+
+test("needsPr: dirty tree, unpushed commits and never-pushed branches need a PR; a pushed clean branch does not", () => {
+	const git = (dir: string, ...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "pipe" });
+	const remote = mkdtempSync(join(tmpdir(), "guard-remote-"));
+	git(remote, "init", "-q", "--bare", "-b", "main");
+	const dir = mkdtempSync(join(tmpdir(), "guard-app-"));
+	git(dir, "init", "-q", "-b", "main");
+	git(dir, "remote", "add", "origin", remote);
+	writeFileSync(join(dir, "a.txt"), "1");
+	git(dir, "add", "-A");
+	git(dir, "commit", "-qm", "one");
+	git(dir, "push", "-qu", "origin", "main");
+	assert.equal(needsPr(dir), false);
+	writeFileSync(join(dir, "a.txt"), "2");
+	assert.equal(needsPr(dir), true);
+	git(dir, "switch", "-qc", "feat");
+	git(dir, "commit", "-qam", "two");
+	assert.equal(needsPr(dir), true);
+	git(dir, "push", "-qu", "origin", "feat");
+	assert.equal(needsPr(dir), false);
+	assert.equal(needsPr(join(dir, "missing")), false);
 });

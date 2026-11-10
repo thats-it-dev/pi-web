@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { checkToolCall, NUDGE, NUDGE_TYPE, openTodos, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, checkToolCall, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
@@ -27,7 +27,24 @@ function dirty(dir: string): boolean {
 	}
 }
 
-export default function piGuard(pi: PiApi): void {
+// Work an app still has to publish: uncommitted changes (untracked files included, .gitignore applies), commits not
+// on the remote, or a branch that was never pushed.
+export function needsPr(dir: string): boolean {
+	let out: string;
+	try {
+		out = execFileSync("git", ["status", "--porcelain=v2", "--branch"], { cwd: dir, encoding: "utf8", timeout: 5000 });
+	} catch {
+		return false;
+	}
+	const lines = out.split("\n").filter(Boolean);
+	if (lines.some((l) => !l.startsWith("#"))) return true;
+	const head = lines.find((l) => l.startsWith("# branch.head "))?.slice(14);
+	const ahead = Number(/^# branch\.ab \+(\d+)/m.exec(out)?.[1] ?? 0);
+	if (ahead > 0) return true;
+	return head !== "main" && !lines.some((l) => l.startsWith("# branch.upstream "));
+}
+
+export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr): void {
 	const home = homedir();
 
 	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript, dirty }));
@@ -40,7 +57,9 @@ export default function piGuard(pi: PiApi): void {
 		if (shouldNudge(messages)) return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
 		// The branch, not the context: after a compaction the last todo result is no longer in the context.
 		const open = openTodos(ctx.sessionManager?.getBranch() ?? []);
-		if (!shouldNudgeTodos(messages, open)) return undefined;
-		return { entries: [{ type: "custom_message", customType: TODO_NUDGE_TYPE, content: todoNudge(open), display: true }], continue: true };
+		if (shouldNudgeTodos(messages, open)) return { entries: [{ type: "custom_message", customType: TODO_NUDGE_TYPE, content: todoNudge(open), display: true }], continue: true };
+		const apps = appsNeedingPr(messages, home, gitNeedsPr);
+		if (!shouldNudgePr(messages, apps)) return undefined;
+		return { entries: [{ type: "custom_message", customType: PR_NUDGE_TYPE, content: prNudge(apps), display: true }], continue: true };
 	});
 }
