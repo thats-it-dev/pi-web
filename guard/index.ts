@@ -55,8 +55,18 @@ export function codeChanged(dir: string): boolean {
 	}
 }
 
+// Lines in an existing file, undefined when it does not exist or can't be read.
+function lines(path: string): number | undefined {
+	try {
+		return readFileSync(path, "utf8").split("\n").length;
+	} catch {
+		return undefined;
+	}
+}
+
 export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr): void {
 	const home = homedir();
+	const rewrites = new Set<string>();
 
 	pi.on("tool_call", (event, ctx) =>
 		checkToolCall(event.toolName, event.input ?? {}, {
@@ -66,6 +76,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			dirty,
 			reviewed: () => reviewedSinceUser(ctx.sessionManager?.getBranch() ?? []),
 			codeChanged,
+			lines,
+			rewrites,
 		}),
 	);
 

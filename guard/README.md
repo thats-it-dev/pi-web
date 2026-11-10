@@ -53,6 +53,13 @@ task could be lost. Before compaction the guard removes those messages (`REINJEC
 `rules.ts`) from what pi summarizes; pi's own summarizer still writes the summary. This relies on pi
 summarizing the same `preparation` object it passes to `session_before_compact` (true in pi 1.0.2).
 
+## Long rewrites
+
+A `write` over an existing app file of more than 80 lines (`OVERWRITE_LINES`) is blocked once per path and
+the reason asks for small edits. Generation runs at about 34 tokens/s on the spark, so output is time: in
+keeb's first guided-lesson run, rewrites of existing files and text copied inside edits cost about 15 of 81
+minutes. Sending the same write again goes through, for a real rewrite.
+
 ## Where the numbers come from
 
 Replaying the 6-day keeb session (Nov 3-8 2026, 2,600 model calls) through these rules: it would have
