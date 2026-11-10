@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GATEWAY_REPO, gatewayPreviewUrl } from "./names.ts";
 import { must, type Run } from "./run.ts";
-import { appRepo, branchOf, findRun, headSha, localChecks, realClock, requireClean, stderrLog, watchRun, type Clock, type Log } from "./wait.ts";
+import { appRepo, branchOf, findRun, headSha, realClock, requireClean, stderrLog, watchRun, type Clock, type Log } from "./wait.ts";
 
 export type PrOpts = { clock?: Clock; previewWaitMs?: number; watchTimeoutMs?: number; log?: Log; progressMs?: number };
 
@@ -74,9 +74,7 @@ export async function openPr(
 	if ((await branchOf(dir, run)) === "main") throw new Error("pr will not run on main; create one with git switch -c <name>, commit, then run pr");
 	await requireClean(dir, run);
 	await requireAhead(dir, run);
-	// Before the local checks, so a spent branch fails in seconds, not after the e2e suite.
 	const existing = await openPrOf(dir, run);
-	await localChecks(dir, run, undefined, log);
 
 	// App CI reads the Gateway line from the PR body of the pull_request event, so it must be there before the push.
 	const line = o.gatewayPr === undefined ? undefined : gatewayLine(o.gatewayPr);

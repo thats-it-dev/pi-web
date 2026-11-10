@@ -4,7 +4,7 @@ import { GATEWAY_REPO, NAME_RE, getPage } from "./names.ts";
 import { ghIdentity, setIdentity } from "./new-app.ts";
 import { openPrOf, parseComments, pushAndOpen, requireAhead } from "./pr.ts";
 import { must, type Run } from "./run.ts";
-import { branchOf, findRun, headSha, localChecks, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
+import { branchOf, findRun, headSha, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
 
 export { gatewayPreviewUrl } from "./names.ts";
 
@@ -93,7 +93,6 @@ export async function gatewayPr(
 	const changed = (await must(run, "git", ["diff", "--name-only", "--no-renames", "origin/main...HEAD"], { cwd: dir })).split("\n").map((s) => s.trim()).filter(Boolean);
 	const bad = changed.filter((p) => !ALLOWED(p) || p.startsWith("apps/example/"));
 	if (bad.length) throw new Error(`gateway-pr only sends apps.json and apps/<app>/ changes; this branch also changes: ${bad.join(", ")}. Undo those (never edit src/)`);
-	await localChecks(dir, run, [["run", "typecheck"], ["test"]]);
 
 	const existing = await openPrOf(dir, run);
 	const { url: prUrl, number: n } = await pushAndOpen(dir, repo, o, run, existing);

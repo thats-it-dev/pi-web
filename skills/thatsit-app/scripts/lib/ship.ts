@@ -1,6 +1,6 @@
 import { getPage } from "./names.ts";
 import { must, type Run } from "./run.ts";
-import { appRepo, deployStepOk, branchOf, findRun, headSha, localChecks, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
+import { appRepo, deployStepOk, branchOf, findRun, headSha, realClock, requireClean, watchRun, type Clock } from "./wait.ts";
 
 export type ShipOpts = { domainTimeoutMs?: number; watchTimeoutMs?: number; runLookupMs?: number; clock?: Clock };
 
@@ -29,7 +29,6 @@ export async function ship(
 		throw new Error(`${name} is already shipped: main has a successful production deploy. Make changes on a branch and open a pull request (pr).`);
 	}
 
-	await localChecks(dir, run);
 	await must(run, "git", ["push", "origin", "main"], { cwd: dir });
 	const sha = await headSha(dir, run);
 	await watchRun(repo, await findRun(repo, sha, run, clock, opts.runLookupMs), run, opts.watchTimeoutMs);

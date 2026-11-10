@@ -136,8 +136,6 @@ const gwPrTable = (over: T = {}): T => ({
 	"git fetch origin main": {},
 	"git rev-list --count origin/main..HEAD": { stdout: "1\n" },
 	"git diff --name-only --no-renames origin/main...HEAD": { stdout: "apps.json\napps/tips/routes.ts\napps/tips/routes.test.ts\n" },
-	"npm run typecheck": {},
-	"npm test": {},
 	"gh pr view": { code: 1, stderr: "no pull requests found" },
 	"git push -u origin HEAD": {},
 	"gh pr create": { stdout: `https://github.com/${GW}/pull/12\n` },
@@ -157,7 +155,7 @@ test("gateway-pr: test workflow, then spark-preview success maps to the preview 
 	const r = await gatewayPr(dir, gwOpts, f.run, { clock: clock() });
 	assert.deepEqual(r, { pr: `https://github.com/${GW}/pull/12`, number: 12, preview: PREVIEW });
 	const l = f.lines();
-	assert.ok(l.includes("npm run typecheck") && l.includes("npm test"));
+	assert.ok(!l.some((x) => x.startsWith("npm")));
 	assert.ok(!l.includes("npm run e2e"));
 	assert.ok(l.includes(`gh pr create --repo ${GW} --title Register tips --body Adds tips`));
 	assert.ok(l.includes(`gh run list --repo ${GW} --commit ${SHA} --workflow test.yml --json databaseId,status,conclusion`));
@@ -263,8 +261,6 @@ const appPrTable = (over: T = {}): T => ({
 	"git status --porcelain": { stdout: "" },
 	"git fetch origin main": {},
 	"git rev-list --count origin/main..HEAD": { stdout: "2\n" },
-	"npm run": {},
-	"npm test": {},
 	"git push -u origin HEAD": {},
 	"gh pr view": { code: 1, stderr: "no pull requests found" },
 	"gh pr create": { stdout: "https://github.com/thats-it-dev/foo/pull/5\n" },
