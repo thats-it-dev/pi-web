@@ -30,3 +30,14 @@ test("duplicates: last wins; invalid dropped", () => {
 	expect(byDay.get("2026-03-07")?.v).toBe(2);
 	expect(daySlots([], () => null).days).toEqual([]);
 });
+
+test("years outside 1000-9999 are invalid and daySlots terminates", () => {
+	expect(dayKey("0001-01-01T00:00:00Z")).toBeNull();
+	expect(dayKey(new Date(8.64e15))).toBeNull();
+	expect(daySlots([{ d: "0001-01-01T00:00:00Z" }], (r) => r.d).days).toEqual([]);
+	expect(daySlots([{ d: new Date(8.64e15) }], (r) => r.d).days).toEqual([]);
+});
+test("TZ is pinned to a DST zone", () => {
+	expect(new Date(2026, 2, 8, 12).getTimezoneOffset()).toBe(420);
+	expect(new Date(2026, 0, 8, 12).getTimezoneOffset()).toBe(480);
+});

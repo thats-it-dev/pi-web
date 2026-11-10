@@ -8,6 +8,7 @@ function pad(n: number): string {
 
 function fromDate(d: Date): string | null {
 	if (Number.isNaN(d.getTime())) return null;
+	if (d.getFullYear() < 1000 || d.getFullYear() > 9999) return null;
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
@@ -53,6 +54,11 @@ export function daySlots<T>(
 	const keys = [...byDay.keys()].sort();
 	const days: string[] = [];
 	const last = keys[keys.length - 1];
-	for (let k = keys[0]; k <= last; k = addDays(k, 1)) days.push(k);
+	for (let k = keys[0]; k <= last; ) {
+		days.push(k);
+		const next = addDays(k, 1);
+		if (next <= k) break;
+		k = next;
+	}
 	return { days, byDay };
 }

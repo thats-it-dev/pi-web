@@ -20,3 +20,7 @@ test("areaPath closes runs of two or more only", () => {
 	expect(d.endsWith("Z")).toBe(true);
 	expect(areaPath([null], [null])).toBe("");
 });
+
+test("linePath single point", () => {
+	expect(linePath([{ x: 5, y: 7 }])).toBe("M5,7h0");
+});
