@@ -1,4 +1,4 @@
-import { LitElement, type PropertyValues, type TemplateResult, css, html } from "lit";
+import { type CSSResultGroup, LitElement, type PropertyDeclarations, type PropertyValues, type TemplateResult, css, html } from "lit";
 import { sharedStyles } from "../styles.ts";
 import { clampIndex, stepIndex } from "./step.ts";
 
@@ -18,7 +18,8 @@ const LIVE_MS = 400;
 export const chartBaseStyles = [
 	sharedStyles,
 	css`
-		:host { display: block; position: relative; }
+		/* min-width 0: a nowrap readout must not widen a grid or flex parent. */
+		:host { display: block; position: relative; min-width: 0; }
 		.readout {
 			margin: 0 0 6px; font-size: 13px; line-height: 1.4; height: 1.4em; color: var(--text-secondary);
 			white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -56,7 +57,7 @@ export const chartBaseStyles = [
  * Overrides of `willUpdate`, `connectedCallback` or `disconnectedCallback` must call super.
  */
 export abstract class ChartBase extends LitElement {
-	static properties = {
+	static properties: PropertyDeclarations = {
 		data: { attribute: false },
 		format: { attribute: false },
 		active: { state: true },
@@ -71,7 +72,7 @@ export abstract class ChartBase extends LitElement {
 	declare summary: string;
 	declare empty: string;
 
-	static styles = chartBaseStyles;
+	static styles: CSSResultGroup = chartBaseStyles;
 
 	private ro?: ResizeObserver;
 	private liveText = "";
@@ -165,11 +166,12 @@ export abstract class ChartBase extends LitElement {
 	/** The data as a visually hidden table, so nothing is hover-only or color-only. */
 	protected renderTable(): TemplateResult {
 		const { head, rows } = this.tableRows();
-		return html`<table class="sr-only">
+		// The wrapper clips: a table ignores width: 1px, so on its own it would widen the scroll area.
+		return html`<div class="sr-only"><table>
 			<caption>${this.plotLabel()}</caption>
 			<thead><tr>${head.map((h) => html`<th scope="col">${h}</th>`)}</tr></thead>
 			<tbody>${rows.map((r) => html`<tr>${r.map((c, j) => (j === 0 ? html`<th scope="row">${c}</th>` : html`<td>${c}</td>`))}</tr>`)}</tbody>
-		</table>`;
+		</table></div>`;
 	}
 
 	/** One quiet line in place of the plot when there is no data. */

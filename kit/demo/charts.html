@@ -33,6 +33,12 @@
 				<tk-stat label="streak" value="6" unit="d"></tk-stat>
 			</tk-stats>
 			<tk-sparkline id="spark-main"></tk-sparkline>
+			<h2>speed</h2>
+			<tk-timeseries id="ts-main" y="wpm" goal="40" unit="wpm"></tk-timeseries>
+			<h2>empty</h2>
+			<tk-timeseries id="ts-empty" y="wpm" unit="wpm"></tk-timeseries>
+			<h2>one day</h2>
+			<tk-timeseries id="ts-one" y="wpm" unit="wpm"></tk-timeseries>
 		</section>
 		<section slot="aside" id="aside-charts">
 			<h2>history</h2>
@@ -43,6 +49,7 @@
 				<tk-stat label="practised" value="312" unit="min"></tk-stat>
 				<tk-stat label="streak" value="6" unit="d"></tk-stat>
 			</tk-stats>
+			<tk-timeseries id="ts-aside" x="day" band="wpm strokeWpm" band-label="pausing" goal="40" unit="wpm"></tk-timeseries>
 		</section>
 	</tk-shell>
 	<script>
@@ -60,9 +67,13 @@
 			const days = [];
 			for (let i = 39; i >= 0; i--) {
 				const day = key(new Date(end - i * 86400000));
-				if (rnd() < 0.3) { days.push({ day, wpm: null, typing: null }); continue; }
+				if (rnd() < 0.3) { days.push({ day, wpm: null, strokeWpm: null }); continue; }
 				const wpm = Math.round(28 + (39 - i) * 0.2 + rnd() * 10);
-				days.push({ day, wpm, typing: wpm + Math.round(4 + rnd() * 6) });
+				days.push({ day, wpm, strokeWpm: wpm + Math.round(4 + rnd() * 6) });
+			}
+			// One "not measured" day: strokeWpm 0 between two measured days (hidden by the series' defined()).
+			for (let i = 15; i < days.length - 1; i++) {
+				if (days[i - 1].wpm !== null && days[i].wpm !== null && days[i + 1].wpm !== null) { days[i].strokeWpm = 0; break; }
 			}
 			const keys = "etaonisrhdlu".split("").map((k, i) => ({ key: k, wpm: Math.round(48 - i * 2 - rnd() * 3) }));
 			const cal = [];
@@ -75,6 +86,15 @@
 			const set = () => {
 				for (const s of document.querySelectorAll("tk-stat[wide]")) s.trend = wpms;
 				document.getElementById("spark-main").values = wpms;
+				const aside = document.getElementById("ts-aside");
+				aside.series = [
+					{ y: "wpm", label: "with pauses" },
+					{ y: "strokeWpm", label: "typing only", defined: (r) => r.strokeWpm > 0 },
+				];
+				aside.data = days;
+				document.getElementById("ts-main").data = days;
+				document.getElementById("ts-empty").data = [];
+				document.getElementById("ts-one").data = [days[days.length - 1].wpm !== null ? days[days.length - 1] : days.find((d) => d.wpm !== null)];
 			};
 			set();
 		})();
