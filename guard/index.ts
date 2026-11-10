@@ -1,6 +1,7 @@
 // pi-web guard: a pi extension that blocks the slow or unsafe habits a local model falls into while
 // working on thatsit.app apps, and restarts a coding run that stops without a reply. Rules: rules.ts.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -16,10 +17,19 @@ function hasScript(dir: string, name: string): boolean {
 	}
 }
 
+// Uncommitted changes to tracked files. Untracked files are not at risk from checkout or restore.
+function dirty(dir: string): boolean {
+	try {
+		return execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim() !== "";
+	} catch {
+		return false;
+	}
+}
+
 export default function piGuard(pi: PiApi): void {
 	const home = homedir();
 
-	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript }));
+	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript, dirty }));
 
 	pi.on("agent_before_settle", (event) => {
 		// context.canContinue describes the context before these entries: it is false whenever the run ended on an
