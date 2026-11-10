@@ -79,16 +79,20 @@ session is idle shows up live in the app. Check the hub's RPC event handling. If
 
 - **`pr <dir> --title --body [--gateway-pr N]`** pushes and opens or updates the PR as it does now, then prints
   `RESULT {"ok":true,"pr":"<url>","number":N}` and exits within seconds. **It no longer runs the local checks** (`localChecks`
-  / `APP_CHECKS`: typecheck, test, lint, e2e) and no longer waits for CI or the preview. Michael's call: a PR may
-  exist briefly before its checks pass.
-- **`pr-wait <dir>`** (new) runs the local checks that `pr` used to run, then does what `pr` did after the PR existed:
+  / `APP_CHECKS`: typecheck, test, lint, e2e) and no longer waits for CI or the preview. Michael's call: those checks
+  are dropped from the CLI entirely. pi already runs `npm run verify` (the same four) before committing, and CI runs them
+  again before the preview deploys. CI failures reach pi through `pr-wait`.
+- **`pr-wait <dir>`** (new) does what `pr` did after the PR existed, with no local checks:
   it waits for CI and the preview comment for the branch's current head commit (including the gateway-preview check). It prints `RESULT {"ok":true,"pr":...,"preview":...[,"gatewayPreview":...]}`
   or exits 1 with the reason (CI failure with the failing job, or a timeout). It keeps its own internal time limits,
   which are fine because they live inside the command, not in bash. It prints progress lines as it does now.
 - **`gateway-pr` is split the same way** (my call): `gateway-pr` opens the gateway PR and returns
   `{pr, number}` right away; the new `gateway-pr-wait <dir>` does the rest (CI + the spark preview, with its 20-min budget) and prints
   `{pr, number, preview}`.
-- `ship` doesn't change internally. It runs through `bg_bash` too.
+- `ship` runs through `bg_bash` too.
+- **`localChecks` is removed from `ship` and `gateway-pr` as well** (my call, following Michael's decision for `pr`). App CI
+  (`deploy.yml`, on push to main and on PRs) and spark-gateway CI (`test.yml`) run the same checks. Delete
+  `localChecks`/`APP_CHECKS` from `lib/wait.ts` once nothing uses them, and update the tests.
 - Split `lib/pr.ts`'s `openPr` into the open part and the wait part. Keep the existing tests passing, split along with
   it.
 
@@ -103,7 +107,7 @@ session is idle shows up live in the app. Check the hub's RPC event handling. If
     is the only way to background them.
 - The PR nudge (`rules.ts` ~296) drops "(bash timeout 2400)" and describes the new flow: run `pr`, then `bg_bash pr-wait`.
 - `SKILL.md`: rewrite line 12 and every other place that mentions waiting on CI. `pr` returns the PR link right away;
-  tell Michael the PR link, then start `pr-wait` with `bg_bash` (it runs the local checks and then waits for CI). When the `bg-bash-done` message comes in, post the preview
+  tell Michael the PR link, then start `pr-wait` with `bg_bash` (it waits for CI and the preview). When the `bg-bash-done` message comes in, post the preview
   link from `RESULT`, or fix the failure and push again (`pr` then `pr-wait`). Same for `ship`/`gateway-pr`. Never set
   a bash timeout on these commands.
 - Update the guard README and tests.
