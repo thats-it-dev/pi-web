@@ -222,10 +222,6 @@ export class TkShell extends LitElement {
 
 	private setDrawer(panel: Panel, value: boolean): void {
 		if (value) {
-			// Switching drawers keeps the first opener: focus then sits in the drawer being replaced.
-			if (!this.drawer) this.opener = deepActiveElement();
-			// Sheets removed from the page while open never report closing; drop them before deciding what goes inert.
-			this.countSheets();
 			this.navOpen = panel === "nav";
 			this.asideOpen = panel === "aside";
 		} else if (panel === "nav") this.navOpen = false;
@@ -248,8 +244,21 @@ export class TkShell extends LitElement {
 		this.set(panel, !this.state[panel].open);
 	}
 
-	// A drawer whose panel docks (window widened) or disappears is no longer a drawer.
-	protected willUpdate(): void {
+	protected willUpdate(changed: Map<PropertyKey, unknown>): void {
+		// Opening one drawer closes the other, however it was opened (methods or the properties).
+		const wasNav = changed.has("navOpen") ? !!changed.get("navOpen") : this.navOpen;
+		const wasAside = changed.has("asideOpen") ? !!changed.get("asideOpen") : this.asideOpen;
+		const opensNav = this.navOpen && !wasNav;
+		const opensAside = this.asideOpen && !wasAside;
+		if (opensNav) this.asideOpen = false;
+		else if (opensAside) this.navOpen = false;
+		if (opensNav || opensAside) {
+			// Switching drawers keeps the first opener: focus then sits in the drawer being replaced.
+			if (!wasNav && !wasAside) this.opener = deepActiveElement();
+			// Sheets removed from the page while open never report closing; drop them before deciding what goes inert.
+			this.countSheets();
+		}
+		// A drawer whose panel docks (window widened) or disappears is no longer a drawer.
 		const s = this.state;
 		if (this.navOpen && (s.nav.docked || !s.nav.present)) this.navOpen = false;
 		if (this.asideOpen && (s.aside.docked || !s.aside.present)) this.asideOpen = false;

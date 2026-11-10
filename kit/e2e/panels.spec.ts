@@ -338,3 +338,20 @@ test("phone: an Escape the page already handled leaves the drawer open", async (
 	await expect(page.locator(aside)).toBeInViewport({ ratio: 1 });
 	expect(await page.locator(shell).evaluate((s: any) => s.asideOpen)).toBe(true);
 });
+
+test("phone: setting the open properties directly keeps one drawer and restores focus", async ({ page }, info) => {
+	test.skip(info.project.name !== "phone");
+	await ready(page);
+	const opener = page.locator("#show-toast");
+	await opener.focus();
+	await page.locator(shell).evaluate((s: any) => (s.asideOpen = true));
+	await expect(page.locator(aside)).toBeInViewport({ ratio: 1 });
+	await expect.poll(() => focusInside(page, "[slot=aside]")).toBe(true);
+	await page.locator(shell).evaluate((s: any) => (s.navOpen = true));
+	await expect(page.locator(nav)).toBeInViewport({ ratio: 1 });
+	expect(await page.locator(shell).evaluate((s: any) => [s.navOpen, s.asideOpen])).toEqual([true, false]);
+	await expect(page.locator(aside)).toBeHidden();
+	await page.locator(shell).evaluate((s: any) => (s.navOpen = false));
+	await expect(page.locator(nav)).toBeHidden();
+	await expect(opener).toBeFocused();
+});
