@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Every chart element on the demo page. Later tasks append their tags here so the text-size test covers them.
-const CHART_TAGS = ["tk-stat", "tk-sparkline", "tk-timeseries", "tk-bars"];
+const CHART_TAGS = ["tk-stat", "tk-sparkline", "tk-timeseries", "tk-bars", "tk-heatmap"];
 
 /** Computed font-size (px) of every element that has direct text, walking open shadow roots under `selector`. */
 export async function textSizes(page: Page, selector: string): Promise<number[]> {
@@ -103,7 +103,7 @@ test("no chart text under 12px", async ({ page }) => {
 	await openAside(page);
 	for (const tag of CHART_TAGS) {
 		const sizes = await textSizes(page, tag);
-		if (tag === "tk-stat" || tag === "tk-timeseries" || tag === "tk-bars") expect(sizes.length, tag).toBeGreaterThan(0);
+		if (tag === "tk-stat" || tag === "tk-timeseries" || tag === "tk-bars" || tag === "tk-heatmap") expect(sizes.length, tag).toBeGreaterThan(0);
 		for (const s of sizes) expect(s, tag).toBeGreaterThanOrEqual(12);
 	}
 });
@@ -355,4 +355,84 @@ test("bars readout: rest summary, hover, keyboard", async ({ page }, info) => {
 	await expect(readout).toHaveText(want(keys[keys.length - 2]));
 	await page.keyboard.press("ArrowDown");
 	await expect(readout).toHaveText(want(keys[keys.length - 2]));
+});
+
+// ---- tk-heatmap ----
+
+const calReady = async (page: Page, url = "/charts.html") => {
+	await ready(page, url);
+	await openAside(page);
+	await page.waitForFunction(() => customElements.get("tk-heatmap"));
+	await expect(page.locator("#cal-aside .cell")).not.toHaveCount(0);
+	await expect(page.locator("#cal-200 .cell")).not.toHaveCount(0);
+};
+
+const cellPos = (page: Page, sel: string, day: string) =>
+	page.locator(`${sel} .cell[data-day="${day}"]`).evaluate((c) => {
+		const g = getComputedStyle(c);
+		return { col: parseInt(g.gridColumnStart), row: parseInt(g.gridRowStart) - 1, w: c.getBoundingClientRect().width };
+	});
+
+test("heatmap: Monday rows, last cell is end day", async ({ page }) => {
+	await calReady(page);
+	const last = await page.locator("#cal-aside .cell").last().getAttribute("data-day");
+	expect(last).toBe("2026-11-09");
+	const mon = await cellPos(page, "#cal-aside", "2026-11-09");
+	const sun = await cellPos(page, "#cal-aside", "2026-11-08");
+	expect(mon.row).toBe(0);
+	expect(sun.row).toBe(6);
+	expect(sun.col).toBe(mon.col - 1);
+});
+
+test("heatmap: narrow container drops oldest weeks, never overflows", async ({ page }) => {
+	await calReady(page);
+	const fits = () => page.locator("#cal-200").evaluate((e) => e.scrollWidth <= e.clientWidth);
+	expect(await fits()).toBe(true);
+	const w200 = (await cellPos(page, "#cal-200", "2026-11-09")).w;
+	expect(w200).toBeGreaterThanOrEqual(10);
+	expect(w200).toBeLessThan(18);
+	const cols = () => page.locator("#cal-200").evaluate((e) => new Set([...e.shadowRoot!.querySelectorAll(".cell")].map((c) => getComputedStyle(c).gridColumnStart)).size);
+	const before = await cols();
+	await page.locator("#cal-narrow").evaluate((e) => { e.style.width = "100px"; });
+	await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+	await expect.poll(cols).toBeLessThan(before);
+	expect(await page.locator("#cal-200 .cell").last().getAttribute("data-day")).toBe("2026-11-09");
+	expect(await fits()).toBe(true);
+});
+
+test("heatmap: zero and missing are the same empty color", async ({ page }) => {
+	await calReady(page);
+	const cal: any[] = (await page.evaluate(() => (window as any).demo.cal)).filter((r: any) => r.day >= "2026-08-24");
+	const zero = cal.find((r) => r.value === 0)!.day;
+	const gone = cal.find((r) => r.value > 40)!.day;
+	const busy = cal.find((r) => r.value > 40 && r.day !== gone)!.day;
+	await page.locator("#cal-aside").evaluate((e: any, [z, g]) => { e.data = e.data.filter((r: any) => r.day !== g); }, [zero, gone]);
+	const panel = await resolveColor(page, "--panel");
+	const fill = (d: string) => page.locator(`#cal-aside .cell[data-day="${d}"]`).evaluate((c) => getComputedStyle(c).backgroundColor);
+	await expect.poll(() => fill(gone)).toBe(panel);
+	expect(await fill(zero)).toBe(panel);
+	expect(await fill(busy)).not.toBe(panel);
+});
+
+test("heatmap keyboard: ArrowUp moves a week", async ({ page }) => {
+	await calReady(page);
+	const cal: any[] = await page.evaluate(() => (window as any).demo.cal);
+	const readout = page.locator("#cal-aside .readout");
+	const rest = await readout.textContent();
+	const vis = cal.filter((r) => r.day >= "2026-08-24");
+	const total = await page.evaluate((n) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n), vis.reduce((n, r) => n + r.value, 0));
+	expect(rest).toBe(`${vis.filter((r) => r.value > 0).length} days · ${total} min`);
+	const want = async (d: string) => {
+		const v = cal.find((r) => r.day === d)!.value;
+		return `${await fmtDay(page, d)} · ${v > 0 ? `${v} min` : "none"}`;
+	};
+	await page.locator("#cal-aside .plot").focus();
+	await page.keyboard.press("End");
+	await expect(readout).toHaveText(await want("2026-11-09"));
+	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-09");
+	await page.keyboard.press("ArrowUp");
+	await expect(readout).toHaveText(await want("2026-11-02"));
+	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-02");
+	await page.keyboard.press("ArrowLeft");
+	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-01");
 });

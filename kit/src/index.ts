@@ -12,3 +12,4 @@ export { TkSparkline } from "./charts/tk-sparkline.ts";
 export type { ReadoutDetail } from "./charts/chart-base.ts";
 export { TkTimeseries, type TimeseriesSeries } from "./charts/tk-timeseries.ts";
 export { TkBars } from "./charts/tk-bars.ts";
+export { TkHeatmap } from "./charts/tk-heatmap.ts";

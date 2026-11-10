@@ -37,6 +37,8 @@
 			<tk-timeseries id="ts-main" y="wpm" goal="40" unit="wpm"></tk-timeseries>
 			<h2>keys, no goal</h2>
 			<tk-bars id="bars-nogoal" label="key" value="wpm" unit="wpm"></tk-bars>
+			<h2>practice, 200px</h2>
+			<div id="cal-narrow" style="width:200px"><tk-heatmap id="cal-200" end="2026-11-09" weeks="12" unit="min"></tk-heatmap></div>
 			<h2>empty</h2>
 			<tk-timeseries id="ts-empty" y="wpm" unit="wpm"></tk-timeseries>
 			<h2>one day</h2>
@@ -56,6 +58,8 @@
 			<tk-bars id="bars-aside" label="key" value="wpm" goal="40" unit="wpm"></tk-bars>
 			<h2>time between keys</h2>
 			<tk-bars id="bars-ms" label="key" value="ms" goal="200" lower unit="ms"></tk-bars>
+			<h2>practice</h2>
+			<tk-heatmap id="cal-aside" end="2026-11-09" weeks="12" unit="min" legend></tk-heatmap>
 		</section>
 	</tk-shell>
 	<script>
@@ -104,6 +108,8 @@
 				document.getElementById("bars-aside").data = keys;
 				document.getElementById("bars-nogoal").data = keys;
 				document.getElementById("bars-ms").data = ms;
+				document.getElementById("cal-aside").data = cal;
+				document.getElementById("cal-200").data = cal;
 				document.getElementById("ts-empty").data = [];
 				document.getElementById("ts-one").data = [days[days.length - 1].wpm !== null ? days[days.length - 1] : days.find((d) => d.wpm !== null)];
 			};
