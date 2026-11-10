@@ -43,6 +43,8 @@ test("fullE2e tells the whole suite from one spec", () => {
 	assert.equal(fullE2e("npx playwright test -g offline"), false);
 	assert.equal(fullE2e("BASE_URL=https://keeb.thatsit.app npm run e2e"), false);
 	assert.equal(fullE2e("npm run verify"), false);
+	assert.equal(fullE2e(`grep -n "^#\\+ \\|npm run e2e" README.md | head -40`), false);
+	assert.equal(fullE2e(`git commit -m 'test: npm run e2e is faster'`), false);
 });
 
 test("the full suite is blocked only in apps that have e2e:one", () => {

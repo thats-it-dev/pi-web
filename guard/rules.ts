@@ -36,7 +36,9 @@ export function workDir(command: string, cwd: string, home: string): string {
 // True when a command runs the whole e2e suite rather than one spec or a grep.
 export function fullE2e(command: string): boolean {
 	if (/\bBASE_URL=/.test(command)) return false; // checking a deployed site
-	for (const m of command.matchAll(/\b(?:npm\s+run\s+e2e(?![:\w-])|playwright\s+test\b)([^;&|\n]*)/g)) {
+	// Quoted text is an argument (a grep pattern, a commit message), not a command that runs.
+	const bare = command.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
+	for (const m of bare.matchAll(/\b(?:npm\s+run\s+e2e(?![:\w-])|playwright\s+test\b)([^;&|\n]*)/g)) {
 		if (!/\.spec\.|\.ts\b|\s(?:-g|--grep)\b/.test(m[1])) return true;
 	}
 	return false;
