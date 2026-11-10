@@ -25,7 +25,7 @@ describe("heatLayout", () => {
 	it("labels only 1sts inside the grid", () => {
 		const { months } = heatLayout("2026-03-08", 3); // Mar 1 is a Sunday in col 1 (Feb 23 week)
 		expect(months).toEqual([{ col: 1, day: "2026-03-01" }]);
-		const m2 = heatLayout("2026-03-15", 3).months; // starts Mar 2: no 1st
+		const m2 = heatLayout("2026-03-15", 2).months; // starts Mar 2: Mar 1 is before the first column
 		expect(m2).toEqual([]);
 	});
 });
