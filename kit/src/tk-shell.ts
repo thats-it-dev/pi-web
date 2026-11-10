@@ -51,6 +51,8 @@ export class TkShell extends LitElement {
 			.main { grid-area: 1 / 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 			/* the slot is display: contents, so the app's own children are what flex */
 			::slotted(:not([slot])) { flex: 1; min-height: 0; }
+			/* a header placed beside the page content keeps its own height; the content takes the rest */
+			::slotted(tk-header:not([slot])) { flex: none; }
 			/* Closed drawers stay off-screen and turn invisible once the slide ends. */
 			.drawer { position: fixed; top: 0; bottom: 0; width: min(85vw, 360px); z-index: 20; visibility: hidden; transition: transform 0.25s ease, visibility 0s linear 0.25s; }
 			.sidebar.drawer { left: 0; transform: translateX(-100%); box-shadow: 2px 0 12px var(--shadow-color); }

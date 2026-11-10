@@ -78,3 +78,11 @@ test("header action keeps its width, centre and view with a long title", async (
 	expect(Math.abs(a.y + a.height / 2 - (row.y + row.height / 2))).toBeLessThanOrEqual(2);
 	await expect(action).toBeInViewport({ ratio: 1 });
 });
+
+test("a header beside the page content keeps its own height; the content takes the rest", async ({ page }) => {
+	const header = (await page.locator("tk-shell > tk-header").boundingBox())!;
+	const section = (await page.locator("tk-shell > section:not([slot])").boundingBox())!;
+	expect(header.height).toBeLessThan(120);
+	expect(Math.round(section.y)).toBe(Math.round(header.y + header.height));
+	expect(Math.round(section.y + section.height)).toBe(page.viewportSize()!.height);
+});
