@@ -37,13 +37,17 @@ list pi left stale after finishing the work, and nowhere else.
 When a run edited or wrote files in an app (`~/workspace/apps/<name>`) and ended with a reply that isn't a
 question, with no `pr`, `ship` or `gateway-pr` after the last edit, and git says the app still has work to
 publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
-message: branch if needed, commit, run `pr` itself with a 2400 s timeout, and never hand Michael commands to run.
+message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, and never hand Michael commands to run.
 At most 2 per user prompt.
 
-## pr and ship timeouts
+## pr timeouts and CI waits
 
-A bash call that runs the skill's `pr`, `ship` or `gateway-pr` with a timeout under 2400 s is blocked: those wait
-for CI (usually 3-6 min) and print progress while they do, and a short cap kills them mid-wait.
+A bash call that runs the skill's `pr` or `gateway-pr` with any timeout is blocked: those return as soon as the PR
+is open, so a timeout means the model thinks it is waiting.
+
+A bash call that runs `pr-wait`, `gateway-pr-wait` or `ship` is blocked outright, backgrounded or not: they wait on
+CI, so they must go through the `bg_bash` tool, which wakes the agent with a bg-bash-done message when CI finishes.
+`bg_bash` commands get the same shell checks as `bash`.
 
 ## Compaction summaries
 

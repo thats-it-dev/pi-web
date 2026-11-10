@@ -185,15 +185,40 @@ test("a short reply after tidying the to-do list is not treated as a stall", () 
 
 // --- pr and ship timeouts ---
 
-test("pr and ship with a bash timeout under 2400 s are blocked; 2400 or none is fine", () => {
-	const pr = `${app}node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr . --title "x" --body "y"`;
-	for (const timeout of [60, 120, 600]) assert.equal(checkToolCall("bash", { command: pr, timeout }, env())?.reason, REASONS.prTimeout, String(timeout));
-	assert.equal(checkToolCall("bash", { command: pr, timeout: 2400 }, env()), undefined);
-	assert.equal(checkToolCall("bash", { command: pr }, env()), undefined);
-	const ship = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/keeb";
-	assert.equal(checkToolCall("bash", { command: ship, timeout: 300 }, env())?.reason, REASONS.prTimeout);
+test("pr and gateway-pr with any bash timeout are blocked; without one they pass", () => {
+	const skill = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts";
+	const pr = `${app}${skill} pr . --title "x" --body "y"`;
+	const gpr = `${skill} gateway-pr ~/workspace/apps/keeb --title x --body y`;
+	for (const command of [pr, gpr]) {
+		for (const timeout of [30, 600, 2400]) assert.equal(checkToolCall("bash", { command, timeout }, env())?.reason, REASONS.prTimeout, `${timeout}`);
+		assert.equal(checkToolCall("bash", { command }, env()), undefined);
+	}
 	assert.equal(checkToolCall("bash", { command: `${app}npm test`, timeout: 60 }, env()), undefined);
-	assert.equal(checkToolCall("bash", { command: "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts check foo", timeout: 60 }, env()), undefined);
+	assert.equal(checkToolCall("bash", { command: `${skill} check foo`, timeout: 60 }, env()), undefined);
+});
+
+const skillCmd = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts";
+const waits = [`${skillCmd} pr-wait ~/workspace/apps/keeb`, `${skillCmd} gateway-pr-wait ~/workspace/apps/keeb`, `${skillCmd} ship ~/workspace/apps/keeb`];
+
+test("pr-wait, gateway-pr-wait and ship in bash are blocked, with or without a timeout", () => {
+	for (const command of waits) {
+		assert.equal(checkToolCall("bash", { command }, env())?.reason, REASONS.waitInBackground, command);
+		assert.equal(checkToolCall("bash", { command, timeout: 2400 }, env())?.reason, REASONS.waitInBackground, command);
+	}
+});
+
+test("backgrounding them in bash is blocked too", () => {
+	for (const command of [`nohup ${skillCmd} pr-wait ~/workspace/apps/keeb > /tmp/o 2>&1 &`, `${skillCmd} ship ~/workspace/apps/keeb &`, `setsid ${skillCmd} gateway-pr-wait ~/workspace/apps/keeb`]) {
+		assert.equal(checkToolCall("bash", { command }, env())?.reason, REASONS.waitInBackground, command);
+	}
+});
+
+test("bg_bash may run pr-wait, gateway-pr-wait and ship", () => {
+	for (const command of waits) assert.equal(checkToolCall("bg_bash", { command }, env()), undefined, command);
+});
+
+test("bg_bash commands get the same shell checks as bash", () => {
+	assert.equal(checkToolCall("bg_bash", { command: "cd ~/workspace/apps/x && git push" }, env())?.reason, REASONS.push);
 });
 
 // --- app changed, no PR ---
@@ -223,7 +248,9 @@ test("a finished run that left an app without a PR is nudged, up to the cap; que
 	const text = prNudge(apps);
 	assert.match(text, /keeb/);
 	assert.match(text, /thatsit-app\.ts pr ~\/workspace\/apps\/keeb/);
-	assert.match(text, /2400/);
+	assert.doesNotMatch(text, /2400|timeout/);
+	assert.match(text, /pr-wait/);
+	assert.match(text, /bg_bash/);
 	assert.match(text, /git switch -c/);
 });
 
