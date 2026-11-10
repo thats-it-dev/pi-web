@@ -62,6 +62,8 @@ export interface RpcHandleOptions {
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
 
+export const BG_JOBS_BLOCK = "A background job is running (bg-jobs); wait for it or cancel it first.";
+
 export class RpcHandle implements SessionHandle {
 	readonly kind = "rpc" as const;
 	readonly capabilities: Capabilities = { dialogs: "here", fork: true, clone: true, newSession: true, bash: true, export: true };
@@ -222,6 +224,12 @@ export class RpcHandle implements SessionHandle {
 			}
 			case "prompt":
 				return this.prompt(cmd);
+			case "new_session":
+			case "fork":
+			case "clone":
+				// pi switches sessions in-process: session_shutdown makes bg kill the jobs without a done message.
+				if (this.hasBackgroundJobs()) return { ok: false, error: BG_JOBS_BLOCK };
+				break;
 			case "export": {
 				mkdirSync(this.opts.exportDir, { recursive: true });
 				const name = `${this.sessionId}-${Date.now()}.html`;
