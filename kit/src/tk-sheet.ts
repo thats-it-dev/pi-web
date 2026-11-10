@@ -1,4 +1,4 @@
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles } from "./styles.ts";
 
 // Lucide icon (ISC): x.
@@ -55,6 +55,14 @@ export class TkSheet extends LitElement {
 
 	private close(): void {
 		this.dispatchEvent(new CustomEvent("tk-close", { bubbles: true, composed: true }));
+	}
+
+	// Tells tk-shell (listening on document) a sheet opened or closed, so it can
+	// leave sheets usable and let them take Escape before a drawer.
+	protected updated(changed: PropertyValues<this>): void {
+		if (!changed.has("open")) return;
+		if (changed.get("open") === undefined && !this.open) return;
+		this.dispatchEvent(new CustomEvent("tk-sheet-toggle", { detail: { open: this.open }, bubbles: true, composed: true }));
 	}
 
 	render() {
