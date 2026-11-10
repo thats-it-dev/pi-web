@@ -449,9 +449,14 @@ test("a resumed session spawn carries the TL;DR system-prompt rule", async () =>
 test("a bg-jobs status marks the handle as having background jobs; clearing it unmarks", async (t) => {
 	const { h } = await startHandle(t);
 	const ui = (statusText?: string) => (h as unknown as { onUiRequest(r: object): void }).onUiRequest({ method: "setStatus", statusKey: "bg-jobs", statusText });
+	let changes = 0;
+	h.onEvent((e) => {
+		if (e.type === "state_changed") changes++;
+	});
 	assert.equal(h.hasBackgroundJobs(), false);
 	ui("2 background jobs");
 	assert.equal(h.hasBackgroundJobs(), true);
 	ui(undefined);
 	assert.equal(h.hasBackgroundJobs(), false);
+	assert.equal(changes, 2); // each toggle fires state_changed so the registry can free waiters
 });

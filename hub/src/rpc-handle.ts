@@ -437,9 +437,14 @@ export class RpcHandle implements SessionHandle {
 	private onUiRequest(req: PiEvent): void {
 		switch (req.method) {
 			case "setStatus":
-				if (req.statusText) this.statuses[req.statusKey] = stripAnsi(String(req.statusText));
-				else delete this.statuses[req.statusKey];
-				this.broadcast(this.meta());
+				{
+					const hadJobs = this.hasBackgroundJobs();
+					if (req.statusText) this.statuses[req.statusKey] = stripAnsi(String(req.statusText));
+					else delete this.statuses[req.statusKey];
+					this.broadcast(this.meta());
+					// The registry frees waiting terminals and the reaper looks again when the last job ends.
+					if (this.hasBackgroundJobs() !== hadJobs) this.emit({ type: "state_changed" });
+				}
 				return;
 			case "setWidget":
 				if (Array.isArray(req.widgetLines) && req.widgetLines.length > 0)

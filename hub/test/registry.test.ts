@@ -365,3 +365,19 @@ test("makeRoom never picks a session with background jobs", async () => {
 	await assert.rejects(registry.create("/w"), (e: unknown) => e instanceof HttpError && e.status === 503);
 	assert.equal(started[1].closed, false);
 });
+
+test("a terminal attaching to an idle headless pi with background jobs waits; it is freed once the jobs end", async () => {
+	const { registry } = setup();
+	const rpc = (await registry.ensure("disk-1")) as FakeHandle;
+	rpc.backgroundJobs = true;
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "waiting");
+	assert.equal(rpc.closed, false);
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
+	rpc.fire({ type: "state_changed" }); // jobs still running
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
+	rpc.backgroundJobs = false;
+	rpc.fire({ type: "state_changed" });
+	assert.deepEqual(b.notices, [BUSY_NOTICE, FREE_NOTICE]);
+	assert.equal(rpc.closed, false);
+});
