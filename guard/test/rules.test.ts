@@ -314,3 +314,44 @@ test("a write over an existing app file of more than 80 lines is blocked once, t
 	assert.deepEqual(checkToolCall("write", { path: "src/big.ts", content: "x" }, env({ cwd: `${home}/workspace/apps/keeb`, lines, rewrites: new Set() })), { block: true, reason: REASONS.overwrite }, "relative path");
 	assert.equal(checkToolCall("write", { path: big, content: "x" }, env()), undefined, "no line counter: not checked");
 });
+
+// --- background jobs ---
+
+const bgCall = (command: string) => ({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bg_bash", arguments: { command } }] });
+const bgStarted = (id: string) => ({ role: "toolResult", toolName: "bg_bash", content: [{ type: "text", text: `started job ${id}. You will get a bg-bash-done message when it exits; end your turn and wait.` }], details: { id } });
+const bgDone = (id: string) => ({ role: "custom", customType: "bg-bash-done", content: `bg_bash job ${id} exited 1 after 2m 3s: pr-wait\nchecks failed` });
+const prWait = `cd ~/workspace/apps/keeb && ${skillCmd} pr-wait .`;
+
+test("no end-of-turn nudge while a bg_bash job of the run has not reported back", () => {
+	const waiting = [user, editApp("/home/m/workspace/apps/keeb/src/x.ts"), result, runPr, result, bgCall(prWait), bgStarted("bg-1"), say("PR #4 is open; CI is running.")];
+	assert.equal(shouldNudge(waiting), false);
+	assert.equal(shouldNudgeTodos(waiting, [{ id: 1, subject: "wait for CI", status: "in_progress" }]), false);
+	assert.equal(shouldNudgePr(waiting, ["/home/m/workspace/apps/keeb"]), false);
+	// The job id from details when the text has none.
+	const bare = { ...bgStarted("bg-2"), content: [{ type: "text", text: "started" }] };
+	assert.equal(shouldNudge([user, edit, result, bgCall(prWait), bare, say("CI is running.")]), false);
+});
+
+test("nudges come back once the job's bg-bash-done message arrived", () => {
+	const after = [user, edit, result, bgCall(prWait), bgStarted("bg-1"), say("CI is running."), bgDone("bg-1"), edit, result, say("")];
+	assert.equal(shouldNudge(after), true);
+	assert.equal(shouldNudgeTodos(after, [{ id: 1, subject: "fix CI", status: "in_progress" }]), true);
+	assert.equal(shouldNudgePr(after, ["/home/m/workspace/apps/keeb"]), true);
+	// Another job's done message does not count.
+	assert.equal(shouldNudge([user, edit, result, bgCall(prWait), bgStarted("bg-2"), bgDone("bg-1"), say("")]), false);
+});
+
+test("a ship or pr run through bg_bash counts as the PR; pr-wait alone does not", () => {
+	const keeb = editApp("/home/m/workspace/apps/keeb/src/app-main.ts");
+	assert.deepEqual(appsNeedingPr([user, keeb, result, bgCall(`${skillCmd} ship ~/workspace/apps/keeb`), bgStarted("bg-1"), long], home, () => true), []);
+	assert.deepEqual(appsNeedingPr([user, keeb, result, bgCall(prWait), bgStarted("bg-1"), long], home, () => true), ["/home/m/workspace/apps/keeb"]);
+});
+
+test("push and CI reasons send CI waits through bg_bash and rerun the same pr command", () => {
+	for (const r of [REASONS.push, REASONS.ci]) {
+		assert.match(r, /bg_bash/);
+		assert.match(r, /pr-wait/);
+		assert.doesNotMatch(r, /`pr` and `ship` already wait|pushes, waits for CI/);
+	}
+	assert.match(REASONS.ci, /rerun the same `pr` command/);
+});

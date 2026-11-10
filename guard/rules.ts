@@ -6,8 +6,8 @@ export type Block = { block: true; reason: string };
 const SKILL_CLI = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts";
 
 export const REASONS = {
-	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\` (or \`ship\` for the first version); it pushes, waits for CI and prints the failing log lines.`,
-	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). \`${SKILL_CLI} pr\` and \`ship\` already wait for CI and print the failing log lines; rerun the same command after a fix.`,
+	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\`; it pushes and opens the PR. Then wait for CI: run \`${SKILL_CLI} pr-wait <dir>\` with the bg_bash tool. For the first version, run \`ship\` with the bg_bash tool instead.`,
+	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). Wait with \`pr-wait\`, \`gateway-pr-wait\` or \`ship\` through the bg_bash tool; it prints the failing log lines. After a fix commit, rerun the same \`pr\` command, then \`pr-wait\` with bg_bash.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
@@ -152,7 +152,7 @@ export function codeOf(toolName: string, input: Record<string, unknown>): { shel
 	return { shell: [], python: [] };
 }
 
-const SKILL_PUSH = /thatsit-app\.ts\s+(?:pr|ship|gateway-pr)\b/;
+const SKILL_PUSH = /thatsit-app\.ts\s+(?:pr|ship|gateway-pr)\b(?!-wait)/;
 const PR_OPEN = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 const CI_WAIT = /thatsit-app\.ts\s+(?:pr-wait|gateway-pr-wait|ship)\b/;
 
@@ -189,7 +189,7 @@ function checkOverwrite(raw: string, env: Env): Block | undefined {
 
 // --- stalled turns ---
 
-type Msg = { role: string; stopReason?: string; content?: unknown; customType?: string };
+type Msg = { role: string; stopReason?: string; content?: unknown; customType?: string; toolName?: string; details?: unknown };
 
 export const NUDGE_TYPE = "pi-guard-nudge";
 export const MAX_NUDGES = 2;
@@ -201,11 +201,29 @@ export const NUDGE =
 const parts = (m: Msg): { type: string; text?: string; name?: string }[] => (Array.isArray(m.content) ? m.content : []);
 const textOf = (m: Msg) => (typeof m.content === "string" ? m.content : parts(m).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n"));
 
+// The run started a bg_bash job whose bg-bash-done message has not arrived: ending the turn is the plan, and
+// the done message starts the next one.
+export function waitingOnBgJob(run: Msg[]): boolean {
+	const open = new Set<string>();
+	for (const m of run) {
+		if (m.role === "toolResult" && m.toolName === "bg_bash") {
+			const d = m.details as { id?: unknown } | undefined;
+			const id = /started job (bg-\d+)/.exec(textOf(m))?.[1] ?? (typeof d?.id === "string" ? d.id : undefined);
+			if (id) open.add(id);
+		} else if (m.role === "custom" && m.customType === "bg-bash-done") {
+			const id = /^bg_bash job (bg-\d+) /.exec(textOf(m))?.[1];
+			if (id) open.delete(id);
+		}
+	}
+	return open.size > 0;
+}
+
 // A coding run (it edited or wrote a file) that ended right after a tool result with a short statement.
 export function shouldNudge(messages: Msg[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (run.at(-2)?.role !== "toolResult") return false;
@@ -243,6 +261,7 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (textOf(last).trim().endsWith("?")) return false;
@@ -278,7 +297,7 @@ export function appsNeedingPr(messages: Msg[], home: string, needsPr: (dir: stri
 				const dir = appDir(c.arguments.path, "", home);
 				if (dir) lastEdit.set(dir, i);
 			}
-			if (c.name === "bash" && SKILL_PUSH.test(String(c.arguments?.command ?? ""))) lastPush = i;
+			if ((c.name === "bash" || c.name === "bg_bash") && SKILL_PUSH.test(String(c.arguments?.command ?? ""))) lastPush = i;
 		}
 	});
 	return [...lastEdit].filter(([, i]) => i > lastPush).map(([dir]) => dir).filter(needsPr);
@@ -289,6 +308,7 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (textOf(last).trim().endsWith("?")) return false;

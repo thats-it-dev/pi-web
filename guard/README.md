@@ -12,7 +12,7 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 | Rule | Blocks | Use instead |
 | --- | --- | --- |
 | push | `git push` | the thatsit-app CLI's `pr` / `ship` |
-| ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr` / `ship`, which wait for CI |
+| ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr-wait` / `gateway-pr-wait` / `ship` through `bg_bash` |
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
 | rewrite | Python that writes files (`open(..., "w")`, `write_text`) in an app | the edit tool |
 | discard | `git checkout <ref> -- <path>`, `git restore`, `git reset --hard`, only while the app has uncommitted changes | write the test first and run it red before the fix; `git show <ref>:<path>` to look at old code |
@@ -35,9 +35,12 @@ list pi left stale after finishing the work, and nowhere else.
 ## App changed, no PR
 
 When a run edited or wrote files in an app (`~/workspace/apps/<name>`) and ended with a reply that isn't a
-question, with no `pr`, `ship` or `gateway-pr` after the last edit, and git says the app still has work to
+question, with no `pr`, `ship` or `gateway-pr` (through `bash` or `bg_bash`) after the last edit, and git says the app still has work to
 publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
 message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, and never hand Michael commands to run.
+
+None of these three nudges fires while a `bg_bash` job the run started has not sent its `bg-bash-done` message:
+ending the turn is the plan then, and the done message starts the next one.
 At most 2 per user prompt.
 
 ## pr timeouts and CI waits
