@@ -48,3 +48,12 @@ test("Change says to branch before editing", () => {
 	const sec = m[2].match(/^## Change an existing app\n([\s\S]*?)(?=^## )/m)?.[1];
 	assert.ok(sec?.includes("Create the branch (step 2) before editing any file."));
 });
+
+test("SKILL.md points at the kit charts", () => {
+	assert.ok(m);
+	const sec = m[2].match(/^## Style rules\n([\s\S]*?)(?=^## )/m)?.[1];
+	assert.ok(sec, "section missing");
+	for (const s of ["tk-stat", "tk-sparkline", "tk-timeseries", "tk-bars", "tk-heatmap", "d3"]) {
+		assert.ok(sec.includes(s), `style rules do not name ${s}`);
+	}
+});
