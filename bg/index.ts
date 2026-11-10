@@ -46,7 +46,6 @@ export default function bg(pi: PiLike, opts: { logDir?: string } = {}): void {
 		logDir: opts.logDir ?? join(tmpdir(), "pi-bg", String(process.pid)),
 		onExit: (job: Job) => {
 			if (closing) return;
-			refreshStatus();
 			let log = "";
 			try {
 				log = readFileSync(job.logPath, "utf8");
@@ -54,9 +53,10 @@ export default function bg(pi: PiLike, opts: { logDir?: string } = {}): void {
 				// no output
 			}
 			pi.sendMessage(
-				{ customType: DONE_TYPE, content: doneText(job, log), display: true, details: { id: job.id, command: job.command, state: job.state, exitCode: job.exitCode, durationMs: (job.endedAt ?? job.startedAt) - job.startedAt, tail: jobs.tail(job.id, 60) } },
+				{ customType: DONE_TYPE, content: doneText(job, log), display: true, details: { id: job.id, command: job.command, state: job.state, exitCode: job.exitCode, signal: job.signal, durationMs: (job.endedAt ?? job.startedAt) - job.startedAt, tail: jobs.tail(job.id, 60) } },
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
+			refreshStatus();
 		},
 	});
 

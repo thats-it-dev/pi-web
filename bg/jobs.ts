@@ -1,5 +1,6 @@
 // Background job manager for bg_bash: detached bash processes logging to a file.
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -13,6 +14,7 @@ export interface Job {
 	startedAt: number;
 	state: JobState;
 	exitCode: number | null;
+	signal: string | null; // set when a signal killed the job
 	endedAt: number | null;
 }
 
@@ -29,7 +31,8 @@ export class Jobs {
 	private now: () => number;
 
 	constructor(opts: { logDir: string; onExit: (job: Job) => void; now?: () => number }) {
-		this.logDir = opts.logDir;
+		// Ids restart at bg-1 per manager; a fresh subdirectory keeps a new bg-1 off an old bg-1.log.
+		this.logDir = join(opts.logDir, randomBytes(4).toString("hex"));
 		this.onExit = opts.onExit;
 		this.now = opts.now ?? Date.now;
 	}
@@ -38,9 +41,9 @@ export class Jobs {
 		mkdirSync(this.logDir, { recursive: true });
 		const id = `bg-${++this.seq}`;
 		const logPath = join(this.logDir, `${id}.log`);
-		const job: Job = { id, command, cwd, logPath, startedAt: this.now(), state: "running", exitCode: null, endedAt: null };
+		const job: Job = { id, command, cwd, logPath, startedAt: this.now(), state: "running", exitCode: null, signal: null, endedAt: null };
 		this.jobs.set(id, job);
-		const fd = openSync(logPath, "a");
+		const fd = openSync(logPath, "w");
 		let child;
 		try {
 			child = spawn("bash", ["-lc", command], { cwd, detached: true, stdio: ["ignore", fd, fd] });
@@ -50,17 +53,18 @@ export class Jobs {
 		child.unref();
 		if (child.pid !== undefined) this.pids.set(id, child.pid);
 		let finished = false;
-		const finish = (code: number | null) => {
+		const finish = (code: number | null, signal: string | null = null) => {
 			if (finished) return;
 			finished = true;
 			this.pids.delete(id);
 			job.state = this.cancelled.has(id) ? "cancelled" : "exited";
 			job.exitCode = code;
+			job.signal = signal;
 			job.endedAt = this.now();
 			this.onExit(job);
 		};
 		child.on("error", () => finish(127));
-		child.on("exit", (code) => finish(code));
+		child.on("exit", (code, signal) => finish(code, signal));
 		return job;
 	}
 
@@ -124,7 +128,7 @@ function shorten(s: string, max: number): string {
 
 export function doneText(job: Job, log: string, tailLines = 60): string {
 	const secs = Math.max(0, Math.round(((job.endedAt ?? job.startedAt) - job.startedAt) / 1000));
-	const verb = job.state === "cancelled" ? "was cancelled" : `exited ${job.exitCode}`;
+	const verb = job.state === "cancelled" ? "was cancelled" : job.exitCode === null && job.signal ? `was killed (${job.signal})` : `exited ${job.exitCode}`;
 	const head = `bg_bash job ${job.id} ${verb} after ${Math.floor(secs / 60)}m ${secs % 60}s: ${shorten(job.command, 120)}`;
 	const tail = tailOf(log, tailLines);
 	const tailSet = new Set(tail.split("\n"));

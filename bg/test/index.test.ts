@@ -15,6 +15,7 @@ function setup() {
 		registerTool: (t: any) => void (tools[t.name] = t),
 		on: (e: string, h: any) => void (handlers[e] = h),
 		sendMessage: (message: any, options: any) => {
+			status.push(["sent", message.customType]);
 			sent.push({ message, options });
 			notify();
 		},
@@ -101,4 +102,15 @@ test("session_shutdown kills running jobs and sends nothing", async () => {
 	handlers.session_shutdown({}, {});
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(sent.length, 0);
+});
+
+test("on exit the done message goes out before the bg-jobs status clears", async () => {
+	const { run, status, nextMessage } = setup();
+	const p = nextMessage();
+	await run("bg_bash", { command: "true" });
+	await p;
+	await new Promise((r) => setTimeout(r, 10));
+	const sentAt = status.findIndex(([k]) => k === "sent");
+	const clearedAt = status.findIndex(([k, v]) => k === "bg-jobs" && v === undefined);
+	assert.ok(sentAt >= 0 && clearedAt > sentAt, JSON.stringify(status));
 });
