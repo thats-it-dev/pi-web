@@ -1,8 +1,6 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
+import { X_ICON } from "./icons.ts";
 import { sharedStyles } from "./styles.ts";
-
-// Lucide icon (ISC): x.
-const X_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>`;
 
 // Bottom sheet on phones, centered panel on wide screens. Content is slotted,
 // so its styles live with whoever renders it.

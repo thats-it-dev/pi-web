@@ -236,3 +236,54 @@ test("a sheet removed from the page while open stops counting: the drawer traps 
 	await page.keyboard.press("Escape");
 	await expect(page.locator(aside)).toBeHidden();
 });
+
+test.describe("header buttons", () => {
+	test("header buttons toggle each panel and report aria-expanded", async ({ page, isMobile }) => {
+		test.skip(isMobile, "desktop columns only");
+		await page.goto("/");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		for (const [btn, panel] of [["tk-header .aside-toggle", aside], ["tk-header .menu", nav]] as const) {
+			await expect(page.locator(btn)).toHaveAttribute("aria-expanded", "true");
+			await page.locator(btn).click();
+			await expect(page.locator(btn)).toHaveAttribute("aria-expanded", "false");
+			await expect.poll(async () => (await page.locator(panel).boundingBox())?.width ?? 0).toBe(0);
+			await page.locator(btn).click();
+			await expect(page.locator(btn)).toHaveAttribute("aria-expanded", "true");
+			await expect.poll(async () => (await page.locator(panel).boundingBox())?.width ?? 0).toBeGreaterThan(200);
+		}
+	});
+
+	test("phone: menu opens nav, panel button opens details, badge shows", async ({ page, isMobile }) => {
+		test.skip(!isMobile, "phone only");
+		await page.goto("/");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		await page.locator("tk-header .menu").click();
+		await expect(page.locator("tk-header .menu")).toHaveAttribute("aria-expanded", "true");
+		await expect(page.locator(nav)).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.locator("tk-header .menu")).toHaveAttribute("aria-expanded", "false");
+		const btn = page.locator("tk-header .aside-toggle");
+		await expect(btn).toContainText("3/7");
+		await btn.click();
+		await expect(btn).toHaveAttribute("aria-expanded", "true");
+		await expect(page.locator(aside)).toBeVisible();
+	});
+
+	test("a header outside a shell has no panel buttons", async ({ page, isMobile }) => {
+		const errors: string[] = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+		await page.goto("/bare.html");
+		await page.waitForFunction(() => customElements.get("tk-header"));
+		await expect(page.locator("tk-header .aside-toggle")).toHaveCount(0);
+		if (!isMobile) await expect(page.locator("tk-header .menu")).toBeHidden();
+		expect(errors).toEqual([]);
+	});
+
+	test("no details content means no details button", async ({ page }) => {
+		await page.goto("/?aside=0");
+		await page.waitForFunction(() => customElements.get("tk-shell"));
+		await expect(page.locator("tk-header .menu")).toHaveCount(1);
+		await expect(page.locator("tk-header .aside-toggle")).toHaveCount(0);
+	});
+});

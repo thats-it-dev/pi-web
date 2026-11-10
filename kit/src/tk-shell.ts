@@ -1,4 +1,5 @@
 import { LitElement, css, html, nothing } from "lit";
+import type { TkHeader } from "./tk-header.ts";
 import { sharedStyles } from "./styles.ts";
 import { type Hidden, type Mode, type Panel, type PanelsState, PHONE_MAX, WIDE_MIN, panelsState, readHidden, writeHidden } from "./panels.ts";
 
@@ -70,6 +71,8 @@ export class TkShell extends LitElement {
 	private openSheets = new Set<EventTarget>();
 	// Focused element when a drawer opened, to return focus there when it closes.
 	private opener: Element | null = null;
+	// Headers inside this shell, kept current with the panel state for their buttons.
+	private headers = new Set<TkHeader>();
 
 	constructor() {
 		super();
@@ -87,6 +90,16 @@ export class TkShell extends LitElement {
 		this.addEventListener("tk-open-nav", () => this.show("nav"));
 		this.addEventListener("tk-toggle-panel", (e) => this.withPanel(e, (p) => this.toggle(p)));
 		this.addEventListener("tk-show-panel", (e) => this.withPanel(e, (p) => this.show(p)));
+		this.addEventListener("tk-header-connect", (e) => {
+			const header = (e as CustomEvent<{ header?: TkHeader }>).detail?.header;
+			if (!header) return;
+			this.headers.add(header);
+			header.panels = this.state;
+		});
+		this.addEventListener("tk-header-disconnect", (e) => {
+			const header = (e as CustomEvent<{ header?: TkHeader }>).detail?.header;
+			if (header) this.headers.delete(header);
+		});
 		this.addEventListener("tk-hide-panel", (e) => this.withPanel(e, (p) => this.hide(p)));
 	}
 
@@ -170,6 +183,11 @@ export class TkShell extends LitElement {
 		const h = readHidden(raw, { nav: this.navHidden, aside: this.asideHidden });
 		this.navHidden = h.nav;
 		this.asideHidden = h.aside;
+		// Headers parsed before this element upgraded announced themselves to no one; pick them up here.
+		for (const header of this.querySelectorAll<TkHeader>("tk-header")) {
+			this.headers.add(header);
+			header.panels = this.state;
+		}
 	}
 
 	disconnectedCallback(): void {
@@ -244,6 +262,7 @@ export class TkShell extends LitElement {
 		const now = this.state;
 		const prev = this.lastState;
 		this.lastState = now;
+		for (const h of this.headers) h.panels = now;
 		if (!prev) return;
 		for (const p of PANELS) {
 			if (prev[p].open === now[p].open && prev[p].docked === now[p].docked) continue;
