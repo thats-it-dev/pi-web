@@ -9,11 +9,6 @@ export function enterSends(e: { key: string; shiftKey: boolean; isComposing: boo
 	return env.finePointer || !env.onScreenKeyboard;
 }
 
-/** Typing on a touch device while no on-screen keyboard is up: a keyboard attached to a phone or iPad. */
-export function hardwareKeyboard(env: { coarse: boolean; onScreenKeyboard: boolean }): boolean {
-	return env.coarse && !env.onScreenKeyboard;
-}
-
 /** Whether the header hides after a scroll the person made: down hides it, any move back up shows it. */
 export function nextTucked(prev: boolean, s: { top: number; delta: number }): boolean {
 	if (s.top <= 0) return false;

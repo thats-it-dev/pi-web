@@ -1,19 +1,18 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import { HubApi } from "../lib/api.ts";
-import { type ThemePref, getHubUrl, getKeyboardTricks, getTheme, normalizeHubUrl, setHubUrl, setKeyboardTricks, setTheme } from "../lib/settings.ts";
+import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setTheme } from "../lib/settings.ts";
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import type { UpdateStatus } from "../../../shared/src/protocol.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
 import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiSettings extends LitElement {
-	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true }, keyboardTricks: { state: true } };
+	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true } };
 	declare url: string;
 	declare status: { ok: boolean; text: string } | null;
 	declare checking: boolean;
 	declare theme: ThemePref;
-	declare keyboardTricks: boolean;
 	declare push: PushStatus | null;
 	declare pushBusy: boolean;
 	declare pushError: string | null;
@@ -47,7 +46,6 @@ export class PiSettings extends LitElement {
 		this.status = null;
 		this.checking = false;
 		this.theme = getTheme();
-		this.keyboardTricks = getKeyboardTricks();
 		this.push = null;
 		this.pushBusy = false;
 		this.pushError = null;
@@ -231,16 +229,6 @@ export class PiSettings extends LitElement {
 				<div class="seg" role="radiogroup" aria-label="Display diagnostics">
 					${(["off", "on"] as const).map(
 						(v) => html`<button role="radio" aria-checked=${vpDebugOn() === (v === "on") ? "true" : "false"} class=${vpDebugOn() === (v === "on") ? "on" : ""} @click=${() => setVpDebug(v === "on")}>${v}</button>`,
-					)}
-				</div>
-				<h2>keyboard experiments</h2>
-				<p class="hint">iPhone and iPad tries at hiding the ✓ row above the keyboard and shrinking the floating bar a hardware keyboard brings up. Turn off if the keyboard stops opening or flickers.</p>
-				<div class="seg" role="radiogroup" aria-label="Keyboard experiments">
-					${(["off", "on"] as const).map(
-						(v) => html`<button role="radio" aria-checked=${this.keyboardTricks === (v === "on") ? "true" : "false"} class=${this.keyboardTricks === (v === "on") ? "on" : ""} @click=${() => {
-							setKeyboardTricks(v === "on");
-							this.keyboardTricks = v === "on";
-						}}>${v}</button>`,
 					)}
 				</div>
 				<h2>install</h2>

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { enterSends, hardwareKeyboard, nextTucked } from "./mobile.ts";
+import { enterSends, nextTucked } from "./mobile.ts";
 
 const enter = { key: "Enter", shiftKey: false, isComposing: false };
 
@@ -20,12 +20,6 @@ test("Shift+Enter, IME composition and other keys never send", () => {
 	expect(enterSends({ ...enter, shiftKey: true }, env)).toBe(false);
 	expect(enterSends({ ...enter, isComposing: true }, env)).toBe(false);
 	expect(enterSends({ ...enter, key: "a" }, env)).toBe(false);
-});
-
-test("hardwareKeyboard: typing on a touch device with no on-screen keyboard up", () => {
-	expect(hardwareKeyboard({ coarse: true, onScreenKeyboard: false })).toBe(true);
-	expect(hardwareKeyboard({ coarse: true, onScreenKeyboard: true })).toBe(false);
-	expect(hardwareKeyboard({ coarse: false, onScreenKeyboard: false })).toBe(false); // a Mac: nothing to work around
 });
 
 test("the header tucks on any downward scroll and comes back on any upward one", () => {
