@@ -134,7 +134,7 @@ export class PiChildThread extends LitElement {
 	render() {
 		const c = this.child;
 		return html`
-			<tk-header menu-label="Open sessions">
+			<tk-header menu-label="Open sessions" aside-label="Progress">
 				<h1 slot="title">
 					<span class="crumb">${this.heading} ›</span>
 					${c ? html`<span class="glyph ${c.state}" role="img" aria-label=${c.state}>${GLYPH[c.state]}</span>${c.agent} · ${c.task}` : nothing}

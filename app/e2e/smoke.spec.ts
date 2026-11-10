@@ -246,10 +246,17 @@ const PLAN_SESSION = "e2e-plan-session";
 test("desktop: the progress column shows to-dos and subagents beside the chat", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
 	await page.goto(`/#/s/${TODO_SESSION}`);
-	const aside = page.locator("pi-session aside");
+	const aside = page.locator("tk-shell [slot=aside]");
 	await expect(aside).toContainText("to-dos");
 	await expect(aside).toContainText("3/3");
-	await expect(page.getByRole("button", { name: "Progress" })).toHaveCount(0);
+	const button = page.getByRole("button", { name: "Progress" });
+	await expect(button).toHaveAttribute("aria-expanded", "true");
+	await button.click();
+	await expect(button).toHaveAttribute("aria-expanded", "false");
+	await expect(aside).toBeHidden(); // a collapsed column is zero wide
+	await button.click();
+	await expect(button).toHaveAttribute("aria-expanded", "true");
+	await expect(aside).toBeVisible();
 
 	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
 	await expect(aside).toContainText("subagents");
@@ -260,8 +267,9 @@ test("desktop: the progress column shows to-dos and subagents beside the chat", 
 test("desktop: a plan opens in a sheet", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
 	await page.goto(`/#/s/${PLAN_SESSION}`);
-	await expect(page.locator("pi-session aside")).toContainText("Task 1: First");
-	await page.locator("pi-session aside").getByRole("button", { name: "open plan" }).click();
+	const aside = page.locator("tk-shell [slot=aside]");
+	await expect(aside).toContainText("Task 1: First");
+	await aside.getByRole("button", { name: "open plan" }).click();
 	await expect(page.locator("tk-sheet")).toContainText("Plan P");
 });
 
@@ -269,31 +277,54 @@ test("desktop: a session with no progress has no column", async ({ page, isMobil
 	test.skip(isMobile, "desktop flow");
 	await startChat(page, "plain");
 	await expect(page.locator("pi-messages")).toContainText("Hello world");
-	await expect(page.locator("pi-session aside")).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Progress" })).toHaveCount(0);
+	await expect(page.locator("tk-shell [slot=aside]")).toHaveCount(0);
 });
 
-test("phone: a badge opens the full-screen progress view, Escape closes it", async ({ page, isMobile }) => {
+test("mid width: progress is a drawer beside the docked session list", async ({ page, isMobile }) => {
+	test.skip(isMobile, "desktop flow");
+	await page.setViewportSize({ width: 1000, height: 800 });
+	await page.goto(`/#/s/${TODO_SESSION}`);
+	await expect(page.locator("pi-sidebar")).toBeVisible();
+	await expect(page.locator("pi-sidebar")).toBeInViewport();
+	const panel = page.locator("tk-shell [slot=aside]");
+	await expect(panel).toContainText("to-dos");
+	await expect(panel).not.toBeInViewport();
+	const button = page.getByRole("button", { name: "Progress" });
+	await expect(button).toHaveAttribute("aria-expanded", "false");
+	await button.click();
+	await expect(panel).toBeInViewport();
+	await expect(button).toHaveAttribute("aria-expanded", "true");
+	await page.goBack();
+	await expect(panel).not.toBeInViewport();
+	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
+});
+
+test("phone: a badge opens the progress drawer; Escape, the dimmed area and Back close it", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await page.goto(`/#/s/${TODO_SESSION}`);
-	await expect(page.locator("pi-session aside")).toHaveCount(0);
+	const drawer = page.locator("tk-shell [slot=aside]");
+	await expect(drawer).toContainText("to-dos");
+	await expect(drawer).not.toBeInViewport();
 	const badge = page.getByRole("button", { name: "Progress" });
 	await expect(badge).toHaveText("3/3");
 	await badge.click();
-	const view = page.locator("pi-progress-view");
-	await expect(view).toContainText("to-dos");
+	await expect(drawer).toBeInViewport();
 	await page.keyboard.press("Escape");
-	await expect(view).toHaveCount(0);
+	await expect(drawer).not.toBeInViewport();
+	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
 
 	await badge.click();
-	await expect(view).toBeVisible();
-	await view.getByRole("button", { name: "Close" }).click();
-	await expect(view).toHaveCount(0);
+	await expect(drawer).toBeInViewport();
+	await page.locator("tk-shell .overlay").click({ position: { x: 10, y: 300 } });
+	await expect(drawer).not.toBeInViewport();
+	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
 
 	await badge.click();
-	await expect(view).toBeVisible();
+	await expect(drawer).toBeInViewport();
 	await page.goBack();
-	await expect(view).toHaveCount(0);
-	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}`));
+	await expect(drawer).not.toBeInViewport();
+	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
 });
 
 test("phone: finished subagents still get a badge", async ({ page, isMobile }) => {
@@ -302,22 +333,24 @@ test("phone: finished subagents still get a badge", async ({ page, isMobile }) =
 	await expect(page.getByRole("button", { name: "Progress" })).toHaveText("•");
 });
 
-test("phone: the plan sheet opens above the progress view", async ({ page, isMobile }) => {
+test("phone: the plan sheet opens above the progress drawer", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await page.goto(`/#/s/${PLAN_SESSION}`);
 	await page.getByRole("button", { name: "Progress" }).click();
-	await page.locator("pi-progress-view").getByRole("button", { name: "open plan" }).click();
+	const drawer = page.locator("tk-shell [slot=aside]");
+	await expect(drawer).toBeInViewport();
+	await drawer.getByRole("button", { name: "open plan" }).click();
 	const sheet = page.locator("tk-sheet");
 	await expect(sheet).toContainText("Plan P");
 	await sheet.getByRole("button", { name: "Close" }).click(); // clickable, so nothing covers it
 	await expect(sheet).toHaveCount(0);
-	await expect(page.locator("pi-progress-view")).toBeVisible(); // Escape/close of the sheet left the view open
+	await expect(drawer).toBeInViewport(); // closing the sheet left the drawer open
 });
 
 test("desktop: a subagent row opens its transcript read-only, back to parent returns", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
 	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
-	const aside = page.locator("pi-session aside");
+	const aside = page.locator("tk-shell [slot=aside]");
 	await aside.locator(".child").click();
 	const thread = page.locator("pi-child-thread");
 	await expect(thread).toContainText("scout");
@@ -337,7 +370,7 @@ test("desktop: an unsent draft survives a trip to a subagent thread", async ({ p
 	test.skip(isMobile, "desktop flow");
 	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
 	await page.getByLabel("Message").fill("half-written thought");
-	await page.locator("pi-session aside .child").click();
+	await page.locator("tk-shell [slot=aside] .child").click();
 	await expect(page.locator("pi-child-thread")).toContainText("Child task");
 	await page.locator("pi-child-thread").getByRole("button", { name: "back to parent" }).click();
 	await expect(page.getByLabel("Message")).toHaveValue("half-written thought");
@@ -347,13 +380,15 @@ test("phone: badge, row, thread full screen, back returns to the parent chat", a
 	test.skip(!isMobile, "phone flow");
 	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
 	await page.getByRole("button", { name: "Progress" }).click();
-	await page.locator("pi-progress-view .child").click();
+	const drawer = page.locator("tk-shell [slot=aside]");
+	await expect(drawer).toBeInViewport();
+	await drawer.locator(".child").click();
 	const thread = page.locator("pi-child-thread");
 	await expect(thread).toContainText("Child task: list the files here");
-	await expect(page.locator("pi-progress-view")).toHaveCount(0);
+	await expect(drawer).not.toBeInViewport();
 	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
-	await page.goBack(); // the progress entry was replaced: this lands on the parent chat
+	await page.goBack(); // the drawer's entry was replaced: this lands on the parent chat
 	await expect(thread).toHaveCount(0);
 	await expect(page.locator("pi-composer")).toBeVisible();
 	await expect(page).toHaveURL(new RegExp(`#/s/${SUBAGENT_SESSION}$`));
