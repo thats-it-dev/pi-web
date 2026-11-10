@@ -24,7 +24,7 @@ export function badgeLabel(view: ProgressView): string | null {
 	}
 	const running = view.subagents.recent.concat(view.subagents.earlier).filter((c) => c.state === "running").length;
 	if (running) return `◐ ${running}`;
-	return view.goal || view.plan || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
+	return view.goal || view.plan || view.pr || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
 }
 
 // At most `max` items, centred on `focus`; returns the slice and how many were left out.
@@ -75,6 +75,20 @@ function todoSection(view: ProgressView) {
 			${shown.map((t) => html`<li class="todo ${t.status}"><span class="txt">${t.status === "in_progress" ? (t.activeForm ?? t.subject) : t.subject}</span></li>`)}
 		</ul>
 		${more ? html`<div class="more">+${more} more</div>` : nothing}
+	</section>`;
+}
+
+function prSection(view: ProgressView) {
+	const p = view.pr;
+	if (!p) return nothing;
+	const link = (href: string, label: string) => html`<a class="link" href=${href} target="_blank" rel="noopener"><span class="txt">${label}</span></a>`;
+	return html`<section class="pr">
+		<h2 class="label">pr</h2>
+		${link(p.url, p.number == null ? (p.title ?? p.url) : `#${p.number}${p.title ? ` · ${p.title}` : ""}`)}
+		${p.ci === "passed" ? html`${p.preview ? link(p.preview, "preview") : nothing}${p.gatewayPreview ? link(p.gatewayPreview, "gateway preview") : nothing}` : nothing}
+		${p.ci === "running" ? html`<div class="note">CI running…</div>` : nothing}
+		${p.ci === "failed" ? html`<div class="note warn">CI failed${p.reason ? `: ${p.reason}` : ""}</div>` : nothing}
+		${p.ci === "lost" ? html`<div class="note">CI result lost</div>` : nothing}
 	</section>`;
 }
 
@@ -133,7 +147,7 @@ function runSection(view: ProgressView, now: number) {
 export function renderProgress(view: ProgressView, opts: ProgressOpts): TemplateResult {
 	return html`<div class="progress">
 		<div class="activity ${view.activity}" role="status">${ACTIVITY[view.activity]}</div>
-		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${subagentSection(view, opts)}${runSection(view, opts.now)}
+		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${prSection(view)}${subagentSection(view, opts)}${runSection(view, opts.now)}
 	</div>`;
 }
 
@@ -150,6 +164,9 @@ export const progressStyles = css`
 	.progress .pill.warn { color: var(--accent); border-color: var(--accent); }
 	.progress .pill.waiting { margin-left: 0; }
 	.progress .note { padding: 0 16px 4px; font-size: 0.72rem; color: var(--text-muted); }
+	.progress .link { display: flex; padding: 5px 16px; font-size: 0.9rem; min-width: 0; color: var(--primary); text-decoration: none; }
+	.progress .link:hover { background: var(--panel); }
+	.progress .note.warn { color: var(--accent); }
 	.progress .file { padding: 0 16px 4px; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
 	.progress li, .progress .child { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 16px; font-size: 0.9rem; min-width: 0; color: var(--text-primary); text-align: left; }
 	.progress li { border-left: 2px solid transparent; padding-left: 14px; }
