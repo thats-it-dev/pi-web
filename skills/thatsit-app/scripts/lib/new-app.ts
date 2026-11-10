@@ -115,7 +115,7 @@ export async function newApp(o: NewAppOpts, run: Run): Promise<{ dir: string; pa
 }
 
 // The template's guardrail test requires package.json's name to equal app.config.json's.
-function renamePackage(dir: string, name: string): void {
+export function renamePackage(dir: string, name: string): void {
 	for (const file of ["package.json", "package-lock.json"]) {
 		const path = join(dir, file);
 		if (!existsSync(path)) continue;

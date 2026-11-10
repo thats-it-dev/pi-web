@@ -5,13 +5,10 @@ description: Use when Michael asks to build, deploy or change a small web app or
 
 # thatsit.app apps
 
-Every app is a public repo `thats-it-dev/<name>` made from the app template, checked out at
-`~/workspace/apps/<name>`, and served at `https://<name>.thatsit.app`. All GitHub and
-Cloudflare work goes through one CLI. Do not run `gh repo create`, `cf` or `wrangler` yourself.
+Every app is a public repo `thats-it-dev/<name>` made from the app template, checked out at `~/workspace/apps/<name>`,
+served at `https://<name>.thatsit.app`. All GitHub and Cloudflare work goes through one CLI; never run `gh repo create`, `cf` or `wrangler` yourself.
 
-The CLI prints progress, then one last line `RESULT {...json...}`. Exit 0 means done; exit 1
-means failed, and the reason is on stderr and in `RESULT`; exit 2 means you typed the command
-wrong. `ship`, `pr` and `gateway-pr` push and wait for CI, and can take 20 minutes or more: if
+The CLI prints progress, then `RESULT {...json...}`. Exit 0: done; 1: failed (reason on stderr and in `RESULT`); 2: usage error. `ship`, `pr` and `gateway-pr` push and wait for CI, and can take 20 minutes or more: if
 your bash tool takes a timeout, give it 2400 seconds. Never push or wait for CI any other way
 (no `git push`, `sleep` or `gh run`). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
 start every app command with `cd ~/workspace/apps/<name> &&` and edit files by full path.
@@ -39,9 +36,8 @@ start every app command with `cd ~/workspace/apps/<name> &&` and edit files by f
 5. **Test.** Run `cd ~/workspace/apps/<name> && npm run verify`; fix and rerun until it passes.
 6. **Commit.** `cd ~/workspace/apps/<name> && git add -A && git commit -m "First version of <name>"`
 7. **Ship.** Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/<name>`
-8. **Reply.** If `RESULT` has `"pending":false`, give Michael its `url`. If `"pending":true`, say
-   the custom domain is still validating, give the `url` from `RESULT` (a pages.dev link) and
-   say `https://<name>.thatsit.app` will work soon.
+8. **Reply.** Give Michael the `url` from `RESULT`. If `"pending":true`, it is a pages.dev link: say
+   `https://<name>.thatsit.app` will work once the custom domain finishes validating.
 
 If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spark data**.
 
@@ -54,6 +50,12 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
 4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
 5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
 6. Reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
+
+## Bring an app up to the template
+
+On a branch (Change steps 1-2): `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts sync-template ~/workspace/apps/<name>`.
+It copies AGENTS.md, guardrail test, CI, scripts and knip; never copy or reflow those yourself. Commit. On
+`"guardrails":"fail"` fix what stderr lists, rerunning `npm run guardrails` (seconds), then Change steps 3-6.
 
 ## Needs spark data
 
@@ -143,10 +145,10 @@ test("add one increases the count", async ({ page }) => {
 - `deploy step was skipped`: the org secrets or `app.config.json` need Michael. Stop and tell him; do not rerun.
 - `did not finish within`, `did not report a preview` or `No preview`: give Michael the error's URL; stop.
 - `there are uncommitted changes`: run `cd ~/workspace/apps/<name> && git add -A && git commit -m "..."`, then rerun.
-- `pr will not run on main` / `gateway-pr will not run on main`: create a branch first (Change step 2).
-- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr`.
-- `predates gateway support`: stop and tell Michael; the app needs the current template's gateway files.
+- `pr will not run on main` / `gateway-pr will not run on main` / `sync-template ... uncommitted`: see Change steps 2 and 4.
 - `ship only works on the main branch`: run `cd ~/workspace/apps/<name> && git switch main`, then rerun.
+- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr`.
+- `predates gateway support`: run `sync-template` (see **Bring an app up to the template**), commit, rerun.
 - Stop and tell Michael (quote the reason from `RESULT`) when the same command fails with exit 1
   twice and you can't fix it, or when the error mentions login, permissions, secrets or a token.
 - Never print, ask for, or write tokens or secrets. The CLI uses the existing `gh` and `cf` logins.

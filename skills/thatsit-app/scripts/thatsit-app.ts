@@ -7,10 +7,12 @@ import { newApp } from "./lib/new-app.ts";
 import { openPr } from "./lib/pr.ts";
 import { realRun } from "./lib/run.ts";
 import { ship } from "./lib/ship.ts";
+import { syncTemplate } from "./lib/sync-template.ts";
 
 export type Args =
 	| { cmd: "check"; name: string }
 	| { cmd: "ship"; name: string }
+	| { cmd: "sync-template"; name: string }
 	| { cmd: "pr"; name: string; title: string; body: string; gatewayPr?: number }
 	| { cmd: "gateway-checkout" }
 	| { cmd: "gateway-register"; name: string }
@@ -24,7 +26,7 @@ export function parseArgs(argv: string[]): Args | null {
 	const [cmd, name, ...rest] = argv;
 	if (cmd === "gateway-checkout") return argv.length === 1 ? { cmd } : null;
 	if (!name || name.startsWith("--")) return null;
-	if (cmd === "check" || cmd === "ship" || cmd === "gateway-register") return rest.length === 0 ? { cmd, name } : null;
+	if (cmd === "check" || cmd === "ship" || cmd === "sync-template" || cmd === "gateway-register") return rest.length === 0 ? { cmd, name } : null;
 	if (cmd === "pr" || cmd === "gateway-pr") {
 		const flags = cmd === "pr" ? ["--title", "--body", "--gateway-pr"] : ["--title", "--body"];
 		const o: Record<string, string> = {};
@@ -64,7 +66,7 @@ const result = (v: unknown) => console.log(`RESULT ${JSON.stringify(v)}`);
 async function main(): Promise<number> {
 	const a = parseArgs(process.argv.slice(2));
 	if (!a) {
-		console.error('usage: thatsit-app check <name> | ship <dir> | pr <dir> --title "..." --body "..." [--gateway-pr <N>] | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume] | gateway-checkout | gateway-register <app> | gateway-pr <dir> --title "..." --body "..."');
+		console.error('usage: thatsit-app check <name> | ship <dir> | sync-template <dir> | pr <dir> --title "..." --body "..." [--gateway-pr <N>] | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume] | gateway-checkout | gateway-register <app> | gateway-pr <dir> --title "..." --body "..."');
 		return 2;
 	}
 	try {
@@ -81,6 +83,13 @@ async function main(): Promise<number> {
 			const r = await ship(a.name, realRun, fetchStatus);
 			if (r.pending) console.error("The custom domain is still validating; use the pages.dev URL for now.");
 			result({ ok: true, ...r });
+			return 0;
+		}
+		if (a.cmd === "sync-template") {
+			const r = await syncTemplate(a.name, realRun);
+			for (const n of r.notes) console.error(n);
+			if (!r.guardrails.ok) console.error(r.guardrails.output);
+			result({ ok: true, changed: r.changed, notes: r.notes, guardrails: r.guardrails.ok ? "pass" : "fail" });
 			return 0;
 		}
 		if (a.cmd === "pr") {
