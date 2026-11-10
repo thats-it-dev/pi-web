@@ -54,7 +54,7 @@ export default function bg(pi: PiLike, opts: { logDir?: string } = {}): void {
 				// no output
 			}
 			pi.sendMessage(
-				{ customType: DONE_TYPE, content: doneText(job, log), display: true, details: { id: job.id, state: job.state, exitCode: job.exitCode } },
+				{ customType: DONE_TYPE, content: doneText(job, log), display: true, details: { id: job.id, command: job.command, state: job.state, exitCode: job.exitCode, durationMs: (job.endedAt ?? job.startedAt) - job.startedAt, tail: jobs.tail(job.id, 60) } },
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		},
@@ -95,7 +95,7 @@ export default function bg(pi: PiLike, opts: { logDir?: string } = {}): void {
 			const blocks = list.map((j) => {
 				const secs = Math.round(((j.endedAt ?? now) - j.startedAt) / 1000);
 				const state = j.state === "exited" ? `exited ${j.exitCode}` : j.state;
-				return `${j.id} ${state} (${Math.floor(secs / 60)}m ${secs % 60}s): ${j.command}\n${jobs.tail(j.id, 10)}`.trimEnd();
+				return `${j.id} ${state} (${Math.floor(secs / 60)}m ${secs % 60}s): ${j.command}\n${jobs.tail(j.id, 40)}`.trimEnd();
 			});
 			return reply(blocks.join("\n\n"));
 		},

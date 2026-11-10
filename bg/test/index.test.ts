@@ -53,6 +53,13 @@ test("on exit it sends one bg-bash-done message that triggers a turn and queues 
 	assert.equal(sent[0].message.display, true);
 	assert.ok(sent[0].message.content.startsWith("bg_bash job bg-1 exited 0"));
 	assert.match(sent[0].message.content, /done/);
+	const d = sent[0].message.details;
+	assert.equal(d.id, "bg-1");
+	assert.equal(d.command, "echo done");
+	assert.equal(d.exitCode, 0);
+	assert.equal(typeof d.durationMs, "number");
+	assert.ok(d.durationMs >= 0);
+	assert.equal(d.tail, "done");
 	assert.deepEqual(sent[0].options, { triggerTurn: true, deliverAs: "followUp" });
 	assert.deepEqual(status.at(-1), ["bg-jobs", undefined]);
 });
