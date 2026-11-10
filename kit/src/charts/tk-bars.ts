@@ -134,6 +134,12 @@ export class TkBars extends ChartBase {
 	protected autoSummary(): string {
 		const n = this.rows.length;
 		const out = [`${n} ${n === 1 ? "row" : "rows"}.`];
+		const have = this.rows.filter((r) => r.value !== null);
+		if (have.length > 1) {
+			const hi = have.reduce((a, b) => (b.value! > a.value! ? b : a));
+			const lo = have.reduce((a, b) => (b.value! < a.value! ? b : a));
+			out.push(`Highest ${hi.label} ${this.fmt(hi.value)}, lowest ${lo.label} ${this.fmt(lo.value)}.`);
+		}
 		const g = this.goalValue();
 		if (g !== undefined) out.push(`${this.atGoalCount()} at goal ${this.fmt(g)}.`);
 		return out.join(" ");

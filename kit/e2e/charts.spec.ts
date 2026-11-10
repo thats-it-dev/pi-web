@@ -452,3 +452,81 @@ test("heatmap: readout keeps its day when the layout shrinks", async ({ page }) 
 	await expect(page.locator("#cal-aside .cell.on")).toHaveAttribute("data-day", "2026-11-08");
 	expect(await readout.textContent()).toBe(before);
 });
+
+// ---- accessibility ----
+
+const allCharts = async (page: Page) => {
+	await ready(page);
+	await openAside(page);
+	await page.waitForFunction(() => ["tk-timeseries", "tk-bars", "tk-heatmap"].every((t) => customElements.get(t)));
+	await expect(page.locator("#ts-aside svg")).toHaveCount(1);
+	await expect(page.locator("#bars-aside .row")).not.toHaveCount(0);
+	await expect(page.locator("#cal-aside .cell")).not.toHaveCount(0);
+};
+
+test("every plot has role=img and a summary", async ({ page }) => {
+	await allCharts(page);
+	for (const id of ["ts-aside", "ts-main", "bars-aside", "bars-nogoal", "bars-ms", "cal-aside", "cal-200"]) {
+		const plot = page.locator(`#${id} .plot`);
+		await expect(plot, id).toHaveAttribute("role", "img");
+		expect(((await plot.getAttribute("aria-label")) ?? "").length, id).toBeGreaterThan(20);
+	}
+	for (const id of ["ts-aside", "bars-aside", "cal-aside"]) {
+		await page.locator(`#${id}`).evaluate((e) => e.setAttribute("summary", "My own summary text"));
+		await expect(page.locator(`#${id} .plot`), id).toHaveAttribute("aria-label", "My own summary text");
+	}
+});
+
+test("hidden table carries the data", async ({ page }) => {
+	await allCharts(page);
+	const days: any[] = await page.evaluate(() => (window as any).demo.days);
+	const ts = page.locator("#ts-aside");
+	const rows = ts.locator("tbody tr");
+	await expect.poll(() => rows.count()).toBeGreaterThan(0);
+	// One row per day slot; a skipped day is a row with an em dash, so the gap is announced too.
+	expect(await rows.count()).toBe(days.length);
+	const withData = days.filter((r) => r.wpm !== null || r.strokeWpm > 0).length;
+	expect(await rows.filter({ hasNotText: "—" }).count()).toBeGreaterThanOrEqual(withData - 1);
+	expect(await rows.filter({ hasText: "—" }).count()).toBeGreaterThan(0);
+	const wrap = ts.locator("div.sr-only");
+	const box = await wrap.evaluate((e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return { w: r.width, h: r.height, clip: s.clipPath, pos: s.position }; });
+	expect(box.w).toBeLessThanOrEqual(1);
+	expect(box.h).toBeLessThanOrEqual(1);
+	expect(box.pos).toBe("absolute");
+	expect(box.clip).not.toBe("none");
+	// Not display:none / hidden: it is in the accessibility tree.
+	expect(await page.locator("#ts-aside").getByRole("table").count()).toBeGreaterThanOrEqual(1);
+	for (const id of ["bars-aside", "cal-aside"]) expect(await page.locator(`#${id}`).getByRole("table").count(), id).toBeGreaterThanOrEqual(1);
+});
+
+test("live region is throttled", async ({ page }) => {
+	await allCharts(page);
+	await page.evaluate(() => {
+		const live = document.querySelector("#ts-aside")!.shadowRoot!.querySelector("[aria-live]")!;
+		(window as any).liveChanges = 0;
+		new MutationObserver(() => (window as any).liveChanges++).observe(live, { childList: true, characterData: true, subtree: true });
+	});
+	await page.locator("#ts-aside .plot").focus();
+	await page.keyboard.press("End");
+	for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowLeft");
+	await page.waitForTimeout(1000);
+	const n = await page.evaluate(() => (window as any).liveChanges as number);
+	expect(n).toBeGreaterThanOrEqual(1);
+	expect(n).toBeLessThanOrEqual(3);
+	// The live text settled on the final readout's day.
+	const live = await page.locator("#ts-aside [aria-live]").textContent();
+	const days: any[] = await page.evaluate(() => (window as any).demo.days);
+	expect(live).toContain(await fmtDay(page, days[days.length - 11].day));
+});
+
+test("forced colors keep marks visible", async ({ page }) => {
+	await page.emulateMedia({ forcedColors: "active" });
+	await allCharts(page);
+	const stroke = await page.locator("#ts-aside path.line.s1").evaluate((p) => getComputedStyle(p).stroke);
+	expect(stroke).not.toBe("none");
+	expect(stroke).not.toMatch(/transparent|rgba\(0, 0, 0, 0\)/);
+	const fill = await page.locator("#bars-aside .fill").first().evaluate((e) => getComputedStyle(e).backgroundColor);
+	expect(fill).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+	const cell = await page.locator("#cal-aside .cell.l4").first().evaluate((e) => getComputedStyle(e).backgroundColor);
+	expect(cell).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+});

@@ -129,6 +129,136 @@ Header 5, overlay 10, drawers 20, sheet scrim 30, sheet panel 31. Anything you a
 
 Never build a panel, drawer, scrim or panel toggle yourself. Use the `nav` and `aside` slots and `tk-header`. Hand-made versions miss the breakpoints, focus handling, Escape and stacking order above.
 
+## Charts
+
+Five small, dependency-free chart elements for dashboards and detail panels: `tk-stat` (with `tk-stats`), `tk-sparkline`, `tk-timeseries`, `tk-bars` and `tk-heatmap`. They size themselves to their container (a 300px aside is the design target) and never overflow it. Live demo: https://kit.thatsit.app/charts.html
+
+Data is always set as a property (`el.data = rows`), never as an attribute. The elements are registered by `kit.js`.
+
+### Stat tiles
+
+`tk-stats` is a two-column grid of `tk-stat` tiles. A tile with `wide` spans both columns and shows its `trend` as a sparkline.
+
+```html
+<tk-stats>
+	<tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks" good="up"></tk-stat>
+	<tk-stat label="sessions" value="42"></tk-stat>
+	<tk-stat label="characters" value="18400"></tk-stat>
+</tk-stats>
+```
+
+`tk-stat`:
+
+- `label`: `string`. The small caption.
+- `value`: `string | number`. Numbers (and numeric strings) are compacted: `18400` shows as `18.4K`. Other strings show as written.
+- `unit`: `string`. Shown after the value.
+- `change`: `string`. A line under the value, for example `"+5 vs previous 2 weeks"`.
+- `good`: `"up" | "down"`. The change line is green (`--success`) or red (`--accent`) only when `change` starts with `+` or `-`/`−` and `good` says which direction is good. Without `good` the line stays neutral, because "up" is not always good.
+- `trend`: `number[]` property. Used by the sparkline of a `wide` tile.
+- `wide`: `boolean`, reflected. Spans both columns.
+
+`tk-sparkline`:
+
+```html
+<tk-sparkline id="spark"></tk-sparkline>
+<script>document.getElementById("spark").values = [30, 32, 31, 36, 40];</script>
+```
+
+- `values`: `number[]` property. Non-finite values are dropped. It draws one 2px line in `--chart-1` with an end dot, has no axes or text and is hidden from assistive tech (put the number next to it). Default size is 110 x 40; size it with CSS.
+- `--tk-spark-ring`: CSS custom property. The color of the ring around the end dot, default `--bg`. `tk-stat` sets it to `--panel`.
+
+### Shared by tk-timeseries, tk-bars and tk-heatmap
+
+These three share one base, so they behave alike.
+
+- `data`: `object[]` property. The rows.
+- `unit`: `string`. Appended to values (`34 wpm`).
+- `format`: `(n: number) => string` property. Replaces the default number formatting.
+- `summary`: `string`. Replaces the generated description (`aria-label`) of the plot.
+- `empty`: `string`, default `"No data yet"`. Shown as one quiet line instead of the plot when there is no data.
+
+**Readout.** A one-line readout above the plot shows the value under the pointer, the touch point or the keyboard cursor, and a summary when nothing is active. The line has a fixed height, so the layout never jumps. Touch drag scrubs horizontally and still lets the page scroll vertically.
+
+**Event.** `tk-readout` bubbles and is composed. `detail` is a `ReadoutDetail`: `{ index: number | null, datum: unknown }`. `index` is `null` at rest. The datum is `{ day, row }` for `tk-timeseries` (`row` is `null` on a skipped day), the row object for `tk-bars`, and the day's row (or `{ day }`) for `tk-heatmap`.
+
+**Keyboard.** Focus the plot, then: Left and Right step one item, Home and End jump to the first and last, Escape returns to rest (only when something is active, so an enclosing `tk-sheet` can still close). On `tk-heatmap`, Up and Down move a week. Blur returns to rest.
+
+**Accessibility.** The plot is `role="img"` with a label (your `summary`, or one generated from the data). The same data is also a visually hidden table, so nothing is hover-only or color-only. The readout is announced through an `aria-live="polite"` region, at most once every 400 ms, so scrubbing does not flood a screen reader. Marks keep system colors in forced-colors mode and transitions stop under reduced motion.
+
+### tk-timeseries
+
+A day-by-day line chart with up to four series, an optional band between two series and an optional goal line.
+
+```html
+<tk-timeseries id="speed" y="wpm" goal="40" unit="wpm"></tk-timeseries>
+<tk-timeseries id="both" band="wpm strokeWpm" band-label="pausing" goal="40" unit="wpm"></tk-timeseries>
+<script>
+	speed.data = [{ day: "2026-11-08", wpm: 31 }, { day: "2026-11-09", wpm: 36 }];
+	both.series = [
+		{ y: "wpm", label: "with pauses" },
+		{ y: "strokeWpm", label: "typing only", defined: (r) => r.strokeWpm > 0 },
+	];
+</script>
+```
+
+- `x`: `string`, default `"day"`. The row field with the day, as `YYYY-MM-DD`.
+- `y`: `string`. Single-series shorthand: the row field to plot.
+- `defined`: `(row) => boolean` property. Single-series shorthand for the series' `defined`.
+- `series`: `{ y, label, defined? }[]` property. Up to four series; more are ignored with a console warning. Series 1 to 4 use `--chart-1` to `--chart-4`. With two or more series the chart shows a legend and the readout names each series.
+- `band`: `string`, two field names separated by a space. Washes the area between those two series. The wash uses the color of the first band series.
+- `band-label`: `string`. The legend name of the band.
+- `goal`: `number`. Draws a goal line.
+- `goal-label`: `string`, default `"goal"`. The word before the goal value on the line.
+- `height`: `number`, default `140`. The plot height in px.
+
+Rules:
+
+- **x is always a calendar day.** Every day between the first and the last row gets its own slot, so a skipped day is a gap in the line, not a bridge. Anything finer than a day is out of scope.
+- **Missing values.** `null`, `undefined` and `NaN` are missing and break the line. `0` is a value and is plotted.
+- **`defined(row)` is ANDed with "is a finite number".** It can hide points but cannot make a non-number plot. This is for the "0 means not measured" case: keeb's typing-only speed is `0` on a day where strokes were not measured, which should be a gap, not a dive to zero. Use `defined: (r) => r.strokeWpm > 0`. The default hides nothing but missing values.
+
+### tk-bars
+
+A list of labelled bars with an optional goal. Rows keep the data order, and every row has the goal tick at the same x.
+
+```html
+<tk-bars id="keys" label="key" value="wpm" goal="40" unit="wpm"></tk-bars>
+<tk-bars id="gaps" label="key" value="ms" goal="200" lower unit="ms"></tk-bars>
+```
+
+- `label`: `string`, default `"label"`. The row field for the name.
+- `value`: `string`, default `"value"`. The row field for the number.
+- `goal`: `number`. The goal; rows that reach it are `--chart-1`, rows below it are `--chart-2`. Without a goal every bar is `--chart-1`. Status is also written in words (`at goal`, `below goal`) in the readout and the table.
+- `lower`: `boolean`. Lower is better (time between keys). Only applies with a `goal`.
+
+A longer bar always means better. With `lower` the scale flips, so the fastest key gets the longest bar, and a value equal to the goal sits exactly on the tick.
+
+### tk-heatmap
+
+A calendar heatmap. Weeks are columns and days are rows.
+
+```html
+<tk-heatmap id="practice" x="day" value="minutes" unit="min" weeks="12" legend></tk-heatmap>
+```
+
+- `x`: `string`, default `"day"`. The row field with the day, as `YYYY-MM-DD`.
+- `value`: `string`, default `"value"`. The row field with the number.
+- `weeks`: `number`, default `12`. How many week columns to show at most.
+- `end`: `string` (`YYYY-MM-DD`), default today. The last day shown, which is the last cell.
+- `legend`: `boolean`. Shows a "less to more" legend.
+
+Weeks start on Monday. Cells shrink to fit but never below 10px; after that the oldest weeks are dropped, so the grid never overflows. Color has five levels (empty, then four), and levels are relative to the maximum of the visible cells, so a quiet window still shows contrast. A day with no row and a day with value `0` look the same.
+
+### Colors
+
+Series use four tokens from `kit.css`, with light and dark values: `--chart-1` (amber), `--chart-2` (blue), `--chart-3` (teal) and `--chart-4` (plum). They are meant to be used in that order.
+
+- The theme's red (`--accent`) and green (`--success`) are status colors. Never use them for a series, and don't use them for a bar or cell that is not a status.
+- `--chart-3` (teal) and `--success` look alike, so don't put them side by side.
+- Anything color-coded is also written in words or a table.
+
+All chart text is at least 12px.
+
 ## API policy
 
 The API is additive-only: exports, element tags (`tk-`), events, CSS custom properties and published files are never removed or renamed. `npm run check-api -w kit` fetches `https://kit.thatsit.app/api.json` and fails if the fresh build dropped anything the live kit has. CI runs it before every deploy.
