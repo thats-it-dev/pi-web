@@ -43,6 +43,10 @@ describe("source scanners", () => {
 		const src = [`export const TOAST_EVENT = "tk-toast";`, `this.dispatchEvent(new CustomEvent("tk-close", { bubbles: true }));`, `new CustomEvent<ToastDetail>(TOAST_EVENT, {})`];
 		expect(eventNames(src).sort()).toEqual(["tk-close", "tk-toast"]);
 	});
+	it("finds events the kit listens for", () => {
+		const src = [`this.addEventListener("tk-hide-panel", (e) => go(e));`, `document.addEventListener('tk-sheet-toggle', f);`, `window.addEventListener("keydown", f);`, `this.addEventListener(name, f);`];
+		expect(eventNames(src).sort()).toEqual(["tk-hide-panel", "tk-sheet-toggle"]);
+	});
 	it("finds public shadow css props", () => {
 		expect(shadowCssProps(["a { bottom: var(--tk-toast-bottom, 4px); color: var(--text); }"])).toEqual(["--tk-toast-bottom"]);
 	});

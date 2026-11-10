@@ -28,6 +28,10 @@ await cp(join(root, "src/theme-init.js"), join(dist, "theme-init.js"));
 await cp(join(root, "public/_headers"), join(dist, "_headers"));
 const demo = join(root, "demo/index.html");
 if (existsSync(demo)) await cp(demo, join(dist, "index.html"));
+const bare = join(root, "demo/bare.html");
+if (existsSync(bare)) await cp(bare, join(dist, "bare.html"));
+const shadow = join(root, "demo/shadow.html");
+if (existsSync(shadow)) await cp(shadow, join(dist, "shadow.html"));
 
 execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", join(root, "tsconfig.build.json")], {
 	cwd: root,

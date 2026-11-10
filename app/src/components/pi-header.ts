@@ -13,7 +13,7 @@ export class PiHeader extends LitElement {
 	declare version: number;
 	declare heading: string;
 	declare tucked: boolean;
-	declare badge: string | null; // the progress count on narrow screens; null hides the button
+	declare badge: string | null; // the progress count on the shell's Progress button; null shows none
 
 	static styles = [
 		sharedStyles,
@@ -25,8 +25,6 @@ export class PiHeader extends LitElement {
 			.meter { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; display: block; }
 			.meter i { display: block; height: 100%; background: var(--primary); transition: width 0.4s ease; }
 			.meter.hot i { background: var(--accent); }
-			.badge { flex: none; align-self: center; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.72rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-			.badge:hover { background: var(--panel); }
 			.state { font-size: 0.72rem; color: var(--text-muted); font-style: italic; }
 		`,
 	];
@@ -68,9 +66,8 @@ export class PiHeader extends LitElement {
 	}
 
 	private frame(heading: string, pct: number | null, nums: string, status: string | null) {
-		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions">
+		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label="Progress" aside-badge=${this.badge ?? ""}>
 			<h1 slot="title">${heading}</h1>
-			${this.badge ? html`<button slot="actions" class="badge" aria-label="Progress" @click=${() => this.emit("pi-open-progress")}>${this.badge}</button>` : nothing}
 			${newChatButton()}
 			<button class="l2" aria-label="Session stats" @click=${() => this.emit("pi-open-sheet", "stats")}>
 				<span class="meter ${pct != null && pct >= 80 ? "hot" : ""}"><i style=${`width:${Math.min(100, Math.max(0, pct ?? 0))}%`}></i></span>

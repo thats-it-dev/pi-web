@@ -122,9 +122,9 @@ test("add one increases the count", async ({ page }) => {
   `https://kit.thatsit.app/kit.js`. Never `from "lit"`. Reference: https://kit.thatsit.app/ (live
   demo) and https://kit.thatsit.app/kit.d.ts.
 - Use only kit components: `tk-sheet` (`heading`, `.open`, `@tk-close`), `tk-toasts` (shows
-  `toast("msg")`), `tk-shell` + `tk-header` for nav apps, and `tk-tailnet-only` for gateway apps.
+  `toast("msg")`), `tk-shell` + `tk-header` for nav apps (`nav` and `aside` slots are the side panels, never hand-built; kit README "Side panels"), and `tk-tailnet-only` for gateway apps.
 - Use only `sharedStyles` classes: `.btn`, `.btn.ghost`, `.seg` (button group, `.on` for the
-  selected one), `.u` (underlined link, `.on`), `.label`, `.dot`, and plain `input`, `textarea`, `select`.
+  selected one), `.u` (underlined link, `.on`), `.label`, `.dot`, `.icon-btn`, `.badge`, and plain `input`, `textarea`, `select`.
 - Colors and fonts come only from tokens such as `var(--bg)`, `var(--text-primary)`, `var(--text-muted)`,
   `var(--primary)`, `var(--accent)`, `var(--border-color)`, `var(--radius)`. No hex colors,
   `font-family` or `border-radius` values in app code.

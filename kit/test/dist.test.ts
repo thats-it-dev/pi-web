@@ -41,4 +41,9 @@ describe.skipIf(!existsSync(dist) && !process.env.CI)("kit dist (run `npm run bu
 		const { exports } = JSON.parse(read("api.json"));
 		for (const name of ["sharedStyles", "toast", "trackViewport"]) expect(exports).toContain(name);
 	});
+	it("api.json lists the side panel API", () => {
+		const { attributes, events } = JSON.parse(read("api.json"));
+		for (const a of ["tk-shell:aside-label", "tk-shell:store-key", "tk-shell:aside-hidden", "tk-header:aside-label", "tk-header:aside-badge"]) expect(attributes).toContain(a);
+		for (const e of ["tk-panel-change", "tk-toggle-panel", "tk-show-panel", "tk-hide-panel", "tk-sheet-toggle"]) expect(events).toContain(e);
+	});
 });

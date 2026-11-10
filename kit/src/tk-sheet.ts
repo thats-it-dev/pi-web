@@ -1,8 +1,6 @@
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, type PropertyValues, css, html, nothing } from "lit";
+import { X_ICON } from "./icons.ts";
 import { sharedStyles } from "./styles.ts";
-
-// Lucide icon (ISC): x.
-const X_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>`;
 
 // Bottom sheet on phones, centered panel on wide screens. Content is slotted,
 // so its styles live with whoever renders it.
@@ -50,11 +48,21 @@ export class TkSheet extends LitElement {
 
 	disconnectedCallback(): void {
 		document.removeEventListener("keydown", this.onKey);
+		// Removed while open: tell tk-shell it is gone. Dispatched on document, since a detached sheet's events reach no one.
+		if (this.open) document.dispatchEvent(new CustomEvent("tk-sheet-toggle", { detail: { open: false } }));
 		super.disconnectedCallback();
 	}
 
 	private close(): void {
 		this.dispatchEvent(new CustomEvent("tk-close", { bubbles: true, composed: true }));
+	}
+
+	// Tells tk-shell (listening on document) a sheet opened or closed, so it can
+	// leave sheets usable and let them take Escape before a drawer.
+	protected updated(changed: PropertyValues<this>): void {
+		if (!changed.has("open")) return;
+		if (changed.get("open") === undefined && !this.open) return;
+		this.dispatchEvent(new CustomEvent("tk-sheet-toggle", { detail: { open: this.open }, bubbles: true, composed: true }));
 	}
 
 	render() {

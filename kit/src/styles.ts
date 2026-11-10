@@ -27,6 +27,10 @@ export const sharedStyles = css`
 	}
 	.btn:disabled { opacity: 0.45; cursor: default; }
 	.btn.ghost { background: transparent; color: var(--text-primary); border-color: var(--border-color); }
+	.icon-btn { display: grid; place-items: center; width: 36px; height: 36px; flex: none; color: var(--text-muted); }
+	.icon-btn:hover { color: var(--text-primary); }
+	.icon-btn svg { width: 20px; height: 20px; }
+	.badge { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.72rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.label { font-family: var(--font-display); letter-spacing: 0.12em; text-transform: lowercase; color: var(--text-muted); font-size: 0.75rem; }
 	.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
 	.dot.live { background: var(--primary); }

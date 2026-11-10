@@ -17,19 +17,19 @@ test("defines all four elements", async ({ page }) => {
 
 test("phone drawer opens from the header and closes on link or overlay", async ({ page }, info) => {
 	test.skip(info.project.name !== "phone");
-	const layout = page.locator("tk-shell .layout");
+	const nav = page.locator('tk-shell aside[aria-label="Demo pages"]');
 	await page.locator("tk-header .menu").click();
-	await expect(layout).toHaveClass(/nav-open/);
+	await expect(nav).toBeInViewport();
 	await page.locator("tk-shell a[href='']").click();
-	await expect(layout).not.toHaveClass(/nav-open/);
+	await expect(nav).not.toBeInViewport();
 	await page.locator("tk-header .menu").click();
-	await expect(layout).toHaveClass(/nav-open/);
+	await expect(nav).toBeInViewport();
 	await page.locator("tk-shell .overlay").click({ position: { x: 380, y: 300 } });
-	await expect(layout).not.toHaveClass(/nav-open/);
+	await expect(nav).not.toBeInViewport();
 });
 
 test("sheet closes on Escape", async ({ page }) => {
-	await page.getByRole("button", { name: "Open sheet" }).click();
+	await page.locator("#open-sheet").click();
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.getByRole("dialog")).toHaveCount(0);
