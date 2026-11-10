@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-shell>
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<title>That's it kit charts</title>
+	<link rel="stylesheet" href="./kit.css" />
+	<script src="./theme-init.js"></script>
+	<script>
+		// ?theme=dark|light overrides the stored/system theme (classic script: runs after theme-init, before first paint).
+		{
+			const t = new URLSearchParams(location.search).get("theme");
+			if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+		}
+	</script>
+	<script type="module">import "./kit.js"</script>
+	<style>
+		section { padding: 18px; display: grid; gap: 14px; align-content: start; overflow-y: auto; }
+		section.main { max-width: 760px; }
+		h2 { margin: 0; font-size: 13px; font-weight: 700; }
+	</style>
+</head>
+<body>
+	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-charts-demo:panels">
+		<tk-header menu-label="Open menu" aside-label="Details"><h1 slot="title">Charts</h1></tk-header>
+		<section class="main" id="main-charts">
+			<h2>history</h2>
+			<tk-stats>
+				<tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks"></tk-stat>
+				<tk-stat label="sessions" value="42"></tk-stat>
+				<tk-stat label="characters" value="18400"></tk-stat>
+				<tk-stat label="practised" value="312" unit="min"></tk-stat>
+				<tk-stat label="streak" value="6" unit="d"></tk-stat>
+			</tk-stats>
+			<tk-sparkline id="spark-main"></tk-sparkline>
+			<h2>speed</h2>
+			<tk-timeseries id="ts-main" y="wpm" goal="40" unit="wpm"></tk-timeseries>
+			<h2>keys, no goal</h2>
+			<tk-bars id="bars-nogoal" label="key" value="wpm" unit="wpm"></tk-bars>
+			<h2>practice, 200px</h2>
+			<div id="cal-narrow" style="width:200px"><tk-heatmap id="cal-200" end="2026-11-09" weeks="12" unit="min"></tk-heatmap></div>
+			<h2>empty</h2>
+			<tk-timeseries id="ts-empty" y="wpm" unit="wpm"></tk-timeseries>
+			<h2>one day</h2>
+			<tk-timeseries id="ts-one" y="wpm" unit="wpm"></tk-timeseries>
+		</section>
+		<section slot="aside" id="aside-charts">
+			<h2>history</h2>
+			<tk-stats>
+				<tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks"></tk-stat>
+				<tk-stat label="sessions" value="42"></tk-stat>
+				<tk-stat label="characters" value="18400"></tk-stat>
+				<tk-stat label="practised" value="312" unit="min"></tk-stat>
+				<tk-stat label="streak" value="6" unit="d"></tk-stat>
+			</tk-stats>
+			<tk-timeseries id="ts-aside" x="day" band="wpm strokeWpm" band-label="pausing" goal="40" unit="wpm"></tk-timeseries>
+			<h2>slowest keys</h2>
+			<tk-bars id="bars-aside" label="key" value="wpm" goal="40" unit="wpm"></tk-bars>
+			<h2>time between keys</h2>
+			<tk-bars id="bars-ms" label="key" value="ms" goal="200" lower unit="ms"></tk-bars>
+			<h2>practice</h2>
+			<tk-heatmap id="cal-aside" end="2026-11-09" weeks="12" unit="min" legend></tk-heatmap>
+		</section>
+	</tk-shell>
+	<script>
+		// Deterministic data (mulberry32): 40 days ending 2026-11-09, about 1 day in 9 skipped (as in mockup B).
+		(() => {
+			let a = 20261110;
+			const rnd = () => {
+				a = (a + 0x6d2b79f5) | 0;
+				let t = Math.imul(a ^ (a >>> 15), 1 | a);
+				t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+				return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+			};
+			const key = (d) => d.toISOString().slice(0, 10);
+			const end = Date.UTC(2026, 10, 9);
+			const days = [];
+			for (let i = 39; i >= 0; i--) {
+				const day = key(new Date(end - i * 86400000));
+				if (rnd() < 1 / 9) { days.push({ day, wpm: null, strokeWpm: null }); continue; }
+				const wpm = Math.round(28 + (39 - i) * 0.2 + rnd() * 10);
+				days.push({ day, wpm, strokeWpm: wpm + Math.round(4 + rnd() * 6) });
+			}
+			// One "not measured" day: strokeWpm 0 between two measured days (hidden by the series' defined()).
+			for (let i = 15; i < days.length - 1; i++) {
+				if (days[i - 1].wpm !== null && days[i].wpm !== null && days[i + 1].wpm !== null) { days[i].strokeWpm = 0; break; }
+			}
+			const keys = "etaonisrhdlu".split("").map((k, i) => ({ key: k, wpm: Math.round(48 - i * 2 - rnd() * 3) }));
+			const cal = [];
+			for (let i = 83; i >= 0; i--) {
+				const day = key(new Date(end - i * 86400000));
+				cal.push({ day, value: rnd() < 0.35 ? 0 : Math.round(rnd() * 60) });
+			}
+			// Latency per key (ms, lower is better): 200 sits exactly on the goal.
+			const ms = [["e", 170], ["t", 190], ["a", 200], ["o", 225], ["n", 260], ["i", 310], ["s", 400]].map(([key, ms]) => ({ key, ms }));
+			window.demo = { days, keys, cal, ms };
+			const wpms = days.map((d) => d.wpm).filter((v) => v !== null);
+			const set = () => {
+				for (const s of document.querySelectorAll("tk-stat[wide]")) s.trend = wpms;
+				document.getElementById("spark-main").values = wpms;
+				const aside = document.getElementById("ts-aside");
+				aside.series = [
+					{ y: "wpm", label: "with pauses" },
+					{ y: "strokeWpm", label: "typing only", defined: (r) => r.strokeWpm > 0 },
+				];
+				aside.data = days;
+				document.getElementById("ts-main").data = days;
+				document.getElementById("bars-aside").data = keys;
+				document.getElementById("bars-nogoal").data = keys;
+				document.getElementById("bars-ms").data = ms;
+				document.getElementById("cal-aside").data = cal;
+				document.getElementById("cal-200").data = cal;
+				document.getElementById("ts-empty").data = [];
+				document.getElementById("ts-one").data = [days[days.length - 1].wpm !== null ? days[days.length - 1] : days.find((d) => d.wpm !== null)];
+			};
+			set();
+		})();
+	</script>
+</body>
+</html>

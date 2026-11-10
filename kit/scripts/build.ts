@@ -32,6 +32,8 @@ const bare = join(root, "demo/bare.html");
 if (existsSync(bare)) await cp(bare, join(dist, "bare.html"));
 const shadow = join(root, "demo/shadow.html");
 if (existsSync(shadow)) await cp(shadow, join(dist, "shadow.html"));
+const charts = join(root, "demo/charts.html");
+if (existsSync(charts)) await cp(charts, join(dist, "charts.html"));
 
 execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", join(root, "tsconfig.build.json")], {
 	cwd: root,

@@ -5,15 +5,18 @@
 	--panel: #e7e7e7;
 	--line: #cfcfcf;
 	--overlay: rgba(0, 0, 0, 0.45);
+	/* Chart series colors, assigned in this order and never cycled. The theme's --accent/--success
+	   are status colors, not series. */
+	--chart-1: #e69500; --chart-2: #006eb8; --chart-3: #00978d; --chart-4: #8a2f7a;
 	--radius: 0.15rem;
 	--sidebar-w: 280px;
 	--aside-w: 300px;
 }
 
 @media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
+	:root:not([data-theme="light"]) { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); --chart-1: #ffaa00; --chart-2: #5aa6e6; --chart-3: #3cc9a8; --chart-4: #b85aa6; }
 }
-:root[data-theme="dark"] { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); }
+:root[data-theme="dark"] { --panel: #1f1f1f; --line: #333333; --overlay: rgba(0, 0, 0, 0.6); --chart-1: #ffaa00; --chart-2: #5aa6e6; --chart-3: #3cc9a8; --chart-4: #b85aa6; }
 
 *, *::before, *::after { box-sizing: border-box; }
 /* App shells opt in with <html data-shell>: the document never scrolls or bounces (iOS

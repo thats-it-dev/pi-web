@@ -1,0 +1,135 @@
+<h2>Two density directions for a 300px sidebar</h2>
+<p class="subtitle">Same keeb-like data in both. Kit tokens: Nunito, --panel / --line, orange --primary. No axis titles. Light on top, dark below. Click the one closer to right; the details are cheap to change.</p>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+.tk { --bg:#f1f1f1; --panel:#e7e7e7; --line:#cfcfcf; --t1:#000; --t2:#555; --t3:#64748b; --pri:#e69500; --pri-w:rgba(230,149,0,.12); --sec:#0032a0;
+  font-family:Nunito, ui-rounded, system-ui, sans-serif; font-size:15px; line-height:1.4; background:var(--bg); color:var(--t1);
+  width:300px; padding:14px 14px 18px; border:1px solid var(--line); border-radius:3px; flex:none; }
+.tk.dark { --bg:#171717; --panel:#1f1f1f; --line:#333; --t1:#fff; --t2:#a1a1aa; --t3:#94a3b8; --pri:#ffaa00; --pri-w:rgba(255,170,0,.14); --sec:#7aa2ff; }
+.row { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start; margin:10px 0 26px; }
+.tk h3 { font-size:13px; font-weight:800; letter-spacing:.02em; margin:16px 0 6px; color:var(--t2); text-transform:lowercase; }
+.tk h3:first-child { margin-top:0 }
+.tk svg text { font-family:inherit; }
+/* A: dense */
+.a .tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+.a .tile { background:var(--panel); border-radius:2px; padding:5px 7px; }
+.a .tile .l { font-size:12px; color:var(--t2); }
+.a .tile .v { font-size:17px; font-weight:700; }
+.a .bars { display:grid; grid-template-columns:22px 1fr 34px; gap:3px 8px; align-items:center; font-size:13px; }
+.a .bars .k { font-weight:700; text-align:center; background:var(--panel); border-radius:2px; }
+.a .bars .n { text-align:right; color:var(--t2); font-variant-numeric:tabular-nums; }
+.track { position:relative; height:6px; background:var(--panel); border-radius:3px; }
+.fill { position:absolute; left:0; top:0; bottom:0; background:var(--pri); border-radius:3px; }
+.fill.under { background:var(--t3); }
+.goal { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--t1); border-radius:1px; }
+/* B: roomy */
+.b .tiles { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.b .tile { background:var(--panel); border-radius:2px; padding:8px 10px; }
+.b .tile .l { font-size:13px; color:var(--t2); }
+.b .tile .v { font-size:24px; font-weight:700; line-height:1.15; }
+.b .tile .d { font-size:12px; color:var(--t2); }
+.b .tile.wide { grid-column:span 2; display:flex; align-items:end; justify-content:space-between; }
+.b .bars { display:flex; flex-direction:column; gap:8px; font-size:13px; }
+.b .bars .top { display:flex; justify-content:space-between; margin-bottom:3px; }
+.b .bars .top b { font-weight:700 }
+.b .bars .top span { color:var(--t2); font-variant-numeric:tabular-nums; }
+.b .track { height:8px; border-radius:4px; }
+.legend { display:flex; gap:12px; font-size:12px; color:var(--t2); margin-top:4px; flex-wrap:wrap; }
+.legend i { display:inline-block; width:12px; height:2px; background:var(--pri); vertical-align:middle; margin-right:4px; border-radius:1px; }
+.legend i.s { background:var(--t3); } .legend i.w { height:8px; background:var(--pri-w); }
+.foot { display:flex; justify-content:space-between; font-size:12px; color:var(--t2); }
+.mon { display:flex; justify-content:space-between; font-size:12px; color:var(--t2); margin-bottom:3px; }
+</style>
+
+<div class="cards" style="grid-template-columns:1fr 1fr">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-body"><h3>A. Dense</h3><p>3-up tiles, one-line bar rows, 96px chart with only an end label, goal label and date range. More fits above the fold.</p></div>
+  </div>
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-body"><h3>B. Roomy</h3><p>2-up tiles with bigger numbers and a sparkline tile, two-line bar rows, 140px chart with 3 hairline gridlines and right-edge values.</p></div>
+  </div>
+</div>
+
+<div class="row" id="light"></div>
+<div class="row" id="dark"></div>
+
+<script>
+(function(){
+// deterministic data
+let s=7; const r=()=>{s=(s*9301+49297)%233280; return s/233280};
+const N=40, goal=40; const days=[];
+for(let i=0;i<N;i++){ const off = (i%9===5 || r()<.05); const base=22+i*0.45; const w=off?null:Math.round(base+ (r()-.5)*7); days.push(off?null:{w, t: Math.round(w*1.18+ r()*3)}); }
+const keys=[['e',46],['t',44],['a',41],['o',39],['n',36],['i',33],['s',31],['r',27]];
+const cal=[]; for(let i=0;i<84;i++){ cal.push(r()<.3?0: Math.round(r()*40)); }
+const stats=[['sessions','42'],['characters','18.4K'],['practised','312 min'],['streak','6 d'],['best day','48 wpm'],['average','34 wpm']];
+
+function chart(w,h,dense){
+  const pad={l:2,r: dense?26:28,t:dense?14:10,b:4};
+  const max=Math.max(goal*1.2, ...days.filter(Boolean).map(d=>d.t));
+  const X=i=>pad.l+i*(w-pad.l-pad.r)/(N-1), Y=v=>h-pad.b-(v/max)*(h-pad.t-pad.b)+0;
+  const vals=days.filter(Boolean); const lo=Math.min(...vals.map(d=>d.w))-3; const hi=Math.max(goal+4,...vals.map(d=>d.t))+2; const Ylo=v=> h-pad.b - ((v-lo)/(hi-lo))*(h-pad.t-pad.b);
+  const y=Ylo;
+  const seg=(k)=>{let d='',pen=false; days.forEach((p,i)=>{ if(!p){pen=false;return;} d+=(pen?'L':'M')+X(i).toFixed(1)+','+y(p[k]).toFixed(1); pen=true;}); return d;};
+  let band=''; let run=[]; const flush=()=>{ if(run.length>1){ band+='M'+run.map(i=>X(i).toFixed(1)+','+y(days[i].t).toFixed(1)).join('L')+'L'+run.slice().reverse().map(i=>X(i).toFixed(1)+','+y(days[i].w).toFixed(1)).join('L')+'Z'; } run=[]; };
+  days.forEach((p,i)=>{ if(p) run.push(i); else flush(); }); flush();
+  let g='';
+  if(!dense){ [20,30,50].forEach(v=>{ if(v===goal) return; g+=`<line x1="${pad.l}" x2="${w-pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1"/><text x="${w}" y="${y(v)}" dy=".32em" text-anchor="end" font-size="12" fill="var(--t2)">${v}</text>`; }); }
+  const last=days.length-1; let li=last; while(!days[li]) li--;
+  const lp=days[li];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;overflow:visible">
+   ${g}
+   <path d="${band}" fill="var(--pri-w)"/>
+   <line x1="${pad.l}" x2="${w-pad.r}" y1="${y(goal)}" y2="${y(goal)}" stroke="var(--t1)" stroke-width="1" opacity=".55"/>
+   <text x="${pad.l}" y="${y(goal)}" dy="-4" font-size="12" font-weight="700" fill="var(--t2)">goal ${goal}</text>
+   <path d="${seg('t')}" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+   <path d="${seg('w')}" fill="none" stroke="var(--pri)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+   <circle cx="${X(li)}" cy="${y(lp.w)}" r="4" fill="var(--pri)" stroke="var(--bg)" stroke-width="2"/>
+   ${dense?`<text x="${X(li)+8}" y="${y(lp.w)}" dy=".32em" text-anchor="start" font-size="13" font-weight="700" fill="var(--t1)">${lp.w}</text>`:''}
+  </svg>`;
+}
+function spark(w,h){ const pts=days.filter(Boolean).slice(-14).map(d=>d.w); const mn=Math.min(...pts), mx=Math.max(...pts);
+  const d=pts.map((v,i)=>(i?'L':'M')+(2+i*(w-6)/(pts.length-1)).toFixed(1)+','+(h-2-(v-mn)/(mx-mn)*(h-6)).toFixed(1)).join('');
+  return `<svg width="${w}" height="${h}" style="display:block;overflow:visible"><path d="${d}" fill="none" stroke="var(--pri)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${w-4}" cy="${h-2-(pts.at(-1)-mn)/(mx-mn)*(h-6)}" r="3.5" fill="var(--pri)" stroke="var(--panel)" stroke-width="2"/></svg>`; }
+const pct=v=>Math.min(100, v/(goal*1.25)*100);
+function heat(cell,gap){ // 12 weeks x 7 days, single hue light->dark
+  const W=12, lv=v=> v===0?0: v<10?1: v<20?2: v<30?3:4;
+  const op=[0,.28,.5,.75,1];
+  let out=`<svg width="${W*(cell+gap)}" height="${7*(cell+gap)}" style="display:block">`;
+  cal.forEach((v,i)=>{ const c=Math.floor(i/7), rr=i%7; const L=lv(v);
+    out+= L? `<rect x="${c*(cell+gap)}" y="${rr*(cell+gap)}" width="${cell}" height="${cell}" rx="2" fill="var(--pri)" fill-opacity="${op[L]}"><title>${v} min</title></rect>` : `<rect x="${c*(cell+gap)}" y="${rr*(cell+gap)}" width="${cell}" height="${cell}" rx="2" fill="var(--panel)"/>`; });
+  return out+'</svg>'; }
+
+function A(dark){ return `<div class="tk a ${dark?'dark':''}">
+  <h3>history · corne</h3>
+  <div class="tiles">${stats.map(([l,v])=>`<div class="tile"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
+  <div style="margin-top:12px">${chart(270,96,true)}</div>
+  <div class="foot"><span>Oct 1</span><span>Nov 9</span></div>
+  <div class="legend"><span><i></i>with pauses</span><span><i class="s"></i>typing only</span><span><i class="w"></i>pausing</span></div>
+  <h3>progress</h3>
+  <div class="bars">${keys.map(([k,v])=>`<span class="k">${k}</span><span class="track"><span class="fill ${v<goal?'under':''}" style="width:${pct(v)}%"></span><span class="goal" style="left:${pct(goal)}%"></span></span><span class="n">${v}</span>`).join('')}</div>
+  <h3>practice · 12 weeks</h3>
+  ${heat(17,4)}
+  <div class="foot" style="margin-top:4px"><span>Aug 18</span><span>less <svg width="52" height="10" style="vertical-align:-1px">${[0,.28,.5,.75,1].map((o,i)=>`<rect x="${i*10.5}" y="0" width="9" height="9" rx="2" fill="${i?'var(--pri)':'var(--panel)'}" fill-opacity="${o||1}"/>`).join('')}</svg> more</span></div>
+</div>`; }
+
+function B(dark){ return `<div class="tk b ${dark?'dark':''}">
+  <h3>history · corne</h3>
+  <div class="tiles">
+    <div class="tile wide"><div><div class="l">average</div><div class="v">34 wpm</div><div class="d">+5 vs previous 2 weeks</div></div>${spark(110,40)}</div>
+    ${stats.slice(0,4).map(([l,v])=>`<div class="tile"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}
+  </div>
+  <div style="margin-top:14px">${chart(270,140,false)}</div>
+  <div class="foot"><span>Oct 1</span><span>Nov 9</span></div>
+  <div class="legend"><span><i></i>with pauses</span><span><i class="s"></i>typing only</span><span><i class="w"></i>pausing</span></div>
+  <h3>progress</h3>
+  <div class="bars">${keys.slice(0,6).map(([k,v])=>`<div><div class="top"><b>${k}</b><span>${v} wpm</span></div><div class="track"><span class="fill ${v<goal?'under':''}" style="width:${pct(v)}%"></span><span class="goal" style="left:${pct(goal)}%"></span></div></div>`).join('')}</div>
+  <h3>practice</h3>
+  <div class="mon"><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span></div>
+  ${heat(18,4)}
+</div>`; }
+
+document.getElementById('light').innerHTML = A(false)+B(false);
+document.getElementById('dark').innerHTML = A(true)+B(true);
+})();
+</script>
