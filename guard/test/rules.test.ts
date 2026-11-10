@@ -176,3 +176,8 @@ test("the to-do nudge names each open item and what to do", () => {
 	assert.match(text, /completed/);
 	assert.match(text, /delete/);
 });
+
+test("a short reply after tidying the to-do list is not treated as a stall", () => {
+	const todoNudgeMsg2 = { role: "custom", customType: TODO_NUDGE_TYPE, content: "..." };
+	assert.equal(shouldNudge([user, edit, result, long, todoNudgeMsg2, todoCall, result, say("Done, list updated.")]), false);
+});

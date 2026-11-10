@@ -128,6 +128,8 @@ export function shouldNudge(messages: Msg[]): boolean {
 	const coded = run.some((m) => m.role === "assistant" && parts(m).some((p) => p.type === "toolCall" && (p.name === "edit" || p.name === "write")));
 	if (!coded) return false;
 	if (run.filter((m) => m.role === "custom" && m.customType === NUDGE_TYPE).length >= MAX_NUDGES) return false;
+	// Once sent back to tidy the to-do list, a short "list updated" reply is the expected answer.
+	if (run.some((m) => m.role === "custom" && m.customType === TODO_NUDGE_TYPE)) return false;
 	const text = textOf(last).trim();
 	return text.length < SHORT_REPLY && !text.endsWith("?");
 }
