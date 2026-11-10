@@ -87,7 +87,7 @@ function resultOf(text: string): Record<string, any> | null {
 
 const firstLine = (v: unknown): string | null => str(typeof v === "string" ? v.split("\n").find((l) => l.trim()) : null)?.trim() ?? null;
 
-export function deriveProgress(conv: Conversation, opts: { live: boolean; bgRunning?: boolean }): Progress {
+export function deriveProgress(conv: Conversation, opts: { live: boolean }): Progress {
 	let pr: LatestPr | null = null;
 	let prJob: string | null = null; // the pr-wait job of the latest PR
 	let prDone: { code: string; text: string } | null = null;
@@ -123,8 +123,8 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean; bgRunn
 			}
 		} else if (m.role === "custom" && m.customType === "bg-bash-done") {
 			const text = textOf(m.content);
-			const head = /^bg_bash job (bg-\d+) (exited (\S+)|was cancelled)/.exec(text);
-			if (pr && prJob && head && head[1] === prJob) prDone = { code: head[3] ?? "cancelled", text };
+			const head = /^bg_bash job (bg-\d+) (?:exited (\S+)|was (cancelled|killed))/.exec(text);
+			if (pr && prJob && head && head[1] === prJob) prDone = { code: head[2] ?? head[3], text };
 		} else if (m.role === "user") turn++;
 		else if (m.role === "assistant" && Array.isArray(m.content)) {
 			for (const c of m.content) {
@@ -189,9 +189,9 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean; bgRunn
 				p.gatewayPreview = str(r?.gatewayPreview);
 			} else {
 				p.ci = "failed";
-				p.reason = prDone.code === "cancelled" ? "cancelled" : firstLine(r?.reason) ?? prDone.text.split("\n").slice(1).find((l) => l.trim() && !l.startsWith("RESULT "))?.trim() ?? null;
+				p.reason = prDone.code === "cancelled" || prDone.code === "killed" ? prDone.code : firstLine(r?.reason) ?? prDone.text.split("\n").slice(1).find((l) => l.trim() && !l.startsWith("RESULT "))?.trim() ?? null;
 			}
-		} else p.ci = opts.live && opts.bgRunning !== false ? "running" : "lost";
+		} else p.ci = opts.live ? "running" : "lost"; // live: the done message can wait minutes in pi's follow-up queue
 	}
 	return { todos, subagents, planPath, pr };
 }

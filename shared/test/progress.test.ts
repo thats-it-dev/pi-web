@@ -194,7 +194,7 @@ const startJob = (callId: string, jobId: string, cmd = "node /x/thatsit-app.ts p
 	result(callId, "bg_bash", { id: jobId }, { content: text(`started job ${jobId}. You will get a bg-bash-done message when it exits; end your turn and wait.`) }),
 ];
 const done = (first: string, rest: string): AgentMessage => ({ role: "custom", customType: "bg-bash-done", content: `${first}\n${rest}`, display: true, timestamp: 3000 } as AgentMessage);
-const prOf = (msgs: AgentMessage[], opts: { live: boolean; bgRunning?: boolean } = { live: false }) => deriveProgress(createConversation([user(), ...msgs]), opts).pr;
+const prOf = (msgs: AgentMessage[], opts: { live: boolean } = { live: false }) => deriveProgress(createConversation([user(), ...msgs]), opts).pr;
 
 test("pr: none in the session", () => {
 	assert.equal(prOf([]), null);
@@ -207,7 +207,7 @@ test("pr: a pr result alone", () => {
 });
 
 test("pr: a running pr-wait", () => {
-	const p = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1")], { live: true, bgRunning: true });
+	const p = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1")], { live: true });
 	assert.equal(p?.ci, "running");
 });
 
@@ -242,8 +242,9 @@ test("pr: cancelled and signal-killed jobs fail", () => {
 	const a = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 was cancelled", "")]);
 	assert.equal(a?.ci, "failed");
 	assert.equal(a?.reason, "cancelled");
-	const b = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 exited null", "killed")]);
+	const b = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 was killed (SIGKILL) after 0m 3s: x", "partial output")]);
 	assert.equal(b?.ci, "failed");
+	assert.equal(b?.reason, "killed");
 });
 
 test("pr: the job id falls back to details.id", () => {
@@ -256,10 +257,9 @@ test("pr: the job id falls back to details.id", () => {
 	assert.equal(prOf(msgs)?.ci, "passed");
 });
 
-test("pr: no done message is lost unless live and jobs still run", () => {
+test("pr: no done message is running while live (it may sit in the follow-up queue), lost once not live", () => {
 	const msgs = [...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1")];
 	assert.equal(prOf(msgs, { live: false })?.ci, "lost");
-	assert.equal(prOf(msgs, { live: true, bgRunning: false })?.ci, "lost");
 	assert.equal(prOf(msgs, { live: true })?.ci, "running");
 });
 
@@ -273,7 +273,7 @@ test("pr: a second pr resets the previous preview", () => {
 	assert.equal(p?.title, "Again");
 	assert.equal(p?.ci, "none");
 	assert.equal(p?.preview, null);
-	assert.equal(prOf([...first, ...bash("b2", prCmd, prOut(8)), ...startJob("j2", "bg-2")], { live: true, bgRunning: true })?.ci, "running");
+	assert.equal(prOf([...first, ...bash("b2", prCmd, prOut(8)), ...startJob("j2", "bg-2")], { live: true })?.ci, "running");
 });
 
 test("pr: gateway-pr counts, ship and failed results do not", () => {

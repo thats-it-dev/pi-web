@@ -387,7 +387,7 @@ describe("ProgressStore", () => {
 		store.stop();
 	});
 
-	it("progress pr goes from running to lost when the bg-jobs status disappears without a done message", () => {
+	it("progress pr stays running while live without a done message, and is lost once the session is not live", () => {
 		const text = (t: string) => [{ type: "text" as const, text: t }];
 		const conv = createConversation([
 			{ role: "assistant", timestamp: 1, content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: 'node thatsit-app.ts pr /w --title "T"' } }] },
@@ -400,6 +400,8 @@ describe("ProgressStore", () => {
 		store.start();
 		expect(store.view.pr?.ci).toBe("running");
 		session.apply({ type: "meta", state: session.snapshot!.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null, approvalMode: "auto" });
+		expect(store.view.pr?.ci).toBe("running"); // bg-jobs cleared, the done message still queued
+		session.apply({ type: "handle_gone", reason: "closed" });
 		expect(store.view.pr?.ci).toBe("lost");
 		store.stop();
 	});

@@ -103,7 +103,7 @@ export class ProgressStore extends EventTarget {
 
 	private derived(): Progress {
 		if (!this.prog) {
-			const p = deriveProgress(this.session.conv, { live: this.session.status === "live", bgRunning: Boolean(this.session.snapshot?.statuses?.["bg-jobs"]) });
+			const p = deriveProgress(this.session.conv, { live: this.session.status === "live" });
 			this.prog = { ...p, planPath: p.planPath ? relPlanPath(p.planPath, this.cwd()) : null };
 		}
 		return this.prog;

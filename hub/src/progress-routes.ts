@@ -68,7 +68,7 @@ export async function routeProgress(req: IncomingMessage, res: ServerResponse, u
 	};
 	const children = async (id: string): Promise<SubagentChild[]> => {
 		const { conv, live } = await parentConv(id);
-		return Promise.all(deriveProgress(conv, { live, bgRunning: registry.get(id)?.hasBackgroundJobs() }).subagents.map(async (c) => vetted(await withStatus(c), index.dir)));
+		return Promise.all(deriveProgress(conv, { live }).subagents.map(async (c) => vetted(await withStatus(c), index.dir)));
 	};
 
 	if (m) {
