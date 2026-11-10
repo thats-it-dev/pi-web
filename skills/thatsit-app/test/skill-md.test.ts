@@ -57,3 +57,28 @@ test("SKILL.md points at the kit charts", () => {
 		assert.ok(sec.includes(s), `style rules do not name ${s}`);
 	}
 });
+
+test("SKILL.md sends CI waits through bg_bash and sets no timeouts", () => {
+	assert.ok(m);
+	assert.doesNotMatch(m[2], /2400|timeout \d/);
+	for (const re of [/bg_bash/, /pr-wait/, /gateway-pr-wait/, /bg-bash-done/]) assert.match(m[2], re);
+});
+
+test("after pr, the reply gives the PR link, says CI is still running and the preview follows", () => {
+	assert.ok(m);
+	const sec = m[2].match(/^## Change an existing app\n([\s\S]*?)(?=^## )/m)?.[1];
+	const step6 = sec?.split("\n").find((l) => l.startsWith("6. "));
+	assert.ok(step6, "step 6 missing");
+	assert.match(step6, /pr-wait/);
+	assert.match(step6, /`pr` link/);
+	assert.match(step6, /CI is still running/);
+	assert.match(step6, /preview/);
+});
+
+test("reruns of pr keep the same command; no dead npm-failed rule", () => {
+	assert.ok(m);
+	assert.doesNotMatch(m[2], /rerun `pr`/);
+	assert.doesNotMatch(m[2], /or `pr` then `pr-wait`/);
+	assert.ok((m[2].match(/rerun the same `pr` command/g) ?? []).length >= 3);
+	assert.doesNotMatch(m[2], /the CLI ran the tests for you/);
+});

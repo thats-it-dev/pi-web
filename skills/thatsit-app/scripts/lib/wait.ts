@@ -35,31 +35,24 @@ export async function requireClean(dir: string, run: Run): Promise<void> {
 	}
 }
 
-// Same checks CI runs, so a push is unlikely to go red for something found locally.
-export const APP_CHECKS = [["run", "typecheck"], ["test"], ["run", "lint"], ["run", "e2e"]];
-// Apps made from an older template have no lint script, so lint runs only where it is defined.
-function hasScript(dir: string, name: string): boolean {
-	try {
-		return name in (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts ?? {});
-	} catch {
-		return false;
-	}
-}
-
-export async function localChecks(dir: string, run: Run, checks = APP_CHECKS, log: Log = stderrLog): Promise<void> {
-	for (const args of checks) {
-		if (args[0] === "run" && args[1] === "lint" && !hasScript(dir, "lint")) continue;
-		log(`local check: npm ${args.join(" ")}`);
-		const r = await run("npm", args, { cwd: dir });
-		if (r.code !== 0) {
-			const out = `${r.stdout}\n${r.stderr}`.trim().split("\n").slice(-LOG_TAIL_LINES).join("\n");
-			throw new Error(`npm ${args.join(" ")} failed; fix it before pushing:\n${out}`);
-		}
-	}
-}
-
 export async function headSha(dir: string, run: Run): Promise<string> {
 	return (await must(run, "git", ["rev-parse", "HEAD"], { cwd: dir })).trim();
+}
+
+// CI runs on the pushed commit: waiting after a local commit that was never pushed would watch an old run.
+// Returns the head commit.
+export async function requirePushed(dir: string, run: Run, cmd: "pr" | "gateway-pr"): Promise<string> {
+	const notPushed = new Error(`HEAD is not pushed; run the same ${cmd} command first`);
+	const branch = await branchOf(dir, run);
+	const f = await run("git", ["fetch", "origin", branch], { cwd: dir });
+	if (f.code !== 0) {
+		if (/couldn't find remote ref/i.test(f.stderr)) throw notPushed;
+		await must(run, "git", ["fetch", "origin", branch], { cwd: dir }); // throws with git's error
+	}
+	const remote = (await must(run, "git", ["rev-parse", "FETCH_HEAD"], { cwd: dir })).trim();
+	const sha = await headSha(dir, run);
+	if (remote !== sha) throw notPushed;
+	return sha;
 }
 
 // A run can take a few seconds to show up after a push.

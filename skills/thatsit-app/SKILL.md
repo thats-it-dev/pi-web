@@ -8,9 +8,11 @@ description: Use when Michael asks to build, deploy or change a small web app or
 Every app is a public repo `thats-it-dev/<name>` made from the app template, checked out at `~/workspace/apps/<name>`,
 served at `https://<name>.thatsit.app`. All GitHub and Cloudflare work goes through one CLI; never run `gh repo create`, `cf` or `wrangler` yourself.
 
-The CLI prints progress, then `RESULT {...json...}`. Exit 0: done; 1: failed (reason on stderr and in `RESULT`); 2: usage error. `ship`, `pr` and `gateway-pr` push and wait for CI, and can take 20 minutes or more: if
-your bash tool takes a timeout, give it 2400 seconds. Never push or wait for CI any other way
-(no `git push`, `sleep` or `gh run`). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
+The CLI prints progress, then `RESULT {...json...}`. Exit 0: done; 1: failed (reason on stderr and in `RESULT`); 2: usage error. `pr` and `gateway-pr` push and return in seconds. `pr-wait`, `gateway-pr-wait` and `ship` wait for CI
+(20 minutes or more): run them only with the `bg_bash` tool (`command` = the whole line), then end your turn.
+When it exits, a `bg-bash-done` message arrives: first line `bg_bash job <id> exited <code>`, then `RESULT`.
+Never set a bash timeout on any of these. Never push or wait for CI any other way
+(no `git push`, `sleep`, polling or `gh run`). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
 start every app command with `cd ~/workspace/apps/<name> &&` and edit files by full path.
 
 ## New app
@@ -20,24 +22,21 @@ start every app command with `cd ~/workspace/apps/<name> &&` and edit files by f
    or `app-template`. Ask Michael in one line, then stop and wait for his answer:
    `I'll call it <name>, at https://<name>.thatsit.app. OK?`
 2. **Check.** Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts check <name>`.
-   If exit 1 says `invalid name`, `reserved name` or `... exists`, pick another name and go
-   back to step 1. Any other exit 1 (for example `gh ... failed` or `cf ... failed`): stop and
-   tell Michael, quoting the stderr line.
+   If exit 1 says `invalid name`, `reserved name` or `... exists`, pick another name, back to step 1.
+   Any other exit 1 (for example `gh ... failed` or `cf ... failed`): stop and tell Michael, quoting stderr.
 3. **Create.** Run:
    `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts new <name> --title "<Title>" --description "<one sentence>"`
-   Add `--color "#RRGGBB"` only if Michael asked for an icon color; that is the only place a
-   hex color is allowed. On success `RESULT` has `dir` and `url`. On exit 1, see "When something fails".
+   Add `--color "#RRGGBB"` only if Michael asked for an icon color (the only allowed hex color). On success `RESULT` has `dir` and `url`. On exit 1, see "When something fails".
 4. **Write the app** in `~/workspace/apps/<name>`. First read its `AGENTS.md` and follow it. Then:
    - Replace `docs/spec.md` with the spec from Michael's request, before any code (AGENTS.md says how).
    - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html` (only an app with several pages and a menu keeps it and the shell).
-   - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the skeleton below).
-     Extra modules go in new files under `src/`; unit tests for plain logic go in `test/`.
+   - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the skeleton below). Extra modules go in new files under `src/`; unit tests for plain logic go in `test/`.
    - Run `cd ~/workspace/apps/<name> && rm e2e/starter.spec.ts`. Keep `e2e/app.spec.ts`.
    - Add `~/workspace/apps/<name>/e2e/<name>.spec.ts` that tests the app's main behavior (example below).
 5. **Test.** Run `cd ~/workspace/apps/<name> && npm run verify`; fix and rerun until it passes.
 6. **Commit.** `cd ~/workspace/apps/<name> && git add -A && git commit -m "First version of <name>"`
-7. **Ship.** Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/<name>`
-8. **Reply.** Give Michael the `url` from `RESULT`. If `"pending":true`, it is a pages.dev link: say
+7. **Ship.** Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/<name>` with `bg_bash`. Tell Michael it is deploying, then end your turn.
+8. **Reply.** When `bg-bash-done` arrives: `exited 0` means give Michael the `url` from `RESULT`; anything else, see "When something fails". If `"pending":true`, it is a pages.dev link: say
    `https://<name>.thatsit.app` will work once the custom domain finishes validating.
 
 If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spark data**.
@@ -48,17 +47,17 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
 2. `cd ~/workspace/apps/<name> && git switch -c <short-branch>` (e.g. `dark-mode-toggle`). Create the branch (step 2) before editing any file.
 3. Edit by full path. Behaviour changes go in `docs/spec.md` too; add or update e2e tests. Run
    `cd ~/workspace/apps/<name> && npm run verify` until green (no `verify` script: `npm run typecheck && npm test && npm run e2e`).
-4. **Review.** Write `git diff main...HEAD` to `/tmp/<name>-review.diff` (and, for generated or progress-based output, samples at
-   the first, a middle and the last stage to a file). Call `subagent` with agent `reviewer`, `async: false`, and a task naming the
+4. **Review.** Write `git diff main...HEAD` to `/tmp/<name>-review.diff` (and samples of generated or progress-based output, first, middle, last stage). Call `subagent` with agent `reviewer`, `async: false`, and a task naming the
    request, `docs/spec.md` and those files. Fix what you confirm, rerun verify, commit (`git add -A && git commit -m "<what changed>"`).
-5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"`
-6. Mark every to-do completed or deleted, then reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
+5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"` in bash (no timeout).
+6. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/<name>` with `bg_bash`. Then end your turn with a reply: the `pr` link from `RESULT`, CI is still running, the preview link follows.
+7. When `bg-bash-done` arrives: `exited 0` means mark every to-do completed or deleted and reply with the `pr` and `preview` URLs from `RESULT` (and `gatewayPreview` if present); anything else means fix the cause, commit, rerun the same `pr` command (same `--title`, `--body`, `--gateway-pr`), then `pr-wait` with `bg_bash`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
 
 ## Bring an app up to the template
 
 On a branch (Change steps 1-2): `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts sync-template ~/workspace/apps/<name>`.
 It copies AGENTS.md, guardrail test, CI, scripts and knip; never copy or reflow those yourself. Commit. On
-`"guardrails":"fail"` fix what stderr lists, rerunning `npm run guardrails` (seconds), then Change steps 3-6.
+`"guardrails":"fail"` fix what stderr lists, rerunning `npm run guardrails` (seconds), then Change steps 3-7.
 
 ## Needs spark data
 
@@ -68,11 +67,11 @@ Only for an app that reads the spark (models, GPU, pi sessions) or keeps data th
 - Gateway checkout `~/workspace/apps/spark-gateway`, before the app's `ship` or `pr`:
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-checkout`
   `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-register <name>` (if not in `apps.json`; makes a branch)
-  Only if `/system/models|gpu|sessions` and the store are not enough: on a branch, write
-  `apps/<name>/routes.ts` + `routes.test.ts` following that repo's `apps/README.md`, commit. Then:
-  `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-pr ~/workspace/apps/spark-gateway --title "..." --body "..."`
+  Only if `/system/models|gpu|sessions` and the store are not enough: on a branch, write `apps/<name>/routes.ts` + `routes.test.ts` per that repo's `apps/README.md`, commit. Then:
+  `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-pr ~/workspace/apps/spark-gateway --title "..." --body "..."` (bash, no timeout; prints `number`)
+  `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts gateway-pr-wait ~/workspace/apps/spark-gateway` with `bg_bash`, end your turn; on `exited 0` continue with the app's `pr`.
   If you committed nothing in the gateway checkout (app already registered, no custom routes), skip gateway-pr and --gateway-pr.
-- For an app change, add `--gateway-pr <N>` (`number` from `gateway-pr`) to the app's `pr`. Reply
+- For an app change, add `--gateway-pr <N>` (`number` from `gateway-pr`) to the app's `pr`, then `pr-wait` as in Change. Reply
   with every `pr` and `preview` URL from the `RESULT`s and tell Michael to merge the gateway PR before
   the app PR. Never edit the gateway's `src/`, never merge, never touch `~/.local/share/spark-gateway`.
 
@@ -138,16 +137,15 @@ test("add one increases the count", async ({ page }) => {
   `already exists`, nothing was created: fix it and rerun without `--resume` (a name problem means a new
   name, back to step 1). Any other error came after the repo was made: from then on use `--resume` with
   the same name and never pick a new one. Fix the cause and rerun with `--resume`; twice failed: tell Michael.
-- `npm ... failed; fix it before pushing`: the CLI ran the tests for you. Fix, commit, rerun the same command.
 - `deploy run ... failed in` / `test run ... failed in` / `spark preview ... failed`: the error ends
-  with the last lines of the failing tests. Fix that, commit, and rerun the same `ship`, `pr` or
-  `gateway-pr`. A rerun of `pr` or `gateway-pr` updates the same PR and its preview comment.
+  with the last lines of the failing tests. Fix that, commit, and rerun the same `ship` command, or rerun the same `pr` command then `pr-wait`
+  (the same `gateway-pr` command then `gateway-pr-wait`), with `bg_bash` for the waits. A rerun of `pr` or `gateway-pr` updates the same PR and its preview comment.
 - `deploy step was skipped`: the org secrets or `app.config.json` need Michael. Stop and tell him; do not rerun.
 - `did not finish within`, `did not report a preview` or `No preview`: give Michael the error's URL; stop.
 - `there are uncommitted changes`: run `cd ~/workspace/apps/<name> && git add -A && git commit -m "..."`, then rerun.
 - `pr will not run on main` / `gateway-pr will not run on main` / `sync-template ... uncommitted`: see Change steps 2 and 4.
 - `ship only works on the main branch`: run `cd ~/workspace/apps/<name> && git switch main`, then rerun.
-- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr`.
+- `is not using gateway preview #N`: run the `cd ... && git commit --allow-empty ...` from the error, rerun the same `pr` command.
 - `predates gateway support`: run `sync-template` (see **Bring an app up to the template**), commit, rerun.
 - Stop and tell Michael (quote the reason from `RESULT`) when the same command fails with exit 1
   twice and you can't fix it, or when the error mentions login, permissions, secrets or a token.

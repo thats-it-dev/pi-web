@@ -341,3 +341,43 @@ test("a terminal that switches onto a session an idle headless pi holds takes it
 	assert.equal(registry.get("disk-1"), b);
 	assert.equal(registry.get("disk-2"), undefined);
 });
+
+test("reap leaves an idle session with background jobs alone", async () => {
+	const { registry, started, setClock } = setup();
+	const h = (await registry.create("/w")) as FakeHandle;
+	h.lastActive = 0;
+	h.backgroundJobs = true;
+	setClock(2000);
+	registry.reap();
+	assert.equal(h.closed, false);
+	h.backgroundJobs = false;
+	registry.reap();
+	assert.equal(h.closed, true);
+	assert.ok(started.length >= 1);
+});
+
+test("makeRoom never picks a session with background jobs", async () => {
+	const { registry, started } = setup({ maxHeadless: 2 });
+	await registry.ensure("disk-1");
+	await registry.ensure("disk-2");
+	started[0].busy = true;
+	started[1].backgroundJobs = true;
+	await assert.rejects(registry.create("/w"), (e: unknown) => e instanceof HttpError && e.status === 503);
+	assert.equal(started[1].closed, false);
+});
+
+test("a terminal attaching to an idle headless pi with background jobs waits; it is freed once the jobs end", async () => {
+	const { registry } = setup();
+	const rpc = (await registry.ensure("disk-1")) as FakeHandle;
+	rpc.backgroundJobs = true;
+	const b = bridge("disk-1");
+	assert.equal(registry.attachBridge(b), "waiting");
+	assert.equal(rpc.closed, false);
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
+	rpc.fire({ type: "state_changed" }); // jobs still running
+	assert.deepEqual(b.notices, [BUSY_NOTICE]);
+	rpc.backgroundJobs = false;
+	rpc.fire({ type: "state_changed" });
+	assert.deepEqual(b.notices, [BUSY_NOTICE, FREE_NOTICE]);
+	assert.equal(rpc.closed, false);
+});

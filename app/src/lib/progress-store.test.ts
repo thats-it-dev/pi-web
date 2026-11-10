@@ -386,4 +386,23 @@ describe("ProgressStore", () => {
 		expect(subagents).toHaveBeenCalledTimes(1); // answered unknown: no more
 		store.stop();
 	});
+
+	it("progress pr stays running while live without a done message, and is lost once the session is not live", () => {
+		const text = (t: string) => [{ type: "text" as const, text: t }];
+		const conv = createConversation([
+			{ role: "assistant", timestamp: 1, content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: 'node thatsit-app.ts pr /w --title "T"' } }] },
+			{ role: "toolResult", toolCallId: "b1", toolName: "bash", content: text('RESULT {"ok":true,"pr":"https://gh/pull/1","number":1}'), isError: false, timestamp: 2 },
+			{ role: "assistant", timestamp: 3, content: [{ type: "toolCall", id: "j1", name: "bg_bash", arguments: { command: "node thatsit-app.ts pr-wait /w" } }] },
+			{ role: "toolResult", toolCallId: "j1", toolName: "bg_bash", content: text("started job bg-1. You will get a bg-bash-done message when it exits; end your turn and wait."), details: { id: "bg-1" }, isError: false, timestamp: 4 },
+		]);
+		const { session, store } = setup();
+		session.apply({ type: "snapshot", snapshot: snap(conv, { statuses: { "bg-jobs": "1 job" } }) });
+		store.start();
+		expect(store.view.pr?.ci).toBe("running");
+		session.apply({ type: "meta", state: session.snapshot!.state, stats: null, statuses: {}, widgets: {}, thinkingLevels: ["off"], terminalPrompt: null, approvalMode: "auto" });
+		expect(store.view.pr?.ci).toBe("running"); // bg-jobs cleared, the done message still queued
+		session.apply({ type: "handle_gone", reason: "closed" });
+		expect(store.view.pr?.ci).toBe("lost");
+		store.stop();
+	});
 });

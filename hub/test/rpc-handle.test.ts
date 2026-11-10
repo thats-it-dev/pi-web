@@ -445,3 +445,31 @@ test("a resumed session spawn carries the TL;DR system-prompt rule", async () =>
 	assert.ok(i >= 0);
 	assert.equal(argv[i + 1], TLDR_PROMPT);
 });
+
+test("a bg-jobs status marks the handle as having background jobs; clearing it unmarks", async (t) => {
+	const { h } = await startHandle(t);
+	const ui = (statusText?: string) => (h as unknown as { onUiRequest(r: object): void }).onUiRequest({ method: "setStatus", statusKey: "bg-jobs", statusText });
+	let changes = 0;
+	h.onEvent((e) => {
+		if (e.type === "state_changed") changes++;
+	});
+	assert.equal(h.hasBackgroundJobs(), false);
+	ui("2 background jobs");
+	assert.equal(h.hasBackgroundJobs(), true);
+	ui(undefined);
+	assert.equal(h.hasBackgroundJobs(), false);
+	assert.equal(changes, 2); // each toggle fires state_changed so the registry can free waiters
+});
+
+test("fork, clone and new_session are refused while a background job runs (pi would kill it)", async (t) => {
+	const { h } = await startHandle(t);
+	const ui = (statusText?: string) => (h as unknown as { onUiRequest(r: object): void }).onUiRequest({ method: "setStatus", statusKey: "bg-jobs", statusText });
+	const before = h.sessionId;
+	ui("1 background job");
+	for (const cmd of [{ type: "new_session" }, { type: "fork", entryId: "x" }, { type: "clone" }] as const) {
+		assert.deepEqual(await h.command(cmd), { ok: false, error: "A background job is running (bg-jobs); wait for it or cancel it first." }, cmd.type);
+	}
+	assert.equal(h.sessionId, before);
+	ui(undefined);
+	assert.equal((await h.command({ type: "new_session" })).ok, true);
+});

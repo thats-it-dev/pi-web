@@ -40,7 +40,7 @@ export function watchTurns(registry: Pick<Registry, "onChange" | "get">, onOutco
 		if (m.state === "idle" && t.running) {
 			t.running = false;
 			const ended = runEnding(snap.conv.messages, t.lastBefore);
-			if (ended) onOutcome({ sessionId: m.sessionId, ...ended }, snap);
+			if (ended && !h.hasBackgroundJobs()) onOutcome({ sessionId: m.sessionId, ...ended }, snap);
 		}
 	});
 }

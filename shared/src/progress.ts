@@ -21,7 +21,17 @@ export interface SubagentChild {
 	asyncDir: string | null;
 	runId: string | null; // the parent's recorded details.runId/asyncId (from partialResult while running); unvalidated
 }
-export interface Progress { todos: Todo[] | null; subagents: SubagentChild[]; planPath: string | null }
+export type PrCi = "running" | "passed" | "failed" | "lost" | "none";
+export interface LatestPr {
+	url: string;
+	number: number | null;
+	title: string | null;
+	ci: PrCi;
+	preview: string | null;
+	gatewayPreview: string | null;
+	reason: string | null;
+}
+export interface Progress { todos: Todo[] | null; subagents: SubagentChild[]; planPath: string | null; pr: LatestPr | null }
 
 export const PLAN_PATH_RE = /(^|\/)docs\/superpowers\/plans\/[^/]+\.md$/;
 
@@ -50,7 +60,38 @@ function childState(r: Record<string, any> | undefined, isError: boolean): Child
 	return "done";
 }
 
+const PR_CMD_RE = /thatsit-app\.ts\s+(?:gateway-)?pr\s/;
+const PR_WAIT_RE = /(?:gateway-)?pr-wait\b/;
+
+// Text of a message's content: a string, or the text parts of a content array.
+function textOf(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content.map((c) => (c?.type === "text" && typeof c.text === "string" ? c.text : "")).join("\n");
+}
+
+// The last `RESULT {...}` line's JSON object, if there is one.
+function resultOf(text: string): Record<string, any> | null {
+	const lines = text.split("\n");
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const l = lines[i].trim();
+		if (!l.startsWith("RESULT ")) continue;
+		try {
+			return rec(JSON.parse(l.slice(7)));
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
+const firstLine = (v: unknown): string | null => str(typeof v === "string" ? v.split("\n").find((l) => l.trim()) : null)?.trim() ?? null;
+
 export function deriveProgress(conv: Conversation, opts: { live: boolean }): Progress {
+	let pr: LatestPr | null = null;
+	let prJob: string | null = null; // the pr-wait job of the latest PR
+	let prDone: { code: string; text: string } | null = null;
+	const commands = new Map<string, string>();
 	let todos: Todo[] | null = null;
 	let planPath: string | null = null;
 	let turn = 0;
@@ -60,6 +101,18 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 	for (const m of conv.messages) {
 		if (m.role === "toolResult" && typeof m.toolCallId === "string") {
 			results.set(m.toolCallId, m);
+			const cmd = commands.get(m.toolCallId);
+			if (cmd && m.toolName === "bash" && PR_CMD_RE.test(cmd)) {
+				const r = resultOf(textOf(m.content));
+				if (r?.ok === true && typeof r.pr === "string") {
+					pr = { url: r.pr, number: typeof r.number === "number" ? r.number : null, title: /--title\s+(?:"([^"]*)"|'([^']*)')/.exec(cmd)?.slice(1).find((x) => x != null) ?? null, ci: "none", preview: null, gatewayPreview: null, reason: null };
+					prJob = null;
+					prDone = null;
+				}
+			} else if (cmd && pr && m.toolName === "bg_bash" && PR_WAIT_RE.test(cmd)) {
+				prJob = /started job (bg-\d+)/.exec(textOf(m.content))?.[1] ?? str(rec(m.details)?.id);
+				prDone = null;
+			}
 			if (m.toolName === "todo") {
 				const tasks = rec(m.details)?.tasks;
 				if (Array.isArray(tasks)) {
@@ -68,11 +121,16 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 						.map((t) => ({ id: t.id, subject: t.subject, status: t.status ?? "pending", ...(t.activeForm ? { activeForm: t.activeForm } : {}) }));
 				}
 			}
+		} else if (m.role === "custom" && m.customType === "bg-bash-done") {
+			const text = textOf(m.content);
+			const head = /^bg_bash job (bg-\d+) (?:exited (\S+)|was (cancelled|killed))/.exec(text);
+			if (pr && prJob && head && head[1] === prJob) prDone = { code: head[2] ?? head[3], text };
 		} else if (m.role === "user") turn++;
 		else if (m.role === "assistant" && Array.isArray(m.content)) {
 			for (const c of m.content) {
 				if (c.type !== "toolCall") continue;
 				const args = rec(c.arguments);
+				if ((c.name === "bash" || c.name === "bg_bash") && typeof args?.command === "string") commands.set(c.id, args.command);
 				if (c.name === "subagent") pending.push({ id: c.id, args, turn, at: m.timestamp ?? null });
 				else if ((c.name === "read" || c.name === "edit" || c.name === "write") && PLAN_PATH_RE.test(str(args?.path) ?? "")) planPath = args!.path;
 			}
@@ -120,7 +178,22 @@ export function deriveProgress(conv: Conversation, opts: { live: boolean }): Pro
 			});
 		}
 	}
-	return { todos, subagents, planPath };
+
+	if (pr && prJob) {
+		const p: LatestPr = pr;
+		if (prDone) {
+			const r = resultOf(prDone.text);
+			if (prDone.code === "0") {
+				p.ci = "passed";
+				p.preview = str(r?.preview);
+				p.gatewayPreview = str(r?.gatewayPreview);
+			} else {
+				p.ci = "failed";
+				p.reason = prDone.code === "cancelled" || prDone.code === "killed" ? prDone.code : firstLine(r?.reason) ?? prDone.text.split("\n").slice(1).find((l) => l.trim() && !l.startsWith("RESULT "))?.trim() ?? null;
+			}
+		} else p.ci = opts.live ? "running" : "lost"; // live: the done message can wait minutes in pi's follow-up queue
+	}
+	return { todos, subagents, planPath, pr };
 }
 
 // The latest turn's children, plus background ones still running, are "recent"; everything else is earlier.

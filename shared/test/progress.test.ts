@@ -180,3 +180,107 @@ test("a pending call without an async arg is a background run, never running", (
 	assert.equal(k.background, true);
 	assert.equal(k.state, "unknown");
 });
+
+// --- latest PR ---
+const text = (t: string) => [{ type: "text", text: t }];
+const bash = (id: string, command: string, out: string, name = "bash"): AgentMessage[] => [
+	call(id, name, { command }),
+	result(id, name, {}, { content: text(out) }),
+];
+const prCmd = `node /x/thatsit-app.ts pr /w --title "Add thing" --body "b"`;
+const prOut = (n: number) => `log\nRESULT ${JSON.stringify({ ok: true, pr: `https://github.com/o/r/pull/${n}`, number: n })}`;
+const startJob = (callId: string, jobId: string, cmd = "node /x/thatsit-app.ts pr-wait /w"): AgentMessage[] => [
+	call(callId, "bg_bash", { command: cmd }),
+	result(callId, "bg_bash", { id: jobId }, { content: text(`started job ${jobId}. You will get a bg-bash-done message when it exits; end your turn and wait.`) }),
+];
+const done = (first: string, rest: string): AgentMessage => ({ role: "custom", customType: "bg-bash-done", content: `${first}\n${rest}`, display: true, timestamp: 3000 } as AgentMessage);
+const prOf = (msgs: AgentMessage[], opts: { live: boolean } = { live: false }) => deriveProgress(createConversation([user(), ...msgs]), opts).pr;
+
+test("pr: none in the session", () => {
+	assert.equal(prOf([]), null);
+});
+
+test("pr: a pr result alone", () => {
+	assert.deepEqual(prOf(bash("b1", prCmd, prOut(7))), {
+		url: "https://github.com/o/r/pull/7", number: 7, title: "Add thing", ci: "none", preview: null, gatewayPreview: null, reason: null,
+	});
+});
+
+test("pr: a running pr-wait", () => {
+	const p = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1")], { live: true });
+	assert.equal(p?.ci, "running");
+});
+
+test("pr: done exit 0 gives the previews", () => {
+	const p = prOf([
+		...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"),
+		done("bg_bash job bg-1 exited 0", `RESULT ${JSON.stringify({ ok: true, pr: "u", preview: "https://p.example", gatewayPreview: "https://g.example" })}\ntail`),
+	]);
+	assert.equal(p?.ci, "passed");
+	assert.equal(p?.preview, "https://p.example");
+	assert.equal(p?.gatewayPreview, "https://g.example");
+	const q = prOf([
+		...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"),
+		done("bg_bash job bg-1 exited 0", `RESULT ${JSON.stringify({ ok: true, preview: "https://p.example" })}`),
+	]);
+	assert.equal(q?.gatewayPreview, null);
+});
+
+test("pr: done exit 1 gives the reason's first line, or the first output line", () => {
+	const p = prOf([
+		...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"),
+		done("bg_bash job bg-1 exited 1", `RESULT ${JSON.stringify({ ok: false, reason: "checks failed\nmore" })}\ntail`),
+	]);
+	assert.equal(p?.ci, "failed");
+	assert.equal(p?.reason, "checks failed");
+	const q = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 exited 2", "boom happened\nsecond")]);
+	assert.equal(q?.ci, "failed");
+	assert.equal(q?.reason, "boom happened");
+});
+
+test("pr: cancelled and signal-killed jobs fail", () => {
+	const a = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 was cancelled", "")]);
+	assert.equal(a?.ci, "failed");
+	assert.equal(a?.reason, "cancelled");
+	const b = prOf([...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"), done("bg_bash job bg-1 was killed (SIGKILL) after 0m 3s: x", "partial output")]);
+	assert.equal(b?.ci, "failed");
+	assert.equal(b?.reason, "killed");
+});
+
+test("pr: the job id falls back to details.id", () => {
+	const msgs = [
+		...bash("b1", prCmd, prOut(7)),
+		call("j1", "bg_bash", { command: "thatsit-app.ts pr-wait /w" }),
+		result("j1", "bg_bash", { id: "bg-4" }, { content: text("started") }),
+		done("bg_bash job bg-4 exited 0", `RESULT ${JSON.stringify({ ok: true, preview: "https://p.example" })}`),
+	];
+	assert.equal(prOf(msgs)?.ci, "passed");
+});
+
+test("pr: no done message is running while live (it may sit in the follow-up queue), lost once not live", () => {
+	const msgs = [...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1")];
+	assert.equal(prOf(msgs, { live: false })?.ci, "lost");
+	assert.equal(prOf(msgs, { live: true })?.ci, "running");
+});
+
+test("pr: a second pr resets the previous preview", () => {
+	const first = [
+		...bash("b1", prCmd, prOut(7)), ...startJob("j1", "bg-1"),
+		done("bg_bash job bg-1 exited 0", `RESULT ${JSON.stringify({ ok: true, preview: "https://p.example" })}`),
+	];
+	const p = prOf([...first, ...bash("b2", prCmd.replace("Add thing", "Again"), prOut(8))]);
+	assert.equal(p?.number, 8);
+	assert.equal(p?.title, "Again");
+	assert.equal(p?.ci, "none");
+	assert.equal(p?.preview, null);
+	assert.equal(prOf([...first, ...bash("b2", prCmd, prOut(8)), ...startJob("j2", "bg-2")], { live: true })?.ci, "running");
+});
+
+test("pr: gateway-pr counts, ship and failed results do not", () => {
+	const g = prOf(bash("b1", `node thatsit-app.ts gateway-pr /w --title 'G t'`, prOut(3)));
+	assert.equal(g?.number, 3);
+	assert.equal(g?.title, "G t");
+	assert.equal(prOf(bash("b1", `node thatsit-app.ts ship /w`, prOut(3))), null);
+	assert.equal(prOf(bash("b1", prCmd, `RESULT {"ok":false,"reason":"x"}`)), null);
+	assert.equal(prOf(bash("b1", `node thatsit-app.ts pr-wait /w`, prOut(3))), null);
+});

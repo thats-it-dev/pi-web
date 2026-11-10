@@ -62,6 +62,8 @@ export interface RpcHandleOptions {
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
 
+export const BG_JOBS_BLOCK = "A background job is running (bg-jobs); wait for it or cancel it first.";
+
 export class RpcHandle implements SessionHandle {
 	readonly kind = "rpc" as const;
 	readonly capabilities: Capabilities = { dialogs: "here", fork: true, clone: true, newSession: true, bash: true, export: true };
@@ -121,6 +123,9 @@ export class RpcHandle implements SessionHandle {
 	}
 	isBusy(): boolean {
 		return this.conv.streaming || this.conv.compacting || this.dialogs.size > 0;
+	}
+	hasBackgroundJobs(): boolean {
+		return Boolean(this.statuses["bg-jobs"]);
 	}
 	liveState(): LiveState {
 		if (this.dialogs.size > 0) return "needs_you";
@@ -219,6 +224,12 @@ export class RpcHandle implements SessionHandle {
 			}
 			case "prompt":
 				return this.prompt(cmd);
+			case "new_session":
+			case "fork":
+			case "clone":
+				// pi switches sessions in-process: session_shutdown makes bg kill the jobs without a done message.
+				if (this.hasBackgroundJobs()) return { ok: false, error: BG_JOBS_BLOCK };
+				break;
 			case "export": {
 				mkdirSync(this.opts.exportDir, { recursive: true });
 				const name = `${this.sessionId}-${Date.now()}.html`;
@@ -434,9 +445,14 @@ export class RpcHandle implements SessionHandle {
 	private onUiRequest(req: PiEvent): void {
 		switch (req.method) {
 			case "setStatus":
-				if (req.statusText) this.statuses[req.statusKey] = stripAnsi(String(req.statusText));
-				else delete this.statuses[req.statusKey];
-				this.broadcast(this.meta());
+				{
+					const hadJobs = this.hasBackgroundJobs();
+					if (req.statusText) this.statuses[req.statusKey] = stripAnsi(String(req.statusText));
+					else delete this.statuses[req.statusKey];
+					this.broadcast(this.meta());
+					// The registry frees waiting terminals and the reaper looks again when the last job ends.
+					if (this.hasBackgroundJobs() !== hadJobs) this.emit({ type: "state_changed" });
+				}
 				return;
 			case "setWidget":
 				if (Array.isArray(req.widgetLines) && req.widgetLines.length > 0)

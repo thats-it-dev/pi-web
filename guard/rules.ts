@@ -6,11 +6,12 @@ export type Block = { block: true; reason: string };
 const SKILL_CLI = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts";
 
 export const REASONS = {
-	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\` (or \`ship\` for the first version); it pushes, waits for CI and prints the failing log lines.`,
-	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). \`${SKILL_CLI} pr\` and \`ship\` already wait for CI and print the failing log lines; rerun the same command after a fix.`,
+	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\`; it pushes and opens the PR. Then wait for CI: run \`${SKILL_CLI} pr-wait <dir>\` with the bg_bash tool. For the first version, run \`ship\` with the bg_bash tool instead.`,
+	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). Wait with \`pr-wait\`, \`gateway-pr-wait\` or \`ship\` through the bg_bash tool; it prints the failing log lines. After a fix commit, rerun the same \`pr\` command, then \`pr-wait\` with bg_bash.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
-	prTimeout: `Blocked: \`pr\` and \`ship\` push, then wait for CI (usually 3-6 min, sometimes longer) and print progress while they wait. A bash timeout is only a cap; the command returns as soon as CI finishes. Rerun the same command with timeout 2400. If Michael asks why it takes a while, tell him it is waiting on CI.`,
+	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
+	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
 	review: `Blocked: run the reviewer before opening the PR. Write the diff to a file (\`cd <dir> && git diff main...HEAD > /tmp/<name>-review.diff\`) and, if the app generates content or changes with the user's progress, sample output at the first, a middle and the last stage to another file. Then call the \`subagent\` tool with agent "reviewer", \`async: false\` (so it waits for the review) and a task that names Michael's request, \`docs/spec.md\` and those files (call \`subagents_enable\` first if \`subagent\` is not available). Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
@@ -96,7 +97,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	return undefined;
 }
 
-const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b/;
+const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 
 /** Files a PR can change without a review: docs, Markdown and CI config. */
 export function reviewFree(path: string): boolean {
@@ -140,7 +141,7 @@ export function reviewedSinceUser(branch: Iterable<unknown>): boolean {
 // The shell commands and Python code a tool call would run, for bash and context-mode's ctx_* tools.
 export function codeOf(toolName: string, input: Record<string, unknown>): { shell: string[]; python: string[] } {
 	const str = (v: unknown) => (typeof v === "string" ? [v] : []);
-	if (toolName === "bash") return { shell: str(input.command), python: [] };
+	if (toolName === "bash" || toolName === "bg_bash") return { shell: str(input.command), python: [] };
 	if (toolName === "ctx_execute") {
 		if (input.language === "shell") return { shell: str(input.code), python: [] };
 		if (input.language === "python") return { shell: [], python: str(input.code) };
@@ -151,13 +152,17 @@ export function codeOf(toolName: string, input: Record<string, unknown>): { shel
 	return { shell: [], python: [] };
 }
 
-const SKILL_PUSH = /thatsit-app\.ts\s+(?:pr|ship|gateway-pr)\b/;
-export const PR_TIMEOUT_S = 2400;
+const SKILL_PUSH = /thatsit-app\.ts\s+(?:pr|ship|gateway-pr)\b(?!-wait)/;
+const PR_OPEN = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
+const CI_WAIT = /thatsit-app\.ts\s+(?:pr-wait|gateway-pr-wait|ship)\b/;
 
 export function checkToolCall(toolName: string, input: Record<string, unknown>, env: Env): Block | undefined {
-	// pi's bash timeout is in seconds.
-	if (toolName === "bash" && typeof input.timeout === "number" && input.timeout < PR_TIMEOUT_S && SKILL_PUSH.test(String(input.command ?? ""))) {
-		return { block: true, reason: REASONS.prTimeout };
+	if (toolName === "bash") {
+		const command = String(input.command ?? "");
+		// pr and gateway-pr return in seconds, so a timeout means the model thinks it waits.
+		if (typeof input.timeout === "number" && PR_OPEN.test(command)) return { block: true, reason: REASONS.prTimeout };
+		// Waiting on CI belongs to bg_bash, whether or not the command is backgrounded.
+		if (CI_WAIT.test(command)) return { block: true, reason: REASONS.waitInBackground };
 	}
 	const { shell, python } = codeOf(toolName, input);
 	for (const command of shell) {
@@ -184,7 +189,7 @@ function checkOverwrite(raw: string, env: Env): Block | undefined {
 
 // --- stalled turns ---
 
-type Msg = { role: string; stopReason?: string; content?: unknown; customType?: string };
+type Msg = { role: string; stopReason?: string; content?: unknown; customType?: string; toolName?: string; details?: unknown };
 
 export const NUDGE_TYPE = "pi-guard-nudge";
 export const MAX_NUDGES = 2;
@@ -196,11 +201,29 @@ export const NUDGE =
 const parts = (m: Msg): { type: string; text?: string; name?: string }[] => (Array.isArray(m.content) ? m.content : []);
 const textOf = (m: Msg) => (typeof m.content === "string" ? m.content : parts(m).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n"));
 
+// The run started a bg_bash job whose bg-bash-done message has not arrived: ending the turn is the plan, and
+// the done message starts the next one.
+export function waitingOnBgJob(run: Msg[]): boolean {
+	const open = new Set<string>();
+	for (const m of run) {
+		if (m.role === "toolResult" && m.toolName === "bg_bash") {
+			const d = m.details as { id?: unknown } | undefined;
+			const id = /started job (bg-\d+)/.exec(textOf(m))?.[1] ?? (typeof d?.id === "string" ? d.id : undefined);
+			if (id) open.add(id);
+		} else if (m.role === "custom" && m.customType === "bg-bash-done") {
+			const id = /^bg_bash job (bg-\d+) /.exec(textOf(m))?.[1];
+			if (id) open.delete(id);
+		}
+	}
+	return open.size > 0;
+}
+
 // A coding run (it edited or wrote a file) that ended right after a tool result with a short statement.
 export function shouldNudge(messages: Msg[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (run.at(-2)?.role !== "toolResult") return false;
@@ -238,6 +261,7 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (textOf(last).trim().endsWith("?")) return false;
@@ -273,7 +297,7 @@ export function appsNeedingPr(messages: Msg[], home: string, needsPr: (dir: stri
 				const dir = appDir(c.arguments.path, "", home);
 				if (dir) lastEdit.set(dir, i);
 			}
-			if (c.name === "bash" && SKILL_PUSH.test(String(c.arguments?.command ?? ""))) lastPush = i;
+			if ((c.name === "bash" || c.name === "bg_bash") && SKILL_PUSH.test(String(c.arguments?.command ?? ""))) lastPush = i;
 		}
 	});
 	return [...lastEdit].filter(([, i]) => i > lastPush).map(([dir]) => dir).filter(needsPr);
@@ -284,6 +308,7 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
+	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (textOf(last).trim().endsWith("?")) return false;
@@ -293,7 +318,8 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 export function prNudge(apps: string[]): string {
 	const name = (d: string) => d.split("/").pop();
 	const cmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/${name(d)} --title "<short title>" --body "<what and why>"`).join("\n");
-	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run (bash timeout 2400):\n${cmds}\nIf Michael said not to open a PR, say so in one line instead.`;
+	const waitCmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/${name(d)}`).join("\n");
+	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run pr:\n${cmds}\nThen wait for CI with the bg_bash tool (never bash), tell Michael the PR link and end your turn:\n${waitCmds}\nIf Michael said not to open a PR, say so in one line instead.`;
 }
 
 // Compaction. Some extensions inject their rules as a message at session start and again after every

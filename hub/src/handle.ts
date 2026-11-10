@@ -20,6 +20,7 @@ export interface SessionHandle {
 	lastActive: number;
 	subscriberCount(): number;
 	isBusy(): boolean; // running, compacting, or waiting on a dialog
+	hasBackgroundJobs(): boolean; // a bg_bash job is still running; keeps the session alive and holds the finished push
 	liveState(): LiveState;
 	snapshot(): Snapshot;
 	command(cmd: AppCommand): Promise<CommandResult>;

@@ -132,7 +132,7 @@ export class Registry {
 	private claim(h: SessionHandle): "attached" | "waiting" {
 		const holder = this.handles.get(h.sessionId);
 		if (holder && holder !== h) {
-			if (holder.kind !== "rpc" || holder.isBusy()) {
+			if (holder.kind !== "rpc" || holder.isBusy() || holder.hasBackgroundJobs()) {
 				this.wait(h);
 				h.notice?.(holder.kind === "rpc" ? BUSY_NOTICE : ELSEWHERE_NOTICE);
 				return "waiting";
@@ -167,7 +167,7 @@ export class Registry {
 	}
 
 	private isIdle(h: SessionHandle): boolean {
-		return h.subscriberCount() === 0 && !h.isBusy();
+		return h.subscriberCount() === 0 && !h.isBusy() && !h.hasBackgroundJobs();
 	}
 
 	private async launch(o: Parameters<HandleFactory["startRpc"]>[0]): Promise<SessionHandle> {
@@ -204,7 +204,7 @@ export class Registry {
 			switch (e.type) {
 				case "state_changed":
 					this.emitState(h.sessionId);
-					if (h.kind === "rpc" && !h.isBusy()) this.freeWaiters(h.sessionId);
+					if (h.kind === "rpc" && !h.isBusy() && !h.hasBackgroundJobs()) this.freeWaiters(h.sessionId);
 					break;
 				case "renamed":
 					this.emit({ type: "session_list_changed" });

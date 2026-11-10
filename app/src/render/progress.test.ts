@@ -5,7 +5,7 @@ import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { ProgressView } from "../lib/progress-store.ts";
 import { badgeLabel, renderProgress } from "./progress.ts";
 
-const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, activity: "idle", runs: null, empty: true });
+const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, pr: null, activity: "idle", runs: null, empty: true });
 const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({
 	key: "t:0", toolCallId: "t", index: 0, agent: "worker", task: "do it", state: "done", background: false, turn: 0, startedAt: 1000, endedAt: 13_000, sessionFile: null, asyncDir: null, runId: null, ...over,
 });
@@ -157,5 +157,40 @@ describe("run section", () => {
 
 	it("no runs, no section", () => {
 		expect(mount({ ...empty(), empty: false, todos: [todo(1, "pending")] }).f.text).not.toContain("tool calls");
+	});
+});
+
+describe("pr section", () => {
+	const pr = (over: Partial<NonNullable<ProgressView["pr"]>> = {}): ProgressView => ({
+		...empty(), empty: false,
+		pr: { url: "https://gh/o/r/pull/7", number: 7, title: "Add thing", ci: "none", preview: null, gatewayPreview: null, reason: null, ...over },
+	});
+	it("renders nothing without a PR", () => {
+		expect(mount(empty()).f.html).not.toContain('<h2 class="label">pr');
+	});
+	it("links the PR and shows nothing more when ci is none", () => {
+		const { f } = mount(pr());
+		expect(f.html).toContain('<h2 class="label">pr</h2>');
+		expect(f.html).toMatch(/href=https:\/\/gh\/o\/r\/pull\/7 target="_blank" rel="noopener"/);
+		expect(f.text).toContain("#7 · Add thing");
+		expect(f.text).not.toContain("CI");
+		expect(badgeLabel(pr())).toBe("•");
+	});
+	it("passed shows the preview links", () => {
+		const { f } = mount(pr({ ci: "passed", preview: "https://p.example", gatewayPreview: "https://g.example" }));
+		expect(f.html).toContain("href=https://p.example");
+		expect(f.html).toContain("href=https://g.example");
+		expect(f.text).toContain("preview");
+		expect(f.text).toContain("gateway preview");
+		expect(mount(pr({ ci: "passed", preview: "https://p.example" })).f.text).not.toContain("gateway");
+	});
+	it("running, failed and lost", () => {
+		expect(mount(pr({ ci: "running" })).f.text).toContain("CI running…");
+		expect(mount(pr({ ci: "failed", reason: "checks failed" })).f.text).toContain("CI failed: checks failed");
+		expect(mount(pr({ ci: "lost" })).f.text).toContain("CI result lost");
+	});
+	it("sits before subagents", () => {
+		const { f } = mount({ ...pr(), subagents: { recent: [child()], earlier: [] } });
+		expect(f.html.indexOf('class="label">pr<')).toBeLessThan(f.html.indexOf(">subagents<"));
 	});
 });

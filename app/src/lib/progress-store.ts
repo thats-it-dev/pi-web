@@ -3,7 +3,7 @@
 
 import type { Goal } from "../../../shared/src/goal.ts";
 import { type PlanDoc, parsePlan } from "../../../shared/src/plan.ts";
-import { type Progress, type SubagentChild, type Todo, deriveProgress, groupSubagents } from "../../../shared/src/progress.ts";
+import { type LatestPr, type Progress, type SubagentChild, type Todo, deriveProgress, groupSubagents } from "../../../shared/src/progress.ts";
 import type { RunReport } from "../../../shared/src/run-report.ts";
 import { HubError, type HubApi } from "./api.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -14,6 +14,7 @@ export interface ProgressView {
 	plan: (PlanDoc & { path: string }) | null;
 	todos: Todo[] | null;
 	subagents: { recent: SubagentChild[]; earlier: SubagentChild[] };
+	pr: LatestPr | null;
 	activity: Activity;
 	/** The current run (since Michael's last message) and the ones before it; null until fetched. */
 	runs: { current: RunReport; earlier: RunReport[]; fetchedAt: number } | null;
@@ -123,14 +124,14 @@ export class ProgressStore extends EventTarget {
 	}
 
 	private compute(): ProgressView {
-		const { todos, planPath } = this.derived();
+		const { todos, planPath, pr } = this.derived();
 		const { conv, snapshot } = this.session;
 		const activity: Activity = snapshot && (snapshot.dialogs.length > 0 || snapshot.terminalPrompt || this.session.dialogs.length > 0) ? "waiting" : conv.streaming ? "working" : "idle";
 		const subagents = groupSubagents(this.children());
 		const plan = this.plan && this.plan.path === planPath ? this.plan : null;
 		const runs = this.runs && this.runs.current.toolCalls > 0 ? this.runs : null;
-		const empty = !this.goal && !plan && !todos?.length && !subagents.recent.length && !subagents.earlier.length && !runs;
-		return { goal: this.goal, plan, todos, subagents, activity, runs, empty };
+		const empty = !this.goal && !plan && !todos?.length && !subagents.recent.length && !subagents.earlier.length && !runs && !pr;
+		return { goal: this.goal, plan, todos, subagents, pr, activity, runs, empty };
 	}
 
 	private update(): void {

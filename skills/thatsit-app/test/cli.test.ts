@@ -42,3 +42,11 @@ test("parseArgs gateway subcommands and pr --gateway-pr", () => {
 	assert.deepEqual(parseArgs(["pr", "/x/foo", "--gateway-pr", "#7", "--body", "B", "--title", "T"]), { cmd: "pr", name: "/x/foo", title: "T", body: "B", gatewayPr: 7 });
 	for (const n of ["0", "500", "x", "1.5", ""]) assert.equal(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--gateway-pr", n]), null, n);
 });
+
+test("parseArgs pr-wait and gateway-pr-wait", () => {
+	assert.deepEqual(parseArgs(["pr-wait", "/x/foo"]), { cmd: "pr-wait", name: "/x/foo" });
+	assert.deepEqual(parseArgs(["gateway-pr-wait", "/x/gw"]), { cmd: "gateway-pr-wait", name: "/x/gw" });
+	assert.equal(parseArgs(["pr-wait"]), null);
+	assert.equal(parseArgs(["gateway-pr-wait"]), null);
+	assert.equal(parseArgs(["pr-wait", "/x/foo", "--title", "T"]), null);
+});

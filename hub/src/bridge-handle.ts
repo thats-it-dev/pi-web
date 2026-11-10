@@ -75,6 +75,9 @@ export class BridgeHandle implements SessionHandle {
 	isBusy(): boolean {
 		return this.conv.streaming || this.conv.compacting || this.prompt !== null;
 	}
+	hasBackgroundJobs(): boolean {
+		return false;
+	}
 	liveState(): LiveState {
 		if (this.prompt) return "needs_you";
 		return this.conv.streaming || this.conv.compacting ? "running" : "idle";
