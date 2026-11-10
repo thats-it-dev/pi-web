@@ -134,8 +134,9 @@ export class TkShell extends LitElement {
 		this.countSheets();
 		this.sheetOnKey = this.sheets > 0;
 	};
+	// An Escape the page already handled (its own popup, an IME composition) is not for the drawer.
 	private onKey = (e: KeyboardEvent) => {
-		if (e.key !== "Escape" || !this.drawer || this.sheetOnKey) return;
+		if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || !this.drawer || this.sheetOnKey) return;
 		this.navOpen = false;
 		this.asideOpen = false;
 	};

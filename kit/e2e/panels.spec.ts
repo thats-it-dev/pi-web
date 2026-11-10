@@ -323,3 +323,18 @@ test.describe("header buttons", () => {
 		expect(await width("tk-sheet .x svg path")).toBeGreaterThan(0);
 	});
 });
+
+test("phone: an Escape the page already handled leaves the drawer open", async ({ page }, info) => {
+	test.skip(info.project.name !== "phone");
+	await ready(page);
+	await page.locator("[slot=aside]").evaluate((el) =>
+		el.addEventListener("keydown", (e) => {
+			if ((e as KeyboardEvent).key === "Escape") e.preventDefault();
+		}),
+	);
+	await call(page, "show", "aside");
+	await expect.poll(() => focusInside(page, "[slot=aside]")).toBe(true);
+	await page.keyboard.press("Escape");
+	await expect(page.locator(aside)).toBeInViewport({ ratio: 1 });
+	expect(await page.locator(shell).evaluate((s: any) => s.asideOpen)).toBe(true);
+});
