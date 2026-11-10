@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, checkToolCall, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
+import { appDir, appsNeedingPr, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -180,4 +180,48 @@ test("the to-do nudge names each open item and what to do", () => {
 test("a short reply after tidying the to-do list is not treated as a stall", () => {
 	const todoNudgeMsg2 = { role: "custom", customType: TODO_NUDGE_TYPE, content: "..." };
 	assert.equal(shouldNudge([user, edit, result, long, todoNudgeMsg2, todoCall, result, say("Done, list updated.")]), false);
+});
+
+// --- pr and ship timeouts ---
+
+test("pr and ship with a bash timeout under 2400 s are blocked; 2400 or none is fine", () => {
+	const pr = `${app}node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr . --title "x" --body "y"`;
+	for (const timeout of [60, 120, 600]) assert.equal(checkToolCall("bash", { command: pr, timeout }, env())?.reason, REASONS.prTimeout, String(timeout));
+	assert.equal(checkToolCall("bash", { command: pr, timeout: 2400 }, env()), undefined);
+	assert.equal(checkToolCall("bash", { command: pr }, env()), undefined);
+	const ship = "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts ship ~/workspace/apps/keeb";
+	assert.equal(checkToolCall("bash", { command: ship, timeout: 300 }, env())?.reason, REASONS.prTimeout);
+	assert.equal(checkToolCall("bash", { command: `${app}npm test`, timeout: 60 }, env()), undefined);
+	assert.equal(checkToolCall("bash", { command: "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts check foo", timeout: 60 }, env()), undefined);
+});
+
+// --- app changed, no PR ---
+
+const editApp = (path: string) => ({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "edit", arguments: { path } }] });
+const runPr = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr . --title x --body y" } }] };
+const prNudgeMsg = { role: "custom", customType: PR_NUDGE_TYPE, content: "..." };
+
+test("appsNeedingPr lists apps edited in this run with no pr or ship after the last edit", () => {
+	const needs = (d: string) => d.endsWith("/keeb");
+	const keeb = editApp("/home/m/workspace/apps/keeb/src/app-main.ts");
+	const tips = editApp("/home/m/workspace/apps/tips/src/x.ts");
+	assert.deepEqual(appsNeedingPr([user, keeb, result, tips, result, long], home, needs), ["/home/m/workspace/apps/keeb"]);
+	assert.deepEqual(appsNeedingPr([user, keeb, result, runPr, result, long], home, needs), []);
+	assert.deepEqual(appsNeedingPr([user, runPr, result, keeb, result, long], home, needs), ["/home/m/workspace/apps/keeb"]);
+	assert.deepEqual(appsNeedingPr([user, editApp("/home/m/workspace/pi-web/x.ts"), result, long], home, () => true), []);
+	// Only this prompt's run counts.
+	assert.deepEqual(appsNeedingPr([user, keeb, result, long, user, say("thanks")], home, needs), []);
+});
+
+test("a finished run that left an app without a PR is nudged, up to the cap; questions are not", () => {
+	const apps = ["/home/m/workspace/apps/keeb"];
+	assert.equal(shouldNudgePr([user, long], apps), true);
+	assert.equal(shouldNudgePr([user, say("Open the PR now, or keep going?")], apps), false);
+	assert.equal(shouldNudgePr([user, long], []), false);
+	assert.equal(shouldNudgePr([user, long, prNudgeMsg, long, prNudgeMsg, long], apps), false);
+	const text = prNudge(apps);
+	assert.match(text, /keeb/);
+	assert.match(text, /thatsit-app\.ts pr ~\/workspace\/apps\/keeb/);
+	assert.match(text, /2400/);
+	assert.match(text, /git switch -c/);
 });

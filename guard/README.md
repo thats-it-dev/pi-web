@@ -32,6 +32,19 @@ At most 2 per user prompt. The list is read from the session branch, as rpiv-tod
 compaction. Replayed over all 88 sessions on the spark (2026-11-10), it fires 14 times in 3 sessions, each a
 list pi left stale after finishing the work, and nowhere else.
 
+## App changed, no PR
+
+When a run edited or wrote files in an app (`~/workspace/apps/<name>`) and ended with a reply that isn't a
+question, with no `pr`, `ship` or `gateway-pr` after the last edit, and git says the app still has work to
+publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
+message: branch if needed, commit, run `pr` itself with a 2400 s timeout, and never hand Michael commands to run.
+At most 2 per user prompt.
+
+## pr and ship timeouts
+
+A bash call that runs the skill's `pr`, `ship` or `gateway-pr` with a timeout under 2400 s is blocked: those wait
+for CI (usually 3-6 min) and print progress while they do, and a short cap kills them mid-wait.
+
 ## Where the numbers come from
 
 Replaying the 6-day keeb session (Nov 3-8 2026, 2,600 model calls) through these rules: it would have

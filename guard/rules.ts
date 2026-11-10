@@ -10,6 +10,7 @@ export const REASONS = {
 	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). \`${SKILL_CLI} pr\` and \`ship\` already wait for CI and print the failing log lines; rerun the same command after a fix.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
+	prTimeout: `Blocked: \`pr\` and \`ship\` push, then wait for CI (usually 3-6 min, sometimes longer) and print progress while they wait. A bash timeout is only a cap; the command returns as soon as CI finishes. Rerun the same command with timeout 2400. If Michael asks why it takes a while, tell him it is waiting on CI.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 };
 
@@ -93,7 +94,14 @@ export function codeOf(toolName: string, input: Record<string, unknown>): { shel
 	return { shell: [], python: [] };
 }
 
+const SKILL_PUSH = /thatsit-app\.ts\s+(?:pr|ship|gateway-pr)\b/;
+export const PR_TIMEOUT_S = 2400;
+
 export function checkToolCall(toolName: string, input: Record<string, unknown>, env: Env): Block | undefined {
+	// pi's bash timeout is in seconds.
+	if (toolName === "bash" && typeof input.timeout === "number" && input.timeout < PR_TIMEOUT_S && SKILL_PUSH.test(String(input.command ?? ""))) {
+		return { block: true, reason: REASONS.prTimeout };
+	}
 	const { shell, python } = codeOf(toolName, input);
 	for (const command of shell) {
 		const v = checkShell(command, env);
@@ -170,4 +178,49 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 export function todoNudge(open: Todo[]): string {
 	const items = open.map((t) => `- #${t.id} ${t.subject} (${t.status === "in_progress" ? "in progress" : "pending"})`).join("\n");
 	return `Before you finish: your to-do list still has ${open.length} open item${open.length === 1 ? "" : "s"}:\n${items}\nUpdate it now with the todo tool: mark each finished item completed, and delete items that no longer apply. If an item is really unfinished, keep working on it, or say in your reply what is left.`;
+}
+
+// --- an app changed without a PR ---
+
+export const PR_NUDGE_TYPE = "pi-guard-pr";
+export const MAX_PR_NUDGES = 2;
+
+type Call = { type: string; name?: string; arguments?: Record<string, unknown> };
+
+// Apps this prompt's run edited or wrote with no pr/ship/gateway-pr after the last such edit, that still have work
+// to publish (needsPr: uncommitted changes, unpushed commits, or a branch never pushed).
+export function appsNeedingPr(messages: Msg[], home: string, needsPr: (dir: string) => boolean): string[] {
+	let start = messages.length;
+	while (start > 0 && messages[start - 1].role !== "user") start--;
+	const lastEdit = new Map<string, number>();
+	let lastPush = -1;
+	messages.slice(start).forEach((m, i) => {
+		if (m.role !== "assistant") return;
+		for (const c of parts(m) as Call[]) {
+			if (c.type !== "toolCall") continue;
+			if ((c.name === "edit" || c.name === "write") && typeof c.arguments?.path === "string") {
+				const dir = appDir(c.arguments.path, "", home);
+				if (dir) lastEdit.set(dir, i);
+			}
+			if (c.name === "bash" && SKILL_PUSH.test(String(c.arguments?.command ?? ""))) lastPush = i;
+		}
+	});
+	return [...lastEdit].filter(([, i]) => i > lastPush).map(([dir]) => dir).filter(needsPr);
+}
+
+export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
+	if (!apps.length) return false;
+	let start = messages.length;
+	while (start > 0 && messages[start - 1].role !== "user") start--;
+	const run = messages.slice(start);
+	const last = run.at(-1);
+	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
+	if (textOf(last).trim().endsWith("?")) return false;
+	return run.filter((m) => m.role === "custom" && m.customType === PR_NUDGE_TYPE).length < MAX_PR_NUDGES;
+}
+
+export function prNudge(apps: string[]): string {
+	const name = (d: string) => d.split("/").pop();
+	const cmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/${name(d)} --title "<short title>" --body "<what and why>"`).join("\n");
+	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run (bash timeout 2400):\n${cmds}\nIf Michael said not to open a PR, say so in one line instead.`;
 }
