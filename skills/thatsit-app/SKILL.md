@@ -28,6 +28,7 @@ start every app command with `cd ~/workspace/apps/<name> &&` and edit files by f
    Add `--color "#RRGGBB"` only if Michael asked for an icon color; that is the only place a
    hex color is allowed. On success `RESULT` has `dir` and `url`. On exit 1, see "When something fails".
 4. **Write the app** in `~/workspace/apps/<name>`. First read its `AGENTS.md` and follow it. Then:
+   - Replace `docs/spec.md` with the spec from Michael's request, before any code (AGENTS.md says how).
    - Remove `data-shell` from the `<html>` tag in `~/workspace/apps/<name>/index.html` (only an app with several pages and a menu keeps it and the shell).
    - Replace all of `~/workspace/apps/<name>/src/app-main.ts` (start from the skeleton below).
      Extra modules go in new files under `src/`; unit tests for plain logic go in `test/`.
@@ -45,10 +46,12 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
 
 1. `cd ~/workspace/apps/<name> && git switch main && git pull`, then read `AGENTS.md` there if it exists and follow it.
 2. `cd ~/workspace/apps/<name> && git switch -c <short-branch>` (e.g. `dark-mode-toggle`). Create the branch (step 2) before editing any file.
-3. Edit files by full path, update or add the e2e test (generated or progress-based output: check every stage, AGENTS.md), then run `cd ~/workspace/apps/<name> && npm run verify`
-   until green (an app with no `verify` script: `npm run typecheck && npm test && npm run e2e`).
-4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
-5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
+3. Edit by full path. Behaviour changes go in `docs/spec.md` too; add or update e2e tests. Run
+   `cd ~/workspace/apps/<name> && npm run verify` until green (no `verify` script: `npm run typecheck && npm test && npm run e2e`).
+4. **Review.** Write `git diff main...HEAD` to `/tmp/<name>-review.diff` (and, for generated or progress-based output, samples at
+   the first, a middle and the last stage to a file). Call `subagent` with agent `reviewer`, `async: false`, and a task naming the
+   request, `docs/spec.md` and those files. Fix what you confirm, rerun verify, commit (`git add -A && git commit -m "<what changed>"`).
+5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"`
 6. Mark every to-do completed or deleted, then reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
 
 ## Bring an app up to the template
@@ -84,7 +87,6 @@ export class AppMain extends LitElement {
 	// Layout only here: no colors, fonts or border-radius. Never override createRenderRoot.
 	static styles = [sharedStyles, css`
 		main { display: grid; gap: 14px; padding: 18px; max-width: 40rem; margin: 0 auto; }
-		.row { display: flex; gap: 10px; flex-wrap: wrap; }
 	`];
 	count = 0;
 	render() {
@@ -92,10 +94,8 @@ export class AppMain extends LitElement {
 			<main>
 				<h1>${__APP_TITLE__}</h1>
 				<p><span class="label">count</span> ${this.count}</p>
-				<div class="row">
-					<button class="btn" @click=${() => this.count++}>Add one</button>
-					<button class="btn ghost" @click=${() => { this.count = 0; toast("Reset"); }}>Reset</button>
-				</div>
+				<button class="btn" @click=${() => this.count++}>Add one</button>
+				<button class="btn ghost" @click=${() => { this.count = 0; toast("Reset"); }}>Reset</button>
 			</main>
 			<tk-toasts></tk-toasts>
 		`;

@@ -1,3 +1,4 @@
+import { checkShell, reviewedSinceUser, reviewFree } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
@@ -224,4 +225,38 @@ test("a finished run that left an app without a PR is nudged, up to the cap; que
 	assert.match(text, /thatsit-app\.ts pr ~\/workspace\/apps\/keeb/);
 	assert.match(text, /2400/);
 	assert.match(text, /git switch -c/);
+});
+
+// --- review before PR ---
+
+const userMsg = (text: string) => ({ type: "message", message: { role: "user", content: text } });
+const subCall = (id: string, args: Record<string, unknown>, text = "") => ({
+	type: "message",
+	message: { role: "assistant", content: [{ type: "text", text }, { type: "toolCall", id, name: "subagent", arguments: args }] },
+});
+const toolRes = (id: string, isError = false) => ({ type: "message", message: { role: "toolResult", toolCallId: id, isError, content: [] } });
+
+test("reviewedSinceUser: a reviewer that returned after Michael's last message counts", () => {
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a")]), true);
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review" }), toolRes("a")]), false, "background run: only a receipt");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a", true)]), false, "failed review");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "scout", task: "look" }), toolRes("a")]), false, "not a reviewer");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", async: false }), toolRes("a"), userMsg("now this")]), false, "before the last message");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { workflow: true, async: false }, 'return runs.run("r", { agent: "reviewer", task: "x" })'), toolRes("a")]), true, "inside a workflow");
+	assert.equal(reviewedSinceUser([]), false);
+});
+
+test("pr and gateway-pr are blocked until a reviewer ran, unless only docs, Markdown or CI changed", () => {
+	const pr = "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b";
+	const base = { cwd: "/home/m", home: "/home/m", hasScript: () => false, dirty: () => false };
+	assert.deepEqual(checkShell(pr, { ...base, reviewed: () => false, codeChanged: () => true }), { block: true, reason: REASONS.review });
+	assert.deepEqual(checkShell(pr.replace(" pr ", " gateway-pr "), { ...base, reviewed: () => false, codeChanged: () => true }), { block: true, reason: REASONS.review });
+	assert.equal(checkShell(pr, { ...base, reviewed: () => true, codeChanged: () => true }), undefined);
+	assert.equal(checkShell(pr, { ...base, reviewed: () => false, codeChanged: () => false }), undefined);
+	assert.equal(checkShell(pr.replace(" pr ", " ship "), { ...base, reviewed: () => false, codeChanged: () => true }), undefined, "ship is the first version");
+});
+
+test("reviewFree: docs, Markdown and CI files only", () => {
+	for (const f of ["docs/spec.md", "README.md", "AGENTS.md", ".github/workflows/deploy.yml"]) assert.equal(reviewFree(f), true, f);
+	for (const f of ["src/app-main.ts", "test/a.test.ts", "package.json", "e2e/x.spec.ts"]) assert.equal(reviewFree(f), false, f);
 });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { needsPr } from "../index.ts";
+import piGuard, { codeChanged, needsPr } from "../index.ts";
 import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -99,4 +99,23 @@ test("compaction leaves re-injected rule messages out of the summary input", () 
 	assert.equal(r, undefined, "pi's own summarizer still writes the summary");
 	assert.deepEqual(preparation.messagesToSummarize, [task, nudge]);
 	assert.deepEqual(preparation.turnPrefixMessages, [task]);
+});
+
+test("codeChanged: a branch that only touches docs, Markdown or CI skips the review", () => {
+	const dir = mkdtempSync(join(tmpdir(), "guard-review-"));
+	const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir });
+	git("init", "-q", "-b", "main");
+	writeFileSync(join(dir, "README.md"), "a");
+	git("add", "-A");
+	git("commit", "-qm", "init");
+	git("switch", "-qc", "docs");
+	writeFileSync(join(dir, "README.md"), "b");
+	assert.equal(codeChanged(dir), false, "uncommitted Markdown");
+	git("commit", "-qam", "docs");
+	assert.equal(codeChanged(dir), false, "committed Markdown");
+	writeFileSync(join(dir, "app.ts"), "x");
+	git("add", "app.ts");
+	assert.equal(codeChanged(dir), true, "a staged code file");
+	git("commit", "-qm", "code");
+	assert.equal(codeChanged(dir), true, "a committed code file");
 });

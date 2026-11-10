@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appsNeedingPr, checkToolCall, dropReinjected, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, checkToolCall, dropReinjected, reviewedSinceUser, reviewFree, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
@@ -44,10 +44,30 @@ export function needsPr(dir: string): boolean {
 	return head !== "main" && !lines.some((l) => l.startsWith("# branch.upstream "));
 }
 
+// Files the branch changes against main, committed or not. When git can't say, assume code changed.
+export function codeChanged(dir: string): boolean {
+	try {
+		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 });
+		const files = [...run(["diff", "--name-only", "main...HEAD"]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n")].filter(Boolean);
+		return files.length === 0 || files.some((f) => !reviewFree(f));
+	} catch {
+		return true;
+	}
+}
+
 export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr): void {
 	const home = homedir();
 
-	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript, dirty }));
+	pi.on("tool_call", (event, ctx) =>
+		checkToolCall(event.toolName, event.input ?? {}, {
+			cwd: ctx.cwd,
+			home,
+			hasScript,
+			dirty,
+			reviewed: () => reviewedSinceUser(ctx.sessionManager?.getBranch() ?? []),
+			codeChanged,
+		}),
+	);
 
 	// Filter in place and return nothing: pi's default summarizer then runs on the same preparation object.
 	pi.on("session_before_compact", (event) => {
