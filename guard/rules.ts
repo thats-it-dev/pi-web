@@ -131,3 +131,41 @@ export function shouldNudge(messages: Msg[]): boolean {
 	const text = textOf(last).trim();
 	return text.length < SHORT_REPLY && !text.endsWith("?");
 }
+
+// --- open to-dos at the end of a run ---
+
+export type Todo = { id: number; subject: string; status: string };
+
+export const TODO_NUDGE_TYPE = "pi-guard-todos";
+export const MAX_TODO_NUDGES = 2;
+const OPEN = new Set(["in_progress", "pending"]);
+
+// The to-do list as rpiv-todo rebuilds it: the last `todo` tool result on the session branch wins.
+export function openTodos(branch: Iterable<unknown>): Todo[] {
+	let tasks: Todo[] = [];
+	for (const entry of branch) {
+		const msg = (entry as { type?: string; message?: { role?: string; toolName?: string; details?: { tasks?: unknown } } }).message;
+		if ((entry as { type?: string }).type !== "message" || msg?.role !== "toolResult" || msg.toolName !== "todo") continue;
+		if (Array.isArray(msg.details?.tasks)) tasks = msg.details.tasks as Todo[];
+	}
+	return tasks.filter((t) => OPEN.has(t.status));
+}
+
+// A run that did work (edited, wrote or used the todo tool) ended with a reply, not a question, while to-dos are open.
+export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
+	if (!open.length) return false;
+	let start = messages.length;
+	while (start > 0 && messages[start - 1].role !== "user") start--;
+	const run = messages.slice(start);
+	const last = run.at(-1);
+	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
+	if (textOf(last).trim().endsWith("?")) return false;
+	const worked = run.some((m) => m.role === "assistant" && parts(m).some((p) => p.type === "toolCall" && (p.name === "edit" || p.name === "write" || p.name === "todo")));
+	if (!worked) return false;
+	return run.filter((m) => m.role === "custom" && m.customType === TODO_NUDGE_TYPE).length < MAX_TODO_NUDGES;
+}
+
+export function todoNudge(open: Todo[]): string {
+	const items = open.map((t) => `- #${t.id} ${t.subject} (${t.status === "in_progress" ? "in progress" : "pending"})`).join("\n");
+	return `Before you finish: your to-do list still has ${open.length} open item${open.length === 1 ? "" : "s"}:\n${items}\nUpdate it now with the todo tool: mark each finished item completed, and delete items that no longer apply. If an item is really unfinished, keep working on it, or say in your reply what is left.`;
+}

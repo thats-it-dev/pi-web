@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, checkToolCall, discards, fullE2e, MAX_NUDGES, NUDGE_TYPE, REASONS, shouldNudge, type Env } from "../rules.ts";
+import { appDir, checkToolCall, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -121,4 +121,58 @@ test("discarding is blocked only while the app has uncommitted changes", () => {
 	assert.equal(bash(revert), REASONS.discard);
 	assert.equal(bash(revert, env({ dirty: () => false })), undefined);
 	assert.equal(bash("cd ~/workspace/pi-web && git checkout -- ."), undefined);
+});
+
+// --- open to-dos at the end of a run ---
+
+const todoEntry = (tasks: { id: number; subject: string; status: string }[]) => ({
+	type: "message",
+	message: { role: "toolResult", toolName: "todo", details: { tasks, nextId: tasks.length + 1 } },
+});
+const todoCall = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "todo" }] };
+const long = say("Done: PR #16 is open and green. " + "x".repeat(400));
+const todoNudgeMsg = { role: "custom", customType: TODO_NUDGE_TYPE, content: "..." };
+
+test("openTodos reads the latest todo list on the branch and keeps in-progress and pending items", () => {
+	const branch = [
+		todoEntry([{ id: 1, subject: "a", status: "pending" }]),
+		{ type: "message", message: { role: "toolResult", toolName: "bash", details: {} } },
+		todoEntry([
+			{ id: 1, subject: "a", status: "completed" },
+			{ id: 2, subject: "b", status: "in_progress" },
+			{ id: 3, subject: "c", status: "pending" },
+			{ id: 4, subject: "d", status: "deleted" },
+		]),
+		{ type: "compaction" },
+	];
+	assert.deepEqual(openTodos(branch).map((t) => t.id), [2, 3]);
+	assert.deepEqual(openTodos([]), []);
+	assert.deepEqual(openTodos([{ type: "message", message: { role: "toolResult", toolName: "todo", details: { tasks: "junk" } } }]), []);
+});
+
+test("a finished coding run with open to-dos is sent back once per nudge, up to the cap", () => {
+	const open = [{ id: 2, subject: "Make keeb pass knip", status: "in_progress" }];
+	assert.equal(shouldNudgeTodos([user, edit, result, long], open), true);
+	assert.equal(shouldNudgeTodos([user, todoCall, result, long], open), true);
+	const capped = [user, edit, result, ...Array(MAX_TODO_NUDGES).fill(0).flatMap(() => [long, todoNudgeMsg]), long];
+	assert.equal(shouldNudgeTodos(capped, open), false);
+});
+
+test("no to-do nudge when nothing is open, pi asks a question, or the run did no work", () => {
+	const open = [{ id: 2, subject: "b", status: "pending" }];
+	assert.equal(shouldNudgeTodos([user, edit, result, long], []), false);
+	assert.equal(shouldNudgeTodos([user, edit, result, say("Merge PR #4 or keep the old colour?")], open), false);
+	assert.equal(shouldNudgeTodos([user, say("Hi.")], open), false);
+});
+
+test("the to-do nudge names each open item and what to do", () => {
+	const text = todoNudge([
+		{ id: 2, subject: "Make keeb pass the guardrail tests", status: "in_progress" },
+		{ id: 4, subject: "Make keeb e2e pass in parallel", status: "pending" },
+	]);
+	assert.match(text, /2 open items/);
+	assert.match(text, /#2 Make keeb pass the guardrail tests \(in progress\)/);
+	assert.match(text, /#4 Make keeb e2e pass in parallel \(pending\)/);
+	assert.match(text, /completed/);
+	assert.match(text, /delete/);
 });

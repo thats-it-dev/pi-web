@@ -5,9 +5,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { checkToolCall, NUDGE, NUDGE_TYPE, shouldNudge } from "./rules.ts";
+import { checkToolCall, NUDGE, NUDGE_TYPE, openTodos, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
-type PiApi = { on(event: string, handler: (event: any, ctx: { cwd: string }) => unknown): unknown };
+type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
+type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
 
 function hasScript(dir: string, name: string): boolean {
 	try {
@@ -31,11 +32,15 @@ export default function piGuard(pi: PiApi): void {
 
 	pi.on("tool_call", (event, ctx) => checkToolCall(event.toolName, event.input ?? {}, { cwd: ctx.cwd, home, hasScript, dirty }));
 
-	pi.on("agent_before_settle", (event) => {
+	pi.on("agent_before_settle", (event, ctx) => {
 		// context.canContinue describes the context before these entries: it is false whenever the run ended on an
 		// assistant reply, which is exactly when a nudge is wanted. pi re-checks after appending the nudge.
 		if (event.outcome !== "completed") return undefined;
-		if (!shouldNudge(event.context.contextMessages ?? [])) return undefined;
-		return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
+		const messages = event.context.contextMessages ?? [];
+		if (shouldNudge(messages)) return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
+		// The branch, not the context: after a compaction the last todo result is no longer in the context.
+		const open = openTodos(ctx.sessionManager?.getBranch() ?? []);
+		if (!shouldNudgeTodos(messages, open)) return undefined;
+		return { entries: [{ type: "custom_message", customType: TODO_NUDGE_TYPE, content: todoNudge(open), display: true }], continue: true };
 	});
 }

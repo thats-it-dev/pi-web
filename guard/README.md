@@ -23,6 +23,15 @@ When a run that edited or wrote a file ends right after a tool result with a rep
 characters that isn't a question, the guard adds a visible `pi-guard-nudge` message and continues once:
 reply in chat if done, carry on if not, or ask. At most 2 nudges per user prompt.
 
+## Open to-dos
+
+When a run that did work (edited, wrote or used the `todo` tool) ends with a reply that isn't a question while the
+session's to-do list still has items in progress or pending, the guard adds a visible `pi-guard-todos` message
+listing them and continues: mark finished items completed, delete ones that no longer apply, or keep working.
+At most 2 per user prompt. The list is read from the session branch, as rpiv-todo rebuilds it, so it survives
+compaction. Replayed over all 88 sessions on the spark (2026-11-10), it fires 14 times in 3 sessions, each a
+list pi left stale after finishing the work, and nowhere else.
+
 ## Where the numbers come from
 
 Replaying the 6-day keeb session (Nov 3-8 2026, 2,600 model calls) through these rules: it would have

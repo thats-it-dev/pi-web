@@ -49,7 +49,7 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
    until green (an app with no `verify` script: `npm run typecheck && npm test && npm run e2e`).
 4. `cd ~/workspace/apps/<name> && git add -A && git commit -m "<what changed>"`
 5. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why>"`
-6. Reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
+6. Mark every to-do completed or deleted, then reply with the `pr` and `preview` URLs from `RESULT`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
 
 ## Bring an app up to the template
 
