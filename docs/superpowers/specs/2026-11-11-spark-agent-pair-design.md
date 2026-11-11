@@ -382,7 +382,7 @@ orchestrator: 21k prompt, 2k output, medium):
 |---|---|---|---|---|---|
 | 0 | 20.8 tok/s | 197 ms | — | — | 274 ms |
 | 4 | **9.2 tok/s** | 389 ms | 92 / 144 / 183 / 261 | 15.6 / 26.1 / 24.7 / 82.3 (last one alone) | **259 s** |
-| 6 | bench aborted: Node's 300 s header timeout; the 6th worker's first token was > 5 min away | | | | |
+| 6 | **7.5 tok/s** | 405 ms | 93 / 180 / 255 / 337 / 378 / 418 | 7 / 17 / 17 / 25 / 25 / 50 (last one alone) | **417 s** |
 
 Findings: (1) the two engines contend for the memory bus: the tune drops from 21 to 9 tok/s while four workers decode;
 (2) worker **prefill serialises** on the 35B at ~1300 tok/s, so a cold 120k-token fan-out of four costs 4+ min before
