@@ -328,6 +328,16 @@ memory for the KV cache", min viable 0.351): the fractions in the Addendum table
 The `.env` now says `MEM_FRACTION_STATIC=0.70`, valid only when the pi tune is already up; llama-swap's `duo`
 group starts members on demand, so the orchestrator must be requested first (plan 2 Task 5 makes pi do that).
 
+**Task 3a (12:31 PT), readout on the 35B** (flash-auto's frozen test split, 66 items, idle, the pi-tune A/B running
+on the other engine): exact **55%**, within-one **94%**, p50 285 ms, p95 345 ms, 0 failures (flash on its 44-item
+run: 70% / 100%, p50 260 ms). Confusion (label → readout): off 11/11; low → off 15, low 6, medium 3; medium → off 3,
+low 3, medium 10, xhigh 4; xhigh → low 1, medium 1, xhigh 9. The readout under-calls (23 too little, 7 too much),
+mostly `low → off`, which changes nothing in the pair (both run on the 35B). Counting only the engine decision
+(off/low → MoE, medium/xhigh → tune) it is right on **56/66 = 85%**; the costly direction is `medium → off/low`
+(6 of 20), a medium task landing on the MoE with thinking. Below the plan's bars (60% / 95%) but recorded and
+accepted: the fallback is medium (tune), and a bias toward medium on close calls can be tuned later from the
+decision log's probabilities. Rows: `~/workspace/flash-auto/results/test-idle-35b.jsonl` (private, gitignored).
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
