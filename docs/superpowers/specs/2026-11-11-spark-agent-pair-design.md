@@ -351,6 +351,12 @@ tok/s. For scale, flash-next's worker finished this task in ~50 min at 34 tok/s 
 read twice the bytes of NVFP4 per step; the tune's token saving (at "medium" it still spent ~2/3 of its tokens
 thinking here) does not cover the gap. Verdict waits for the base runs below.
 
+**Task 3c (13:25 PT), pi tune alone** (`bench/pair-contention.mjs --workers 0`, 21k-token prompt, 1.5k output): decode
+**20.8 tok/s**, TTFT 23.8 s (≈890 tok/s prefill), p95 inter-token gap 197 ms, DFlash accept 6.2 on this prose prompt
+(3.5 on the agent runs). **Engine switch:** the same 100k-token prompt, warm on the 35B then cold on the tune: 157 s to
+first token (≈640 tok/s prefill). A `pair-auto` switch at a 100k context therefore costs ~2.5 min on the first turn.
+Readout probes on the 35B: p95 274 ms.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
