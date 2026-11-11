@@ -1,6 +1,7 @@
 import { css, html, nothing } from "lit";
 import { APPROVAL_MODES, type ApprovalMode, type Dialog, type ForkPoint, type ModelInfo, type Snapshot, type ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { abbreviateCwd, formatCost, formatTokens } from "../lib/format.ts";
+import { choicesAnswer, parseDialogTitle } from "../lib/dialog-title.ts";
 import { type Speed, speedLabel } from "../lib/live-stats.ts";
 
 export const UNAVAILABLE_IN_TERMINAL = "Not available while open in the terminal.";
@@ -88,17 +89,32 @@ export function dialogSheet(d: Dialog, seenAt: number, respond: (a: DialogAnswer
 		e.preventDefault();
 		respond({ value: String(new FormData(e.target as HTMLFormElement).get("value") ?? "") });
 	};
+	const t = parseDialogTitle(d.title);
+	const pick = d.method === "input" && t.choices.length > 0;
+	const submitChoices = (e: Event) => {
+		e.preventDefault();
+		const f = new FormData(e.target as HTMLFormElement);
+		respond({ value: choicesAnswer(f.getAll("pick").map(Number), String(f.get("value") ?? "")) });
+	};
 	return html`
+		${t.body && !pick ? html`<p class="msg">${t.body}</p>` : nothing}
 		${d.message ? html`<p class="msg">${d.message}</p>` : nothing}
+		${pick
+			? html`<form class="answer" @submit=${submitChoices}>
+					<div class="opts">${t.choices.map((c) => html`<label class="pick"><input type="checkbox" name="pick" value=${c.n} /><span><span class="lbl">${c.label}</span>${c.description ? html`<span class="desc">${c.description}</span>` : nothing}</span></label>`)}</div>
+					<input name="value" aria-label="or type your own answer" placeholder="or type your own answer" />
+					<button class="btn">submit</button>
+				</form>`
+			: nothing}
 		${d.method === "select" ? html`<div class="opts">${(d.options ?? []).map((o) => html`<button class="btn ghost opt" @click=${() => respond({ value: o })}>${o}</button>`)}</div>` : nothing}
 		${d.method === "confirm"
 			? html`<div class="row"><button class="btn" @click=${() => respond({ confirmed: true })}>yes</button><button class="btn ghost" @click=${() => respond({ confirmed: false })}>no</button></div>`
 			: nothing}
-		${d.method === "input"
-			? html`<form class="answer" @submit=${submitValue}><input name="value" aria-label=${d.title} placeholder=${d.placeholder ?? ""} /><button class="btn">submit</button></form>`
+		${d.method === "input" && !pick
+			? html`<form class="answer" @submit=${submitValue}><input name="value" aria-label=${t.heading} placeholder=${d.placeholder ?? ""} /><button class="btn">submit</button></form>`
 			: nothing}
 		${d.method === "editor"
-			? html`<form class="answer" @submit=${submitValue}><textarea name="value" rows="10" aria-label=${d.title} .value=${d.prefill ?? ""}></textarea><button class="btn">submit</button></form>`
+			? html`<form class="answer" @submit=${submitValue}><textarea name="value" rows="10" aria-label=${t.heading} .value=${d.prefill ?? ""}></textarea><button class="btn">submit</button></form>`
 			: nothing}
 		<div class="foot">
 			${left != null ? html`<span class="hint">times out in ${left}s</span>` : html`<span></span>`}
@@ -130,6 +146,11 @@ export const sheetStyles = css`
 	.msg { white-space: pre-wrap; margin-top: 0; }
 	.opts { display: grid; gap: 6px; }
 	.opt { justify-content: flex-start; text-align: left; }
+	.pick { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: var(--radius); cursor: pointer; }
+	.pick:has(input:checked) { border-color: var(--primary); background: var(--panel); }
+	.pick input { margin-top: 3px; flex: none; }
+	.pick .lbl { display: block; }
+	.pick .desc { display: block; font-size: 0.85rem; color: var(--text-secondary); }
 	.row { display: flex; gap: 8px; }
 	form.answer { display: grid; gap: 8px; }
 	form.answer textarea { width: 100%; font-family: var(--font-mono); }

@@ -20,6 +20,7 @@ import { nextTucked } from "../lib/mobile.ts";
 import { badgeLabel } from "../render/progress.ts";
 import { markdownStyles } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
+import { parseDialogTitle } from "../lib/dialog-title.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
 import type { FileSearch, PiComposer, SubmitDetail } from "./pi-composer.ts";
 import "./pi-composer.ts";
@@ -548,7 +549,7 @@ export class PiSession extends LitElement {
 				></pi-composer>
 			</div>
 			${dialog
-				? html`<tk-sheet open heading=${dialog.title || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>
+				? html`<tk-sheet open heading=${parseDialogTitle(dialog.title).heading || "pi needs an answer"} @tk-close=${() => this.answer(dialog.id, { cancelled: true })}>
 						${dialogSheet(dialog, s.dialogSeenAt.get(dialog.id) ?? Date.now(), (a) => this.answer(dialog.id, a))}
 					</tk-sheet>`
 				: this.sheet
