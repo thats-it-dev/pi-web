@@ -13,6 +13,10 @@ test("appDir finds the app from the command or the cwd", () => {
 	assert.equal(appDir("git -C $HOME/workspace/apps/tips status", home, home), "/home/m/workspace/apps/tips");
 	assert.equal(appDir("ls", "/home/m/workspace/apps/keeb/src", home), "/home/m/workspace/apps/keeb");
 	assert.equal(appDir("cd ~/workspace/pi-web && git push", home, home), undefined);
+	// pi-subagents worktrees live beside the apps: governed as the app they were cut from.
+	assert.equal(appDir("cd ~/workspace/apps/worktrees/cad/pi-worktree-ab12-0 && npm test", home, home), "/home/m/workspace/apps/cad");
+	assert.equal(appDir("npm test", "/home/m/workspace/apps/worktrees/cad/pi-worktree-ab12-0/src", home), "/home/m/workspace/apps/cad");
+	assert.equal(appDir("ls", "/home/m/workspace/apps/worktrees", home), undefined);
 });
 
 test("pushing from an app is blocked, commits that mention push are not", () => {

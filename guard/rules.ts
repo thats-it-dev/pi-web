@@ -26,11 +26,22 @@ export function appDir(command: string, cwd: string, home: string): string | und
 	const expanded = command.replace(/(^|[\s="'(])(~|\$HOME|\$\{HOME\})(?=\/)/g, `$1${home}`);
 	const at = expanded.indexOf(`${apps}/`);
 	if (at >= 0) {
-		const name = /^[A-Za-z0-9._-]+/.exec(expanded.slice(at + apps.length + 1))?.[0];
+		const name = appName(expanded.slice(at + apps.length + 1));
 		if (name) return join(apps, name);
 	}
-	if (cwd.startsWith(`${apps}/`)) return join(apps, cwd.slice(apps.length + 1).split("/")[0]);
+	if (cwd.startsWith(`${apps}/`)) {
+		const name = appName(cwd.slice(apps.length + 1));
+		if (name) return join(apps, name);
+	}
 	return undefined;
+}
+
+// The app in a path relative to ~/workspace/apps: its first segment, or the second under `worktrees/`
+// (pi-subagents cuts worktrees at ~/workspace/apps/worktrees/<app>/pi-worktree-<run>-<i>).
+function appName(rel: string): string | undefined {
+	const m = /^([A-Za-z0-9._-]+)(?:\/([A-Za-z0-9._-]+))?/.exec(rel);
+	if (!m) return undefined;
+	return m[1] === "worktrees" ? m[2] : m[1];
 }
 
 // The directory a command runs in: its leading `cd`, else the session cwd.
