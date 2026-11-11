@@ -357,6 +357,22 @@ thinking here) does not cover the gap. Verdict waits for the base runs below.
 first token (≈640 tok/s prefill). A `pair-auto` switch at a 100k context therefore costs ~2.5 min on the first turn.
 Readout probes on the 35B: p95 274 ms.
 
+**Task 3d (13:34–14:24 PT), A/B — base 27b (NVFP4 + DFlash2) at xhigh**, same brief, base, harness and cap:
+
+| Model / effort | Run | Wall | Turns | Tool calls | Output tokens (thinking share) | Max ctx | Engine decode (accept) | Finished? |
+|---|---|---|---|---|---|---|---|---|
+| pi tune FP8 / medium | 1 | 25 (cap) | 17 | 20 | 30,586 (53%) | 47k | 21.4 tok/s (3.48) | no |
+| pi tune FP8 / medium | 2 | 25 (cap) | 12 | 13 | 34,494 (67%) | 37k | ~21 tok/s | no (`src/sketch/` written) |
+| base NVFP4 / xhigh | 1 | 25 (cap) | 13 | 19 | 22,972 (56%) | 45k | 31.2 tok/s (4.28) | no (`test/sketch.test.ts` written) |
+| base NVFP4 / xhigh | 2 | 25 (cap) | 10 | 15 | 13,730 (78%) | 35k | 23.4 tok/s (3.17) | no (nothing written) |
+
+Token counts exclude the turn in flight when the cap hit (pi records a message only when it completes), so they
+undercount by up to one turn each; "tests" only ever meant the pre-existing suite. **Neither model finished the
+task in 25 min** (flash-next's worker took ~50 min), so the wall-clock rule is inconclusive. Per token the base
+is 1.3–1.5× faster (27 vs 21 tok/s; the community's ~48 for this box did not reproduce with this image/config).
+The tune's thinking share at "medium" (53–67%) was no lower than the base's at xhigh. The memory cost stands:
+the FP8 tune leaves the 35B 453k KV tokens (~3 workers) where NVFP4 weights would leave ~15 GB more.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
