@@ -18,14 +18,25 @@
 			metas[i].setAttribute("content", theme === "dark" ? "#171717" : "#f1f1f1");
 		}
 	}
-	// A fresh copy of the tag makes WebKit apply the color again after a hash or history navigation.
+	// A fresh copy of the tag makes WebKit apply the color again. iPadOS resets a home-screen app's
+	// status bar when it comes back from the background (and may read it late), so returning
+	// re-applies it a few times; so does a hash or history navigation.
 	function reapply() {
 		var metas = document.querySelectorAll('meta[name="theme-color"]');
 		for (var i = 0; i < metas.length; i++) metas[i].replaceWith(metas[i].cloneNode());
 	}
+	function reapplySoon() {
+		reapply();
+		setTimeout(reapply, 300);
+		setTimeout(reapply, 1000);
+	}
 	apply();
 	window.addEventListener("hashchange", reapply);
 	window.addEventListener("popstate", reapply);
+	window.addEventListener("pageshow", reapplySoon);
+	document.addEventListener("visibilitychange", function () {
+		if (document.visibilityState === "visible") reapplySoon();
+	});
 	media.addEventListener("change", function () {
 		try {
 			pref = localStorage.getItem(key) || "system";
