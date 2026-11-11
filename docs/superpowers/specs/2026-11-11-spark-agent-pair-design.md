@@ -373,6 +373,8 @@ is 1.3–1.5× faster (27 vs 21 tok/s; the community's ~48 for this box did not 
 The tune's thinking share at "medium" (53–67%) was no lower than the base's at xhigh. The memory cost stands:
 the FP8 tune leaves the 35B 453k KV tokens (~3 workers) where NVFP4 weights would leave ~15 GB more.
 
+**Task 3 decision (14:30 PT, Michael):** keep the pi tune FP8 as the orchestrator engine; quantizing it to NVFP4 stays a follow-up.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
