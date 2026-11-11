@@ -46,10 +46,35 @@ export const PI_NOTES: Record<string, string> = {
 		"> **In pi:** every plan runs this way. Never switch to subagent-driven-development and never dispatch a `worker` subagent per task. Final review: in an app under ~/workspace/apps, use the thatsit-app skill's Review step (`subagent` with agent `reviewer`; the guard writes the scoped diff) instead of review-package and code-reviewer.md, and finish with its pr steps, not finishing-a-development-branch. Elsewhere, run review-package and call `subagent` with agent `reviewer` on the file it prints.",
 };
 
+/** The notes when the agent pair is pi's model (spec: docs/superpowers/specs/2026-11-11-spark-agent-pair-design.md):
+ *  the orchestrator still runs executing-plans itself, with subagents for scouting, writing and review. */
+export const PI_NOTES_PAIR: Record<string, string> = {
+	"writing-plans":
+		"> **In pi (agent pair):** plans run with superpowers:executing-plans by the orchestrator, with subagents for scouting, writing and review as that skill's pi note describes. Don't ask which execution approach to use. Mark tasks that don't depend on each other's files or interfaces with a line `**Parallel group:** <letter>` right under the task heading; tasks in one group run as parallel workers in worktrees. A task without the line runs alone.",
+	"executing-plans": [
+		"> **In pi (agent pair):** you orchestrate; subagents do the reading, writing and reviewing. The rules, in order:",
+		"> 1. **Prefetch.** When task N starts, launch two `scout` subagents async (read-only, ≤ 2k tokens each) for task N+1: the files it names and their seams, the test files and names, the spec sections. Their output goes into N+1's brief.",
+		"> 2. **Brief.** A worker brief carries: the task text from the plan, the scout findings, acceptance (the exact failing test to write first, the verify command), the budget rules, and \"do not open a PR, do not push\". Briefs live in the plan's `.superpowers/sdd/` workspace.",
+		"> 3. **Write.** One `worker` per task, launched as an async single (`async: true`, with `checkpointBeforeDeadlineMs`); you stay awake for scout and reviewer results and steer the worker on a P1. A task group the plan marks `**Parallel group:**` is one async single per task with `worktree: true`; merge the branches in plan order onto the plan branch and rerun verify after each merge. Worktree workers run typecheck and unit tests only, never e2e; the full `npm run verify` runs once in the main checkout after each merge. Commit the plan branch before a fan-out.",
+		"> 4. **Gate.** On the worker's commit: run verify; on green, call `subagent` with agent `reviewer` and `async: true` (the guard writes the scoped diff and marks the review when the run completes) and start task N+1 at once.",
+		"> 5. **Fix.** Review findings queue to the next task boundary, except a P1 on a file the current task edits, which is fixed now. Every fix is RED → GREEN plus a green suite.",
+		"> 6. **Final.** After the last task: a final whole-branch review with agent `reviewer` and `model: \"spark/qwen3.8-27b-pi\"`, one fix pass, then the thatsit-app skill's pr steps. Never finishing-a-development-branch.",
+		"> 7. **Runaways.** A worker that hits its deadline hands off state on disk (its checkpoint); resume it with `action: \"resume\"` or finish the task inline. Never dispatch a second worker on the same files while one is running.",
+	].join("\n"),
+};
+
+/** True when pi's settings make the agent pair the session model and the MoE the subagent default. */
+export function pairMode(settings: unknown): boolean {
+	const s = settings as { defaultModel?: unknown; subagents?: { defaultModel?: unknown } } | undefined;
+	const main = typeof s?.defaultModel === "string" ? s.defaultModel : "";
+	const sub = typeof s?.subagents?.defaultModel === "string" ? s.subagents.defaultModel : "";
+	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
+}
+
 /** A skill's SKILL.md for pi: its pi note after the frontmatter, and no plan header pointing at a skill pi doesn't have. */
-export function forPi(name: string, md: string): string {
+export function forPi(name: string, md: string, notes: Record<string, string> = PI_NOTES): string {
 	let out = md.replace("superpowers:subagent-driven-development (recommended) or superpowers:executing-plans", "superpowers:executing-plans");
-	const note = PI_NOTES[name];
+	const note = notes[name];
 	if (!note) return out;
 	const m = /^---\n[\s\S]*?\n---\n/.exec(out);
 	const at = m ? m[0].length : 0;
@@ -62,7 +87,7 @@ const MANUAL = join(homedir(), ".pi", "agent", "tmp", "superpowers-manual");
 /** Writes manual-only copies of the superpowers skills to `out`: each SKILL.md gains disable-model-invocation,
  *  every other file is a symlink to the original, so relative references still resolve. Returns `out`, or
  *  undefined when superpowers is not installed. */
-export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED, supportOnly = SUPPORT_ONLY): string | undefined {
+export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED, supportOnly = SUPPORT_ONLY, notes: Record<string, string> = PI_NOTES): string | undefined {
 	if (!existsSync(src)) return undefined;
 	rmSync(out, { recursive: true, force: true });
 	for (const name of readdirSync(src)) {
@@ -72,7 +97,7 @@ export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED
 		const dir = join(out, name);
 		mkdirSync(dir, { recursive: true });
 		for (const f of readdirSync(join(src, name))) if (f !== "SKILL.md") symlinkSync(join(src, name, f), join(dir, f));
-		if (!support) writeFileSync(join(dir, "SKILL.md"), manualOnly(forPi(name, readFileSync(skill, "utf8"))));
+		if (!support) writeFileSync(join(dir, "SKILL.md"), manualOnly(forPi(name, readFileSync(skill, "utf8"), notes)));
 	}
 	return out;
 }
@@ -155,7 +180,13 @@ export default function superpowersSwitch(pi: PiApi): void {
 	const show = (ctx: Ctx) => ctx.ui?.setStatus(STATUS_KEY, on ? STATUS_ON : undefined);
 
 	pi.on("resources_discover", () => {
-		const dir = buildManualSkills();
+		let settings: unknown;
+		try {
+			settings = JSON.parse(readFileSync(join(homedir(), ".pi", "agent", "settings.json"), "utf8"));
+		} catch {
+			settings = undefined; // no settings: the inline-only notes
+		}
+		const dir = buildManualSkills(undefined, undefined, undefined, undefined, pairMode(settings) ? PI_NOTES_PAIR : PI_NOTES);
 		return dir ? { skillPaths: [dir] } : undefined;
 	});
 

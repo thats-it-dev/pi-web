@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import superpowersSwitch, { bootstrap, buildManualSkills, forPi, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
+import superpowersSwitch, { bootstrap, buildManualSkills, forPi, pairMode, PI_NOTES_PAIR, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
 
 const entry = (on: boolean) => ({ type: "custom", customType: ENTRY_TYPE, data: { on } });
 
@@ -129,4 +129,20 @@ test("session start brings an older chat's reasoning floor in line with its swit
 	assert.deepEqual(saved, [], "already in line");
 	handlers.session_start({ reason: "resume" }, ctx([entry(false), { type: "custom", customType: FLOOR_ENTRY, data: { level: "medium" } }]));
 	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: null }]], "off with a floor left over: clear it");
+});
+
+test("pairMode reads the pair from settings", () => {
+	assert.equal(pairMode({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+	assert.equal(pairMode({ defaultModel: "spark/qwen3.8-27b-pi", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+	assert.equal(pairMode({ defaultModel: "flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
+	assert.equal(pairMode({ defaultModel: "spark/pair-auto" }), false);
+	assert.equal(pairMode(undefined), false);
+});
+
+test("the pair notes replace the inline-only ones", () => {
+	const md = "---\nname: executing-plans\n---\nbody";
+	assert.match(forPi("executing-plans", md, PI_NOTES_PAIR), /async single|Parallel group/);
+	assert.doesNotMatch(forPi("executing-plans", md, PI_NOTES_PAIR), /never dispatch a `worker` subagent/);
+	assert.match(forPi("writing-plans", md.replace("executing-plans", "writing-plans"), PI_NOTES_PAIR), /\*\*Parallel group:\*\* <letter>/);
+	assert.doesNotMatch(forPi("writing-plans", md.replace("executing-plans", "writing-plans"), PI_NOTES_PAIR), /subagent-driven-development is not available/);
 });
