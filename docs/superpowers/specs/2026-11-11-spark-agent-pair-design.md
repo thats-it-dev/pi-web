@@ -1,0 +1,249 @@
+# Spark agent pair: 27b orchestrator, 35B-A3B subagents
+
+**Date:** 2026-11-11. **Status:** design, awaiting Michael's approval.
+
+## Intent
+
+One app's plan (the cad plan was the trigger) lands sooner on the wall clock, by using the
+GB10's spare capacity for parallel subagents instead of one 34 tok/s stream. Today pi runs
+`qwen3.8-flash-next` whose 74.9 GiB of weights leave a 559k-token KV pool: room for one
+worker beside the orchestrator, and that worker starts cold. The 2026-11-11 cad session
+(13 h, 1,233 turns) showed 14 of 20 worker subagents timing out, ~95% of their time in
+decode, and the orchestrator redoing tasks inline faster. The hardware is bandwidth-bound,
+so one stream uses about a third of what batching gets; the win is many streams, not a
+faster one.
+
+## Decisions (Michael's, 2026-11-11)
+
+1. Goal: a single plan finishes sooner. Not multi-app throughput, not overnight runs.
+2. `qwen3.8-27b` replaces flash-next as pi's model, to free the memory subagents need.
+3. Subagents run on `qwen3.6-35b-a3b-sglang` (Qwen3.6-35B-A3B NVFP4 + DFlash2). Bonsai 2
+   is out: on this box it's 33 tok/s and ~60 SWE-bench Verified against the MoE's measured
+   120 tok/s and 73.4.
+4. Task N+1 may start before task N's review lands; findings come back as a fix step.
+5. Independent plan tasks may run as parallel workers in worktrees.
+6. Throughput over responsiveness: run as many workers as memory allows; a sluggish chat
+   while a plan runs is accepted.
+
+## Goals
+
+- Critical path per plan task under ~40 min (cad baseline: ~73 min with subagents, ~45 min
+  inline), measured on a replay of cad Tasks 2–4.
+- No task starts cold: its brief carries the file excerpts, seams and test names it needs.
+- The per-task gate stays: `npm run verify` green, guard-scoped reviewer, commit.
+
+## Non-goals
+
+- Bonsai 2, a second llama.cpp engine, or any new model download beyond the 35B checkpoint.
+- Changing flash-next's serving; it simply isn't loaded while the pair is.
+- Multi-Spark, pi-web UI changes beyond what the model switch forces.
+
+## Anti-goals (failure even if it "works")
+
+- An OOM, a hung box or a reboot. Measured free memory after both engines boot must stay
+  ≥ 10 GB (the 35B study saw swap and a frozen box past that).
+- Two workers editing the same files, or a worker opening a PR (the thatsit-app PR flow is
+  the orchestrator's).
+- A mid-plan swap back to flash-next. Flash and the pair are in exclusive llama-swap groups;
+  one request to a flash model unloads both engines and costs 4 min plus every warm cache.
+- Losing the guard's scoped review (it writes the incremental diff and budgets the reviewer).
+
+## Constraints and measured facts
+
+| Fact | Value | Source |
+|---|---|---|
+| GB10 memory visible to sglang | 121.6 GiB, ~273 GB/s, unified | `~/Qwen3.6-35b-SGLang-DGX-Spark/numbers.md` |
+| flash-next weights / KV pool | 74.9 GiB / 559k tokens | vLLM boot log, 2026-11-10 |
+| 27b weights | ~15 GB NVFP4 + BF16 lm_head (23 GB dir); DFlash2 draft 3.6 GB | HF cache |
+| 27b KV per token (fp8) | target 32 KiB (16 full-attn layers × 4 KV heads × 256 × K,V); draft 16 KiB (5 layers × 8 × 128), sliding window 2048 | config.json of both |
+| 27b speed on one GB10 | ~48–50 tok/s c=1, ~148 combined at c=8 (community; not yet measured here) | OpenZeka, NVIDIA forum |
+| 27b chat template | `enable_thinking` and `reasoning_effort` supported | `chat_template.jinja` |
+| 35B-A3B weights | 24.5 GB target + 1.2 GB draft | best-config.txt |
+| 35B-A3B KV per token | 10 KB target + 12 KB draft (fp8) | best-config.txt |
+| 35B-A3B speed, this box | c=1: 120 tok/s mean, 163 code; c=8: 280 combined / 50 per stream; c=10: 301 / 44 | numbers.md, 2026-10-02 |
+| 35B-A3B capacity | 4.7 full 262k contexts at fraction 0.5; ~2.4 more per +0.1 | numbers.md |
+| 35B-A3B chat template | `enable_thinking` only: no effort levels | `chat_template.jinja` |
+| Engine overhead beyond its fraction | ~9 GB (0.5 × 121.6 = 60.8 reserved, 52 GB free after boot) | numbers.md |
+| Checkpoint state | only `nvidia/Qwen3.6-35B-A3B-NVFP4` is cached; the measured `unsloth/…-NVFP4` + `incoai/…-DFlash2` draft must be downloaded (~26 GB, 3.1 TB free) | HF cache, start.sh |
+| Workload (cad run) | worker: 72k output tokens, 60 turns, context 94k–190k, 50–66% thinking; reviewer: 18k, 9 turns; orchestrator context peaked at 250k | session logs |
+| Guard app detection | `appDir()` takes the first path segment after `~/workspace/apps/` | `guard/rules.ts:23` |
+| pi-subagents worktrees | default root `~/workspace/apps/worktrees/<app>/pi-worktree-<run>-<i>`; `worktreeBaseDir` overrides the root; roots inside the repo are refused | pi-subagents docs/configuration.md |
+
+## Architecture
+
+### Serving (llama-swap)
+
+Both engines are members of one group with `swap: false, exclusive: true` (the existing
+`duo` group already pairs them; its fractions are what's wrong). Starting fractions, to be
+replaced by measured ones in phase 0:
+
+| Engine | Fraction | Reserved | Weights | Left for KV/state | Streams |
+|---|---|---|---|---|---|
+| `qwen3.8-27b` (sglang, DFlash2 K=8) | 0.32 | 38.9 GB | 18.6 GB | ~18 GB ≈ 370k tokens ≈ 1.4 full contexts | `--max-running-requests 3`: orchestrator + final reviewer + headroom |
+| `qwen3.6-35b-a3b-sglang` (sglang, DFlash block 8) | 0.42 | 51.1 GB | 25.7 GB | ~24 GB ≈ 1.1M tokens ≈ 4 full / ~7 at 160k | `MAX_CONCURRENT_REQUESTS=8` |
+| Both + overhead | 0.74 | 90 + ~18 | | | ~13 GB free, floor 10 |
+
+27b's `--max-total-tokens` and the 35B `.env` (`MEM_FRACTION_STATIC`, `MAX_CONCURRENT_REQUESTS`,
+pinned `MODEL_ID`) change accordingly. The 35B `start.sh` auto-sizes `MAX_TOTAL_TOKENS` to
+`MAX_CONCURRENT_REQUESTS × 262144`, which at 8 overshoots the 0.42 budget, so it is capped
+explicitly (the worker-context budget above, ~1.1M tokens). llama-swap gets a `concurrencyLimit` above the planned
+fan-out so excess requests queue in sglang rather than getting a 429.
+
+### pi model config
+
+- `models.json`, spark provider: the `qwen3.8-27b` entry gains the same `compat` block as
+  flash-next (`thinkingFormat: chat-template`, `chatTemplateKwargs` with `enable_thinking` and
+  `reasoning_effort`) and a `thinkingLevelMap`; today it has none, so effort is silently
+  ignored. The 35B entry gets `enable_thinking` only.
+- `settings.json`: `defaultModel: spark/qwen3.8-27b`; a compaction override for 27b sized to
+  its 262k window (the orchestrator hit 250k on flash's 500k window, so expect roughly twice
+  the compactions; the reserve is the builder's number); `subagents.defaultModel:
+  spark/qwen3.6-35b-a3b-sglang`; `agentOverrides` for `scout`, `reviewer`, `worker` pointing
+  at the 35B (today scout and reviewer are pinned to flash-next: left alone, one review
+  would unload the pair); `httpIdleTimeoutMs` raised so a long prefill behind other streams
+  isn't abandoned at 5 min; parallel concurrency 6 to start.
+- The `flash-auto` package is removed from `settings.json` packages while the pair is pi's
+  model. Any chat that picked flash-auto would otherwise trigger the group swap. pi-web's
+  last-picked-model memory must land on 27b; the `flash-auto` status line and the
+  superpowers reasoning floor are flash-only and become no-ops.
+- `~/.pi/agent/agents/worker.md` (created 2026-11-11: tool budget 40, orient in ≤ 10
+  calls, first edit by ~10, read with read tools not bash, stay in cwd) stays; it gets the
+  35B via the override, not frontmatter.
+
+### Roles and models
+
+| Role | Model | Tools | Runs | Notes |
+|---|---|---|---|---|
+| Orchestrator (pi session) | 27b | all | 1 stream | writes plans, briefs, merges, runs verify and the PR flow |
+| Scout | 35B | read-only | 2 in parallel, async | prefetches the next task's brief material while the current task runs |
+| Worker | 35B | read, grep, find, ls, bash, edit, write, contact_supervisor | 1 per task; N in parallel for independent tasks, each in a worktree | medium-effort equivalent: thinking on, per-turn `maxTokens` 32768, run deadline from pi-subagents |
+| Task reviewer | 35B | read-only | async, overlapped with the next task | guard-scoped diff; reports P1/P2 with file:line; the guard marks it on completion |
+| Final reviewer | 27b | read-only | once per plan | whole-branch review on the stronger model, one of 27b's extra slots; the guard keeps the `model` because 27b is resident |
+
+### Plan execution (the harness contract)
+
+The orchestrator follows `executing-plans` with these pi-specific rules, carried by the
+pi note the pi-web superpowers extension prepends (today's note says "inline only"; it
+becomes mode-aware):
+
+1. **Prefetch.** When task N starts, two scouts run async for task N+1: the files it names,
+   their seams, the test files and names, the spec sections. Their output (≤ 2k tokens each,
+   paths not pasted bodies where possible) goes into N+1's brief.
+2. **Brief.** Every worker brief carries: the task text from the plan, the scout findings,
+   acceptance (the exact failing test to write first, the verify command), the budget rules,
+   and "do not open a PR, do not push". Briefs live in the plan's `.superpowers/sdd/` workspace
+   as today.
+3. **Write.** One worker per task on the plan branch, launched as an **async single**
+   (`async: true`, with `checkpointBeforeDeadlineMs`): the orchestrator stays awake to take
+   scout and reviewer results, steer the worker on a P1, and resume it after a deadline.
+   Composite `tasks:[…]` fan-outs have no deadline or checkpoint, so a parallel group is N
+   separate async singles. pi-subagents infers an acceptance review for an async writer
+   (`acceptanceRole: writer`); it is turned off (`acceptance: { level: "none" }`) because
+   the gate is the orchestrator's verify plus the guard-scoped reviewer, not an unscoped
+   second reviewer per worker.
+   For a task group the plan marks as independent, one worker each with `worktree: true`;
+   the orchestrator merges the branches in plan order onto the plan branch and reruns verify
+   after each merge. **Worktrees are bare checkouts**, so: a `worktreeSetupHook` symlinks
+   the main checkout's `node_modules` (Playwright browsers already live in `~/.cache`);
+   workers in worktrees run typecheck and unit tests only, never e2e (ports collide and the
+   guard blocks a full e2e outside `verify` anyway); the full `npm run verify` runs once in
+   the main checkout after each merge. The plan branch is committed before a fan-out, since
+   allocation refuses a dirty checkout; `.superpowers/sdd/` is self-ignored so briefs don't
+   count.
+4. **Gate.** On the worker's commit: verify; on green, spawn the task reviewer async and
+   immediately start N+1. Findings arrive as the `subagent-notify` message pi already
+   delivers.
+5. **Fix.** Findings queue to the next task boundary, except a P1 touching a file the
+   current task edits, which is fixed now. Each fix is RED → GREEN plus a green suite, as
+   executing-plans requires.
+6. **Final.** After the last task: final review on 27b, one fix pass, then the thatsit-app
+   PR steps. Never finishing-a-development-branch.
+7. **Runaways.** The 35B has no effort levels, so caps are the harness's job: the worker's
+   tool budget, pi-subagents' run deadline with a checkpoint before it, and the per-turn
+   token cap. A worker that hits its deadline hands off state on disk; the orchestrator
+   resumes or finishes inline, as today.
+
+### Guard changes (`~/workspace/pi-web/guard`)
+
+- **Async scoped reviews.** `scopeReview()` today forces `async = false` and strips
+  `model`, so Decision 4 cannot happen under it. It keeps everything that makes the review
+  scoped (cwd, the incremental diff and its base, the budget, the header) and allows
+  `async: true`. The review mark that satisfies the PR gate and sets the next review's base
+  moves from the launch's tool result to the completion: the guard records the snapshot at
+  launch and writes the mark when that run's `subagent-notify` arrives with a finished
+  report. A review that is still running, timed out or failed leaves no mark, so the PR
+  gate still means "a completed review covers HEAD".
+- **Model override only for resident models.** `model` is kept when it names a model in the
+  currently loaded llama-swap group (the guard asks `127.0.0.1:9000/running`), and stripped
+  otherwise. That lets the final review run on 27b and makes the mid-plan swap to flash
+  impossible from a reviewer call.
+- `appDir()` maps `~/workspace/apps/worktrees/<app>/…` to `~/workspace/apps/<app>`, so a
+  worker running in a worktree is governed as that app (edit rules, verify, review scoping).
+  Alternatively `worktreeBaseDir` is set somewhere the guard already understands; the
+  builder picks.
+- The PR reminder (`pi-guard-pr`) fires for the parent session only. Today it reached
+  workers and one stopped to ask which instruction to obey.
+- Review scoping keeps working across worktree merges: the incremental diff base is the
+  last reviewed commit on the plan branch, not the worktree's.
+
+### Superpowers extension (`~/workspace/pi-web/superpowers`)
+
+The pi notes for `writing-plans` and `executing-plans` become mode-aware: with the pair
+configured (session model 27b, subagent default 35B) they describe the contract above;
+otherwise they keep the 2026-11-11 inline-only text. `writing-plans` additionally asks the
+plan to mark independent task groups explicitly, since rule 3 depends on it.
+
+## Phase 0: measure before switching
+
+All of this needs flash-next unloaded, so it waits for the running cad session to finish.
+Each gate is a number written into this document's "Measured" section before phase 1.
+
+1. **Co-load.** Boot both engines at the starting fractions. Record free memory after boot
+   (floor 10 GB), KV tokens per engine, and that llama-swap reports both ready.
+2. **Contention.** 27b c=1 tok/s alone; then while the 35B serves 4 and 8 workers on
+   realistic prompts (a worker turn: ~120k prompt, 2k output). 35B per-stream at c=4 and c=8
+   with 27b active. Chunked-prefill stalls on both engines (p95 inter-token gap).
+3. **Replay.** Run cad Tasks 2–4 from the plan under the pair, with the contract above.
+   Compare against the 2026-11-11 inline numbers: wall-clock per task, verify pass on
+   first try, reviewer findings, worker timeouts.
+
+Go if the per-task critical path beats ~45 min and nothing in the anti-goals happened.
+If the 27b stream collapses under load (throughput-first still needs it to finish a turn),
+the builder lowers worker concurrency before touching fractions.
+
+## Builder-check answers (my calls, 2026-11-11)
+
+A fresh reviewer read this document as the engineer who'd build it and asked three
+questions. None changes what Michael decided; the answers are now in the sections above:
+
+1. The guard allows async scoped reviews and marks them on completion; `model` survives
+   when it names a resident model (Guard changes).
+2. Workers are async singles with checkpoints; parallel groups are N async singles; the
+   inferred acceptance review is off (Plan execution, rule 3).
+3. Worktree workers get a `node_modules` symlink, run typecheck and unit tests only, and
+   the full verify runs once per merge in the main checkout (Plan execution, rule 3).
+
+Also from that check: pi-subagents' own config file (`~/.pi/agent/extensions/subagent/config.json`,
+for `parallel.concurrency`, `timeoutMs`, `checkpointBeforeDeadlineMs`, `worktreeBaseDir`)
+doesn't exist yet and is created in phase 1; pi-web's `LastModelStore`
+(`hub/src/last-model.ts`) is rewritten to 27b at the switch.
+
+## Left to the builder
+
+- Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
+- How the superpowers notes detect the mode (settings read at discovery vs a saved entry).
+- The merge procedure for parallel worktrees and how it is recorded in the plan ledger.
+- Whether the task reviewer's budget changes with the faster model.
+- Whether to keep `~/.pi/agent/agents/worker.md`'s read-tool block at 40 for a model that
+  decodes 3.5× faster.
+
+## Risks
+
+- The 35B numbers are a month old and were taken with the unsloth checkpoint at
+  `MAX_CONCURRENT_REQUESTS=2`; c=8 at a 0.42 fraction with 160k contexts is extrapolated.
+- 27b's speed on this box is community data; its DFlash acceptance on tool-call-heavy
+  output is unknown.
+- Qwen3.6-35B-A3B is a generation older than 27b; its tool-call reliability under pi's
+  tool schema hasn't been exercised here.
+- Two sglang engines contend for one memory bus; the contention test is the first thing
+  that can kill this design.
