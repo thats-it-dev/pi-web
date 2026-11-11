@@ -394,6 +394,13 @@ p50 321 ms, p95 370 ms — better than flash's own 70/100, and the orchestrator 
 prefills. Decision: `pair-auto` reads out on `qwen3.8-27b-pi` (flash-auto `models.ts`). Worker concurrency: **4**
 (Michael chose throughput over responsiveness; 6 is unmeasured). pi-subagents `config.json` updated.
 
+**Task 5 (14:59 PT), the switch:** `~/.pi/agent/settings.json` → `defaultModel: spark/pair-auto`, `subagents.defaultModel`
+and the scout/reviewer/worker overrides → `spark/qwen3.6-35b-a3b-sglang`, compaction reserve 60k on the three pair
+models, `httpIdleTimeoutMs: 900000` (backup `settings.json.bak-2026-11-11`); `~/.config/pi-web/last-model.json` →
+`pair-auto`; `systemctl --user restart pi-web-hub` (active 14:59:30). Checks: the superpowers manual copies carry the
+pair notes; `subagent({action:"models"})` lists every builtin role on the 35B (reviewer and worker from the user
+overrides, scout from its builtin config); the `pair-auto` routing check follows the 6-worker bench.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
