@@ -296,6 +296,12 @@ Michael allowed stopping the running cad pi session and unloading flash-next. Th
 gains a Task 0 that stops that session (pi process `PI_WEB=1`, started 2026-11-10 20:44 PT,
 and its detached worker runner) and unloads flash through llama-swap.
 
+**Config staged 2026-11-11** (harness plan Task 6, inert until the switch): `~/.pi/agent/extensions/subagent/config.json`
+(parallel 8/6, 45-min deadline, 5-min checkpoint, worktree hook), `~/.pi/agent/extensions/subagent/setup-worktree.mjs`
+(links the main checkout's `node_modules`, reported synthetic), `~/.pi/agent/agents/worker.md` (`acceptance: none`),
+`~/.pi/agent/models.json` (new `qwen3.8-27b-pi` entry; `qwen3.8-27b` and the 35B gain their `compat` blocks;
+backup `models.json.bak-2026-11-11`).
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
