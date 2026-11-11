@@ -158,8 +158,11 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	return { dir, snap };
 }
 
-export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr): void {
+export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env): void {
 	const home = homedir();
+	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
+	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
+	const child = !!env.PI_SUBAGENT_CHILD;
 	const rewrites = new Set<string>();
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
 	const reviews = new Map<string, { dir: string; snap: string }>();
@@ -214,7 +217,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	pi.on("agent_before_settle", (event, ctx) => {
 		// context.canContinue describes the context before these entries: it is false whenever the run ended on an
 		// assistant reply, which is exactly when a nudge is wanted. pi re-checks after appending the nudge.
-		if (event.outcome !== "completed") return undefined;
+		if (child || event.outcome !== "completed") return undefined;
 		const messages = event.context.contextMessages ?? [];
 		if (shouldNudge(messages)) return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
 		// The branch, not the context: after a compaction the last todo result is no longer in the context.

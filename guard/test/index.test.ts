@@ -7,11 +7,17 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
-function load(gitNeedsPr: (dir: string) => boolean = () => false) {
+function load(gitNeedsPr: (dir: string) => boolean = () => false, env: Record<string, string | undefined> = {}) {
 	const handlers: Record<string, (event: any, ctx: any) => any> = {};
-	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, gitNeedsPr);
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, gitNeedsPr, env);
 	return handlers;
 }
+
+test("inside a subagent child the guard blocks but never nudges", () => {
+	const h = load(() => true, { PI_SUBAGENT_CHILD: "1" });
+	assert.equal(h.agent_before_settle({ outcome: "completed", context: { canContinue: false, contextMessages: stalled } }, { cwd: "/" }), undefined);
+	assert.deepEqual(h.tool_call({ toolName: "bash", input: { command: "cd ~/workspace/apps/keeb && git push" } }, { cwd: "/" }), { block: true, reason: REASONS.push });
+});
 
 const stalled = [
 	{ role: "user", content: "fix it" },
