@@ -14,6 +14,20 @@ export const STATUS_KEY = "superpowers";
 export const STATUS_ON = "superpowers on";
 const MARKER = "superpowers:using-superpowers bootstrap for pi";
 
+/** flash-auto's reasoning floor entry (`{ level }`, latest wins, null clears). Following a long process skill
+ *  falls apart when the router reads a short reply ("No I want options lists") as a reason to stop thinking. */
+export const FLOOR_ENTRY = "flash-auto-floor";
+export const FLOOR = "medium";
+
+function savedFloor(branch: Iterable<unknown>): string | null {
+	let level: string | null = null;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type === "custom" && e.customType === FLOOR_ENTRY) level = ((e.data as { level?: unknown } | undefined)?.level as string | null) ?? null;
+	}
+	return level;
+}
+
 /** Superpowers skills left out: they fight the thatsit-app flow and the guard (worktrees move app edits out of
  *  ~/workspace/apps, finishing-a-development-branch pushes and merges, the review skills send unscoped reviewers). */
 export const EXCLUDED = ["using-git-worktrees", "finishing-a-development-branch", "subagent-driven-development", "requesting-code-review"];
@@ -121,7 +135,11 @@ export default function superpowersSwitch(pi: PiApi): void {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		on = savedState(ctx.sessionManager?.getBranch() ?? []);
+		const branch = [...(ctx.sessionManager?.getBranch() ?? [])];
+		on = savedState(branch);
+		// Chats switched on before the floor existed, or left with one after switching off.
+		const want = on ? FLOOR : null;
+		if (savedFloor(branch) !== want) pi.appendEntry(FLOOR_ENTRY, { level: want });
 		show(ctx);
 	});
 
@@ -132,6 +150,7 @@ export default function superpowersSwitch(pi: PiApi): void {
 			const next = want === "on" ? true : want === "off" ? false : !on;
 			on = next;
 			pi.appendEntry(ENTRY_TYPE, { on });
+			pi.appendEntry(FLOOR_ENTRY, { level: on ? FLOOR : null });
 			show(ctx);
 			ctx.ui?.notify(on ? "Superpowers on for this chat." : "Superpowers off: use /skill:<name> to run one.", "info");
 		},

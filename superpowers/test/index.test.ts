@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import superpowersSwitch, { bootstrap, buildManualSkills, catalog, ENTRY_TYPE, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
+import superpowersSwitch, { bootstrap, buildManualSkills, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
 
 const entry = (on: boolean) => ({ type: "custom", customType: ENTRY_TYPE, data: { on } });
 
@@ -71,15 +71,32 @@ test("the switch: command saves and shows the state; off by default with no boot
 	const saved: unknown[] = [];
 	const status: Record<string, string | undefined> = {};
 	const ctx = { sessionManager: { getBranch: () => [] }, ui: { setStatus: (k: string, t: string | undefined) => (status[k] = t), notify: () => {} } };
-	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: (_n, o) => (command = o.handler), appendEntry: (_t, d) => saved.push(d) });
+	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: (_n, o) => (command = o.handler), appendEntry: (t, d) => saved.push([t, d]) });
 	handlers.session_start({ reason: "startup" }, ctx);
 	assert.equal(status[STATUS_KEY], undefined);
 	assert.equal(handlers.context({ messages: [] }, ctx), undefined);
+	assert.deepEqual(saved, [], "a fresh chat with superpowers off writes nothing");
 	command!("on", ctx);
-	assert.deepEqual(saved, [{ on: true }]);
+	assert.deepEqual(saved, [[ENTRY_TYPE, { on: true }], [FLOOR_ENTRY, { level: "medium" }]], "on asks flash-auto for a medium reasoning floor");
 	assert.equal(status[STATUS_KEY], STATUS_ON);
+	saved.length = 0;
 	command!("off", ctx);
+	assert.deepEqual(saved, [[ENTRY_TYPE, { on: false }], [FLOOR_ENTRY, { level: null }]]);
 	assert.equal(status[STATUS_KEY], undefined);
 	handlers.session_start({ reason: "resume" }, { ...ctx, sessionManager: { getBranch: () => [entry(true)] } });
 	assert.equal(status[STATUS_KEY], STATUS_ON, "a resumed chat restores its switch");
+});
+
+test("session start brings an older chat's reasoning floor in line with its switch", () => {
+	const handlers: Record<string, (e: any, c: any) => any> = {};
+	const saved: unknown[] = [];
+	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: () => {}, appendEntry: (t, d) => saved.push([t, d]) });
+	const ctx = (branch: unknown[]) => ({ sessionManager: { getBranch: () => branch }, ui: { setStatus: () => {}, notify: () => {} } });
+	handlers.session_start({ reason: "resume" }, ctx([entry(true)]));
+	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: "medium" }]], "on but no floor yet: add it");
+	saved.length = 0;
+	handlers.session_start({ reason: "resume" }, ctx([entry(true), { type: "custom", customType: FLOOR_ENTRY, data: { level: "medium" } }]));
+	assert.deepEqual(saved, [], "already in line");
+	handlers.session_start({ reason: "resume" }, ctx([entry(false), { type: "custom", customType: FLOOR_ENTRY, data: { level: "medium" } }]));
+	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: null }]], "off with a floor left over: clear it");
 });

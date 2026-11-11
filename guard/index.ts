@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, type ReviewScope, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, type ReviewScope, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -193,6 +193,10 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 
 	// Mark a finished scoped review in its result, so the PR gate and the next review's base survive a restart.
 	pi.on("tool_result", (event) => {
+		if (event.toolName === "ask_user_question") {
+			const text = partialAnswers(event.input, event.details);
+			return text ? { content: [{ type: "text", text }], details: event.details } : undefined;
+		}
 		const scoped = reviews.get(event.toolCallId);
 		if (!scoped) return undefined;
 		reviews.delete(event.toolCallId);

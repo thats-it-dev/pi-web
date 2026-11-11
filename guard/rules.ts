@@ -303,6 +303,23 @@ export function waitingOnBgJob(run: Msg[]): boolean {
 	return open.size > 0;
 }
 
+// The reply puts a question to Michael: a sentence of prose ends in "?" (markdown emphasis and closing
+// brackets aside; "a?.b" or "?q=" don't count). pi-web replies close with a "TL;DR:" line, so the question is rarely the last character.
+// Code blocks and quotes don't count.
+export function asksUser(text: string): boolean {
+	let fenced = false;
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (line.startsWith("```")) {
+			fenced = !fenced;
+			continue;
+		}
+		if (fenced || line.startsWith(">")) continue;
+		if (/\?[*_`)\]"'”’]*(\s|$)/.test(line)) return true;
+	}
+	return false;
+}
+
 // A coding run (it edited or wrote a file) that ended right after a tool result with a short statement.
 export function shouldNudge(messages: Msg[]): boolean {
 	let start = messages.length;
@@ -318,7 +335,7 @@ export function shouldNudge(messages: Msg[]): boolean {
 	// Once sent back to tidy the to-do list, a short "list updated" reply is the expected answer.
 	if (run.some((m) => m.role === "custom" && m.customType === TODO_NUDGE_TYPE)) return false;
 	const text = textOf(last).trim();
-	return text.length < SHORT_REPLY && !text.endsWith("?");
+	return text.length < SHORT_REPLY && !asksUser(text);
 }
 
 // --- open to-dos at the end of a run ---
@@ -349,7 +366,7 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
-	if (textOf(last).trim().endsWith("?")) return false;
+	if (asksUser(textOf(last))) return false;
 	const worked = run.some((m) => m.role === "assistant" && parts(m).some((p) => p.type === "toolCall" && (p.name === "edit" || p.name === "write" || p.name === "todo")));
 	if (!worked) return false;
 	return run.filter((m) => m.role === "custom" && m.customType === TODO_NUDGE_TYPE).length < MAX_TODO_NUDGES;
@@ -396,7 +413,7 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	if (waitingOnBgJob(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
-	if (textOf(last).trim().endsWith("?")) return false;
+	if (asksUser(textOf(last))) return false;
 	return run.filter((m) => m.role === "custom" && m.customType === PR_NUDGE_TYPE).length < MAX_PR_NUDGES;
 }
 
@@ -419,4 +436,22 @@ export function dropReinjected(messages: unknown[] | undefined): void {
 		const m = messages[i] as { role?: string; customType?: string };
 		if (m?.role === "custom" && REINJECTED_TYPES.has(m.customType ?? "")) messages.splice(i, 1);
 	}
+}
+
+// --- a questionnaire closed partway ---
+
+type Answer = { questionIndex?: number; question?: string; kind?: string; answer?: string | null; selected?: string[] };
+
+// rpiv-ask-user-question reports any cancelled questionnaire as "User declined to answer questions" and keeps
+// the answers given before the cancel in `details`, which the model never sees. Returns the text the model
+// should get instead, or undefined when there is nothing to recover (a plain decline, or a full answer).
+export function partialAnswers(input: { questions?: { question?: string }[] } | undefined, details: unknown): string | undefined {
+	const d = details as { cancelled?: boolean; answers?: Answer[] } | undefined;
+	if (!d?.cancelled || !d.answers?.length) return undefined;
+	const questions = input?.questions ?? [];
+	const total = Math.max(questions.length, d.answers.length);
+	const given = d.answers.map((a) => `"${a.question ?? ""}"="${a.kind === "multi" ? (a.selected ?? []).join(", ") : (a.answer ?? "")}"`).join(" ");
+	const done = new Set(d.answers.map((a) => a.questionIndex));
+	const open = questions.map((q, i) => (done.has(i) ? null : `"${q.question ?? ""}"`)).filter(Boolean);
+	return `The user answered ${d.answers.length} of ${total} questions, then closed the questionnaire: ${given} Use these answers.${open.length ? ` Not answered: ${open.join(", ")}.` : ""} Closing it is not a preference about how you ask: keep the same format, and ask what is still open again if you need it.`;
 }

@@ -195,3 +195,13 @@ test("tool_result marks a scoped review so the PR gate sees it", () => {
 	const r = h.tool_result({ toolCallId: "unknown", content: [{ type: "text", text: "x" }], isError: false }, { cwd: "/" });
 	assert.equal(r, undefined, "only calls the guard scoped");
 });
+
+test("tool_result gives the model a cancelled questionnaire's partial answers", () => {
+	const h = load();
+	const details = { cancelled: true, answers: [{ questionIndex: 0, question: "Q1", kind: "option", answer: "A" }] };
+	const r = h.tool_result({ toolCallId: "q", toolName: "ask_user_question", input: { questions: [{ question: "Q1" }, { question: "Q2" }] }, content: [{ type: "text", text: "User declined to answer questions" }], details, isError: false }, { cwd: "/" });
+	assert.match(r.content[0].text, /answered 1 of 2.*"Q1"="A"/);
+	assert.equal(r.details, details);
+	const plain = h.tool_result({ toolCallId: "q2", toolName: "ask_user_question", input: {}, content: [], details: { cancelled: true, answers: [] }, isError: false }, { cwd: "/" });
+	assert.equal(plain, undefined);
+});

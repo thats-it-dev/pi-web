@@ -1,7 +1,7 @@
 import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, appsNeedingPr, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
+import { appDir, appsNeedingPr, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -401,4 +401,41 @@ test("push and CI reasons send CI waits through bg_bash and rerun the same pr co
 		assert.doesNotMatch(r, /`pr` and `ship` already wait|pushes, waits for CI/);
 	}
 	assert.match(REASONS.ci, /rerun the same `pr` command/);
+});
+
+test("a reply that asks mid-text and ends with a TL;DR line is waiting on Michael: no nudges", () => {
+	const open = [{ id: 1, subject: "Brainstorm the design", status: "in_progress" }];
+	const asked = say(
+		"Route 2 locked.\n\n**Question 1 — what is the last part you wanted to print?** Describe it as concretely as you can.\n\nWhy I'm asking: it changes the sketch model.\n\nTL;DR: route confirmed; now need the part you want to print.",
+	);
+	assert.equal(shouldNudgeTodos([user, todoCall, result, asked], open), false);
+	assert.equal(shouldNudge([user, edit, result, say("Which colour, red or blue?\n\nTL;DR: waiting on the colour.")]), false);
+	// A question inside a code block or a quote is not asking Michael anything.
+	const quoted = say("Done: the guard now handles it.\n\n```\nif (x?) y\n```\n> was it red?\n\nTL;DR: guard fixed.");
+	assert.equal(shouldNudgeTodos([user, todoCall, result, quoted], open), true);
+});
+
+test("a cancelled questionnaire still hands the model the answers Michael gave", () => {
+	const input = { questions: [{ question: "How should parts live?" }, { question: "How to start a part?" }, { question: "Real parts?" }, { question: "Export?" }] };
+	const details = {
+		cancelled: true,
+		answers: [
+			{ questionIndex: 0, question: "How should parts live?", kind: "option", answer: "Separate bodies in one file (Recommended)" },
+			{ questionIndex: 1, question: "How to start a part?", kind: "custom", answer: "Take heavy inspiration from shapr3d" },
+		],
+	};
+	const text = partialAnswers(input, details);
+	assert.ok(text);
+	assert.match(text, /answered 2 of 4/);
+	assert.match(text, /"How should parts live\?"="Separate bodies in one file \(Recommended\)"/);
+	assert.match(text, /"How to start a part\?"="Take heavy inspiration from shapr3d"/);
+	assert.match(text, /Real parts\?/);
+	assert.match(text, /not .*preference/i);
+	// Multi-select answers list what was picked.
+	const multi = { cancelled: true, answers: [{ questionIndex: 0, question: "Q", kind: "multi", answer: null, selected: ["A", "C"] }] };
+	assert.match(partialAnswers({ questions: [{ question: "Q" }, { question: "R" }] }, multi) ?? "", /"Q"="A, C"/);
+	// A plain decline, or an answered questionnaire, is left as it is.
+	assert.equal(partialAnswers(input, { cancelled: true, answers: [] }), undefined);
+	assert.equal(partialAnswers(input, { cancelled: false, answers: details.answers }), undefined);
+	assert.equal(partialAnswers(input, undefined), undefined);
 });
