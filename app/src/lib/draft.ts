@@ -7,15 +7,17 @@ export interface Draft {
 	model: { provider: string; modelId: string } | null;
 	thinking: ThinkingLevel | null;
 	approval: ApprovalMode | null;
+	superpowers: boolean;
 }
 
 export interface Handoff {
 	text: string;
 	images: ImageInput[];
 	approval: ApprovalMode | null;
+	superpowers: boolean;
 }
 
-const fresh = (): Draft => ({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null });
+const fresh = (): Draft => ({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 
 // The new-chat draft and the first message waiting for its session; one per tab.
 let draft = fresh();

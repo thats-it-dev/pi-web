@@ -13,7 +13,7 @@ const model = (over: Partial<ModelInfo> = {}): ModelInfo => ({
 	...over,
 });
 
-const view = { step: "root" as const, canImages: true, cwd: "~", cwdFixed: false, model: "flash · medium", approval: "semi" as const, recentCwds: [] };
+const view = { step: "root" as const, canImages: true, cwd: "~", cwdFixed: false, model: "flash · medium", approval: "semi" as const, superpowers: false, recentCwds: [] };
 
 describe("thinkingLevelsFor", () => {
 	it("hides levels for a non-reasoning model", () => {
@@ -28,7 +28,7 @@ describe("thinkingLevelsFor", () => {
 describe("chatMenu rows", () => {
 	it("omits attach image when the model takes no images", () => {
 		expect(menuRows({ ...view, canImages: false }).map((r) => r.label)).not.toContain("attach image");
-		expect(menuRows(view).map((r) => r.label)).toEqual(["attach image", "folder", "model", "approvals"]);
+		expect(menuRows(view).map((r) => r.label)).toEqual(["attach image", "folder", "model", "approvals", "superpowers"]);
 	});
 
 	it("a fixed folder row is not clickable and says fixed once a chat starts", () => {
@@ -41,5 +41,10 @@ describe("chatMenu rows", () => {
 		const rows = menuRows(view);
 		expect(rows.find((r) => r.key === "model")?.value).toBe("flash · medium");
 		expect(rows.find((r) => r.key === "approvals")?.value).toBe("semi");
+	});
+
+	it("superpowers is a switch, off by default", () => {
+		expect(menuRows(view).find((r) => r.key === "superpowers")).toMatchObject({ value: "off", toggle: true, hint: "only when you type /skill:<name>" });
+		expect(menuRows({ ...view, superpowers: true }).find((r) => r.key === "superpowers")).toMatchObject({ value: "on", hint: "pi uses the skills on its own" });
 	});
 });

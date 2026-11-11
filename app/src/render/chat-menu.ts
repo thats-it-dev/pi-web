@@ -12,6 +12,7 @@ export interface ChatMenuView {
 	cwdFixed: boolean;
 	model: string; // "name · thinking"
 	approval: ApprovalMode | null;
+	superpowers: boolean; // the superpowers skills run on their own (on) or only by /skill:<name> (off)
 	recentCwds: string[];
 }
 
@@ -19,9 +20,10 @@ export interface ChatMenuHandlers {
 	step(s: MenuStep): void;
 	attach(): void;
 	pickCwd(path: string): void;
+	toggleSuperpowers(): void;
 }
 
-export type MenuRowKey = "attach" | "folder" | "model" | "approvals";
+export type MenuRowKey = "attach" | "folder" | "model" | "approvals" | "superpowers";
 
 export interface MenuRow {
 	key: MenuRowKey;
@@ -29,6 +31,7 @@ export interface MenuRow {
 	value: string;
 	disabled: boolean;
 	hint?: string;
+	toggle?: boolean; // a switch: clicking flips it in place instead of opening a step
 }
 
 export const FOLDER_FIXED_HINT = "fixed once a chat starts";
@@ -47,11 +50,12 @@ export function menuRows(v: ChatMenuView): MenuRow[] {
 			: { key: "folder", label: "folder", value: v.cwd, disabled: false },
 		{ key: "model", label: "model", value: v.model, disabled: false },
 		{ key: "approvals", label: "approvals", value: v.approval ?? "—", disabled: false },
+		{ key: "superpowers", label: "superpowers", value: v.superpowers ? "on" : "off", disabled: false, toggle: true, hint: v.superpowers ? "pi uses the skills on its own" : "only when you type /skill:<name>" },
 	);
 	return rows;
 }
 
-// Lucide icons (ISC): image-plus, folder, cpu and shield-check.
+// Lucide icons (ISC): image-plus, folder, cpu, shield-check and zap.
 const icon = (body: SVGTemplateResult) =>
 	html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICONS: Record<MenuRowKey, TemplateResult> = {
@@ -59,6 +63,7 @@ const ICONS: Record<MenuRowKey, TemplateResult> = {
 	folder: icon(svg`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />`),
 	model: icon(svg`<rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2" /><path d="M15 20v2" /><path d="M2 15h2" /><path d="M2 9h2" /><path d="M20 15h2" /><path d="M20 9h2" /><path d="M9 2v2" /><path d="M9 20v2" />`),
 	approvals: icon(svg`<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" />`),
+	superpowers: icon(svg`<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />`),
 };
 
 const STEP_TITLES: Record<Exclude<MenuStep, "root">, string> = { folder: "folder", model: "model", approvals: "approvals" };
@@ -74,7 +79,15 @@ export function chatMenu(v: ChatMenuView, on: ChatMenuHandlers): TemplateResult 
 				<span class="val">${r.value}</span>
 				${r.disabled ? html`<span class="chev" aria-hidden="true"></span>` : html`<span class="chev" aria-hidden="true">›</span>`}`;
 			if (r.disabled) return html`<div class="mrow off" aria-disabled="true">${body}</div>`;
-			return html`<button class="mrow" @click=${() => (r.key === "attach" ? on.attach() : on.step(r.key))}>${body}</button>`;
+			if (r.toggle) {
+				const checked = r.value === "on";
+				return html`<button class="mrow" role="switch" aria-checked=${checked ? "true" : "false"} @click=${() => on.toggleSuperpowers()}>
+					<span class="ic">${ICONS[r.key]}</span>
+					<span class="lbl">${r.label}${r.hint ? html`<small>${r.hint}</small>` : nothing}</span>
+					<span class="sw ${checked ? "on" : ""}" aria-hidden="true"><i></i></span>
+				</button>`;
+			}
+			return html`<button class="mrow" @click=${() => (r.key === "attach" ? on.attach() : on.step(r.key as MenuStep))}>${body}</button>`;
 		})}</div>`;
 	}
 	const back = html`<button class="back u" @click=${() => on.step("root")}>‹ ${STEP_TITLES[v.step]}</button>`;
@@ -103,6 +116,10 @@ export const chatMenuStyles = css`
 	.mrow .lbl small { font-size: 0.75rem; color: var(--text-muted); }
 	.mrow .val { flex: 0 1 auto; min-width: 0; color: var(--text-secondary); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.mrow .chev { flex: none; width: 0.8em; color: var(--text-muted); }
+	.sw { flex: none; width: 36px; height: 20px; border-radius: 10px; background: var(--line); position: relative; transition: background 0.15s; }
+	.sw i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); transition: transform 0.15s; }
+	.sw.on { background: var(--primary); }
+	.sw.on i { transform: translateX(16px); }
 	.back { color: var(--text-secondary); font-size: 0.9rem; padding: 2px 0 10px; }
 	form.cwd input { width: 100%; font-family: var(--font-mono); }
 `;

@@ -176,7 +176,7 @@ export class PiNewChat extends LitElement {
 		const { model, thinking } = this.choice;
 		try {
 			const { sessionId } = await this.api.createSession({ cwd: d.cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}) });
-			handOff(sessionId, { text, images, approval: d.approval });
+			handOff(sessionId, { text, images, approval: d.approval, superpowers: d.superpowers });
 			resetDraft();
 			this.sent = true;
 			location.hash = hrefFor({ name: "session", id: sessionId });
@@ -269,6 +269,7 @@ export class PiNewChat extends LitElement {
 				cwdFixed: false,
 				model: model ? `${model.name}${thinking ? ` · ${thinking}` : ""}` : "—",
 				approval,
+				superpowers: d.superpowers,
 				recentCwds: this.recentCwds.map((c) => abbreviateCwd(c, this.homeDir)),
 			},
 			{
@@ -282,6 +283,7 @@ export class PiNewChat extends LitElement {
 					this.edit({ cwd: path });
 					this.menuStep = "root";
 				},
+				toggleSuperpowers: () => this.edit({ superpowers: !d.superpowers }),
 			},
 		);
 		if (step === "model") return html`${menu}${this.renderModels(() => (this.menuStep = "root"))}`;

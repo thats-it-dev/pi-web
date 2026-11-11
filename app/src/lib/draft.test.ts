@@ -8,10 +8,10 @@ beforeEach(() => {
 
 describe("draft chat", () => {
 	it("a fresh draft is ~ with no model", () => {
-		expect(getDraft()).toEqual({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null });
+		expect(getDraft()).toEqual({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 	});
 	it("takeHandoff returns the message once", () => {
-		const msg = { text: "hi", images: [], approval: null };
+		const msg = { text: "hi", images: [], approval: null, superpowers: false };
 		handOff("s1", msg);
 		expect(takeHandoff("s2")).toBeNull();
 		expect(takeHandoff("s1")).toEqual(msg);
@@ -20,6 +20,6 @@ describe("draft chat", () => {
 	it("resetDraft clears text, images, folder and model", () => {
 		updateDraft({ text: "x", images: [{ mimeType: "image/png", data: "a" }], cwd: "/a", model: { provider: "p", modelId: "m" } });
 		resetDraft();
-		expect(getDraft()).toEqual({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null });
+		expect(getDraft()).toEqual({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 	});
 });

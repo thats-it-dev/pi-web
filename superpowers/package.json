@@ -1,0 +1,13 @@
+{
+	"name": "@pi-web/superpowers",
+	"private": true,
+	"type": "module",
+	"description": "pi extension: a per-chat switch that keeps the superpowers skills manual until the chat turns them on",
+	"keywords": ["pi-package"],
+	"pi": { "extensions": ["./index.ts"] },
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+}

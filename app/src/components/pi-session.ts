@@ -291,6 +291,7 @@ export class PiSession extends LitElement {
 		const msg = s?.snapshot ? takeHandoff(s.id) : null;
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
+		if (msg.superpowers && !superpowersOn(s.snapshot)) await this.run({ type: "prompt", text: "/superpowers on", mode: "send" });
 		await this.send(msg.text, msg.images, "send");
 	}
 
@@ -586,6 +587,7 @@ export class PiSession extends LitElement {
 				cwdFixed: true, // a running session's folder can't change
 				model: model ? `${model.name} · ${snap.state.thinkingLevel}` : "—",
 				approval: snap.capabilities.dialogs === "terminal" ? null : snap.approvalMode,
+				superpowers: superpowersOn(snap),
 				recentCwds: [],
 			},
 			{
@@ -596,6 +598,7 @@ export class PiSession extends LitElement {
 					this.composer?.pickImages();
 				},
 				pickCwd: () => {},
+				toggleSuperpowers: () => void this.run({ type: "prompt", text: `/superpowers ${superpowersOn(snap) ? "off" : "on"}`, mode: "send" }),
 			},
 		);
 		if (step === "model")
@@ -617,3 +620,8 @@ export class PiSession extends LitElement {
 	}
 }
 customElements.define("pi-session", PiSession);
+
+// The superpowers switch, as the superpowers extension reports it in the session's statuses.
+function superpowersOn(snap: Snapshot): boolean {
+	return snap.statuses?.superpowers === "superpowers on";
+}
