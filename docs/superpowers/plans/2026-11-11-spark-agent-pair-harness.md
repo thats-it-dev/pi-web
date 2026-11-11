@@ -177,7 +177,7 @@ test("scopeReview keeps a resident model and strips any other, and a failed look
 - Test: `superpowers/test/index.test.ts`
 
 **Interfaces:**
-- Produces: `export function pairMode(settings: unknown): boolean` — true when `defaultModel` ends with `qwen3.8-27b` and `subagents.defaultModel` ends with `qwen3.6-35b-a3b-sglang`.
+- Produces: `export function pairMode(settings: unknown): boolean` — true when `defaultModel` ends with `pair-auto` or `qwen3.8-27b-pi`, and `subagents.defaultModel` ends with `qwen3.6-35b-a3b-sglang`.
 - `export const PI_NOTES_PAIR: Record<string, string>` with entries for `writing-plans` and `executing-plans`.
 - `forPi(name, md, notes = PI_NOTES)`; `buildManualSkills(src, out, exclude, supportOnly, notes = PI_NOTES)`; `resources_discover` reads `~/.pi/agent/settings.json` and passes `PI_NOTES_PAIR` when `pairMode` is true.
 
@@ -190,7 +190,8 @@ Note text (exact, so the model gets one contract):
 
 ```ts
 test("pairMode reads the pair from settings", () => {
-	assert.equal(pairMode({ defaultModel: "spark/qwen3.8-27b", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+	assert.equal(pairMode({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+	assert.equal(pairMode({ defaultModel: "spark/qwen3.8-27b-pi", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
 	assert.equal(pairMode({ defaultModel: "flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
 	assert.equal(pairMode(undefined), false);
 });
@@ -220,10 +221,58 @@ test("the pair notes replace the inline-only ones", () => {
 - `config.json`: `{ "parallel": { "maxTasks": 8, "concurrency": 6 }, "timeoutMs": 2700000, "checkpointBeforeDeadlineMs": 300000, "worktreeSetupHook": "~/.pi/agent/extensions/subagent/setup-worktree.mjs", "worktreeSetupHookTimeoutMs": 30000 }`
 - `setup-worktree.mjs`: reads the stdin JSON (`repoRoot`, `worktreePath`), symlinks `${repoRoot}/node_modules` to `${worktreePath}/node_modules` when the source exists, prints `{"syntheticPaths":["node_modules"]}`; exits non-zero with a message on any other error.
 - `worker.md` frontmatter gains `acceptance: {"level":"none","reason":"the orchestrator's verify and guard-scoped reviewer are the gate"}`.
-- `models.json`: the `qwen3.8-27b` entry gains `"thinkingLevelMap": {"minimal":"low","low":"low","medium":"medium","high":"xhigh","xhigh":"xhigh","max":"xhigh"}` and the flash-next `compat` block verbatim (`thinkingFormat: chat-template`, `chatTemplateKwargs` with `enable_thinking` and `reasoning_effort`); the 35B entry gains `compat` with `thinkingFormat: chat-template` and `chatTemplateKwargs: { "enable_thinking": { "$var": "thinking.enabled" } }` only (its template has no effort levels).
+- `models.json`: a new spark entry `{ "id": "qwen3.8-27b-pi", "name": "Qwen3.8 27B pi (FP8)", "reasoning": true, "input": ["text","image"], "contextWindow": 262144, "maxTokens": 32768 }` with `"thinkingLevelMap": {"minimal":"low","low":"low","medium":"medium","high":"xhigh","xhigh":"xhigh","max":"xhigh"}` and the flash-next `compat` block verbatim (`thinkingFormat: chat-template`, `chatTemplateKwargs` with `enable_thinking` and `reasoning_effort`); the existing `qwen3.8-27b` entry gains the same two blocks (it stays for the A/B); the 35B entry gains `compat` with `thinkingFormat: chat-template` and `chatTemplateKwargs: { "enable_thinking": { "$var": "thinking.enabled" } }` only (its template has no effort levels).
 
 - [ ] **Step 1: Write the hook and a check:** run `echo '{"repoRoot":"'$PWD'/a","worktreePath":"'$PWD'/b"}' | node ~/.pi/agent/extensions/subagent/setup-worktree.mjs` from a scratch dir with `a/node_modules` present and `b` empty. Expected: prints `{"syntheticPaths":["node_modules"]}` and `b/node_modules` is a symlink to `a/node_modules`.
 - [ ] **Step 2: Write `config.json`** and validate: `node -e 'JSON.parse(require("fs").readFileSync(process.env.HOME+"/.pi/agent/extensions/subagent/config.json","utf8"))'`.
 - [ ] **Step 3: Edit `models.json` and `worker.md`**; validate both parse: the JSON as in step 2; the frontmatter with `node -e` splitting on `---` and `JSON.parse` of the `acceptance:` value.
 - [ ] **Step 4: Confirm nothing changed for the running setup:** `grep -c flash-auto ~/.pi/agent/settings.json` still reports the package and default model (plan 2 switches them).
-- [ ] **Step 5: Commit** in pi-web only a note: append a "Config staged 2026-11-11" line to the spec's "Builder-check answers" section listing the four files, then `git commit -am "docs(superpowers): pair config staged under ~/.pi/agent"` and `git push`.
+- [ ] **Step 5: Commit** in pi-web only a note: append a "Config staged 2026-11-11" line to the spec's "Builder-check answers" section listing the four files, then `git commit -am "docs(superpowers): pair config staged under ~/.pi/agent"`.
+
+### Task 7: `spark/pair-auto` router (repo `~/workspace/flash-auto`)
+
+**Files:**
+- Create: `src/targets.ts`
+- Modify: `src/models.ts`, `src/extension.ts`, `src/flash.ts` (readout model option only)
+- Test: `test/targets.test.ts`, `test/models.test.ts`, `test/extension.test.ts`
+
+**Interfaces:**
+- `src/targets.ts`: `export interface Target { physicalId: string; thinkingLevel: Level }` and `export const PAIR_TARGETS: Record<Level, Target> = { off: { physicalId: "qwen3.6-35b-a3b-sglang", thinkingLevel: "off" }, low: { physicalId: "qwen3.6-35b-a3b-sglang", thinkingLevel: "low" }, medium: { physicalId: "qwen3.8-27b-pi", thinkingLevel: "medium" }, xhigh: { physicalId: "qwen3.8-27b-pi", thinkingLevel: "xhigh" } }` (the 35B's `low` is "thinking on": its template has no effort levels, so pi's level only toggles `enable_thinking`).
+- `src/models.ts`: `AutoModel` gains `targets?: Record<Level, Target>` and `readoutModel: string` (llama-swap model name the readout runs on; today's entry gets `readoutModel: "qwen3.8-flash-next"`); `AUTO_MODELS` gains `{ virtualId: "pair-auto", name: "Spark pair (auto)", provider: "spark", physicalId: "qwen3.8-27b-pi", baseUrl: "http://localhost:9000", swapModel: "qwen3.6-35b-a3b-sglang", readoutModel: "qwen3.6-35b-a3b-sglang", targets: PAIR_TARGETS }`. `export function activeAutoModels(env = process.env): AutoModel[]` returns only `pair-auto` unless `env.PI_FLASH_AUTO === "1"`, in which case only `flash-auto` (never both: flash-auto's fallback dispatches to flash-next and would swap the group).
+- `src/extension.ts`: `createRoute` resolves `auto.targets?.[d.level] ?? { physicalId: auto.physicalId, thinkingLevel: d.level }`, looks the physical model up per request, and returns it; the registered virtual model's `contextWindow` is `262_144` for `pair-auto` (`500_000` for flash-auto). `default` registers `activeAutoModels()`. `isFlashRunning`/`createFlashClassifier` get `model: auto.readoutModel` and `swapModel` for the `/running` check.
+- `src/flash.ts`: no behavior change; the `model` option already selects the readout model. The readout request keeps `chat_template_kwargs: { enable_thinking: false }`.
+
+- [ ] **Step 1: Write the failing tests:**
+
+```ts
+// test/targets.test.ts
+test("the pair targets send off/low to the MoE and medium/xhigh to the pi tune", () => {
+	assert.equal(PAIR_TARGETS.off.physicalId, "qwen3.6-35b-a3b-sglang");
+	assert.equal(PAIR_TARGETS.low.physicalId, "qwen3.6-35b-a3b-sglang");
+	assert.equal(PAIR_TARGETS.medium.physicalId, "qwen3.8-27b-pi");
+	assert.equal(PAIR_TARGETS.xhigh.thinkingLevel, "xhigh");
+});
+// test/models.test.ts (replace the "one auto model" test)
+test("pair-auto is the active virtual model; flash-auto only when PI_FLASH_AUTO=1", () => {
+	assert.deepEqual(activeAutoModels({}).map((m) => m.virtualId), ["pair-auto"]);
+	assert.deepEqual(activeAutoModels({ PI_FLASH_AUTO: "1" }).map((m) => m.virtualId), ["flash-auto"]);
+	assert.equal(AUTO_MODELS.find((m) => m.virtualId === "pair-auto")?.readoutModel, "qwen3.6-35b-a3b-sglang");
+});
+// test/extension.test.ts
+test("pair-auto routes a low decision to the MoE and an xhigh one to the pi tune", async () => {
+	// ctx.modelRegistry.find returns stubs for both ids; setup("low") → r.model.id === "qwen3.6-35b-a3b-sglang", r.thinkingLevel === "low"
+	// setup("xhigh") → r.model.id === "qwen3.8-27b-pi", r.thinkingLevel === "xhigh"
+	// a fallback decision (classify rejects) → "qwen3.8-27b-pi" at "medium"
+});
+```
+
+- [ ] **Step 2: Run** `cd ~/workspace/flash-auto && npm test`. Expected: FAIL on the new tests; the old "one auto model" test is replaced, not kept.
+- [ ] **Step 3: Implement** as in Interfaces. Keep the decision log line's `virtual` field so the two routers' logs stay separable.
+- [ ] **Step 4: Run** `npm test` and `npm run typecheck`. Expected: green.
+- [ ] **Step 5: Live check is plan 2's** (both engines must be resident); do not run `bench/smoke.ts` here.
+- [ ] **Step 6: Commit** in flash-auto: `git add -A && git commit -m "feat: pair-auto routes each prompt to the MoE or the pi tune by its reasoning level"` (do not push the repo's private data; `git status` must show none of `data/` or `results/*.jsonl`).
+
+### Task 8: Push
+
+- [ ] **Step 1:** `cd ~/workspace/pi-web && npm test --workspaces --if-present` or the per-package tests from Tasks 1–5 once more; all green.
+- [ ] **Step 2:** `git push` pi-web master and `cd ~/workspace/flash-auto && git push`.

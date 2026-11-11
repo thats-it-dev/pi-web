@@ -228,6 +228,74 @@ for `parallel.concurrency`, `timeoutMs`, `checkpointBeforeDeadlineMs`, `worktree
 doesn't exist yet and is created in phase 1; pi-web's `LastModelStore`
 (`hub/src/last-model.ts`) is rewritten to 27b at the switch.
 
+## Addendum (Michael, 2026-11-11, after plan review)
+
+Three additions. They change the orchestrator checkpoint, replace the "full switch" with a
+router, and allow phase 0 to start now.
+
+### 1. The 27b is the pi fine-tune: `bytkim/Qwen3.8-27B-pi-FP8`
+
+SFT on successful pi sessions plus GRPO with an effort-ordered reward; on Terminal-Bench 2.1 it
+matches the base at xhigh (67/89) while running at **medium with ~41% fewer output tokens**
+(37.4k vs 63.5k per task), and reaches 71/89 at xhigh ([blog](https://huggingface.co/blog/bytkim/qwen38-27b-pi),
+[FP8 card](https://huggingface.co/bytkim/Qwen3.8-27B-pi-FP8)). Its template keeps
+`enable_thinking` and `reasoning_effort` low/medium/xhigh. Ships as BF16, block-wise FP8
+(~30.4 GB) and GGUF; **no NVFP4**. The base's MTP heads are preserved and the DFlash2 draft
+(incoai mirror, 3.85 GB) is stated to work with either target format, but neither was
+retrained on the tune, so acceptance length is a phase-0 number.
+
+Consequences, replacing the serving table above:
+
+| Engine | Fraction | Reserved | Weights | Left for KV/state | Streams |
+|---|---|---|---|---|---|
+| `qwen3.8-27b-pi` (sglang, FP8 weights, FP8 KV, DFlash2) | 0.44 | 53.5 GB | 34.2 GB | ~19 GB ≈ 400k tokens ≈ 1.5 full contexts | `--max-running-requests 3` |
+| `qwen3.6-35b-a3b-sglang` | 0.32 | 38.9 GB | 25.7 GB | ~13 GB ≈ 600k tokens ≈ 4 workers at 150k | `MAX_CONCURRENT_REQUESTS=6` |
+| Both + overhead | 0.76 | 92 + ~18 | | | ~11.6 GB free, floor 10 |
+
+FP8 reads twice the bytes per step of NVFP4: on vLLM at c=16 FP8 was ~25% slower than NVFP4
+([forum](https://forums.developer.nvidia.com/t/qwen3-8-27b-on-dgx-spark-using-vllm-nvfp4-vs-fp8-performance/380258)),
+and one user saw 10–12 tok/s single-stream with vLLM+MTP on FP8. With sglang+DFlash the
+expectation is ~30 tok/s against the base's ~48, paid back by the 41% token cut. Phase 0
+runs an A/B (base NVFP4 vs pi FP8: tok/s at c=1, DFlash accept length, output tokens and
+wall-clock on one fixed pi task). If the pi tune loses on wall-clock, the fallback is a
+self-quantized NVFP4 of `bytkim/Qwen3.8-27B-pi` (llm-compressor, the RadixArk BF16-lm_head
+recipe), a separate task; the base NVFP4 stays serveable for that comparison.
+
+### 2. A router picks the model and the level: `spark/pair-auto`
+
+flash-auto's controller is reimplemented for the pair. pi's default model becomes the virtual
+`spark/pair-auto`; per user message it decides a level and the level implies the engine:
+
+| Readout level | Engine | Thinking |
+|---|---|---|
+| off | 35B-A3B | off (`enable_thinking: false`) |
+| low | 35B-A3B | on |
+| medium | 27b-pi | `reasoning_effort: medium` |
+| xhigh | 27b-pi | `reasoning_effort: xhigh` |
+
+- The one-token readout keeps flash-auto's prompt and letters (so the frozen benchmark set
+  and `FLASH_PROMPT_VERSION` still apply) but runs on the **35B** with thinking off: it is
+  always resident and fast. Same sticky rules: continuation and retry reuse the turn's
+  decision; go-ahead and steering keep the previous one; a failed decision falls back to
+  **medium (27b-pi)**, never to a model that isn't loaded.
+- The `flash-auto-floor` session entry keeps its name and meaning on the four-level scale:
+  the superpowers switch's `medium` floor therefore pins a plan-running chat to 27b-pi.
+- Subagents are not routed: scout, reviewer and worker stay pinned to the 35B through
+  `agentOverrides`; the final reviewer names `spark/qwen3.8-27b-pi`.
+- Switching engines mid-session costs a prefill of the context on the other engine unless its
+  radix cache still holds the prefix. The decision is per user message, never per tool step,
+  so a turn never switches; phase 0 records TTFT right after a switch at ~100k context.
+- `flash-auto` (the virtual model that targets flash-next) is no longer registered while the
+  pair is pi's model: its fallback path would dispatch to flash-next and trigger the group
+  swap. The package stays installed; it now provides `pair-auto`.
+- The virtual model declares `contextWindow: 262144`, the smaller of the two.
+
+### 3. Phase 0 may start now
+
+Michael allowed stopping the running cad pi session and unloading flash-next. The switch plan
+gains a Task 0 that stops that session (pi process `PI_WEB=1`, started 2026-11-10 20:44 PT,
+and its detached worker runner) and unloads flash through llama-swap.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
