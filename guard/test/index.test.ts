@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, needsPr, scopeReview, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -246,4 +246,18 @@ test("scopeReview keeps a resident model and strips any other, and a failed look
 	const down: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-27b-pi" };
 	assert.ok(!("block" in (scopeReview(down, branch, home, home, () => { throw new Error("ECONNREFUSED"); }) ?? {})));
 	assert.equal(down.model, undefined);
+});
+
+test("an async scoped review whose launch result has no run id gets a pending mark that never counts", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 5;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb", async: true };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r9", input }, ctx), undefined);
+	const r = h.tool_result({ toolCallId: "r9", toolName: "subagent", content: [{ type: "text", text: "Launched in the background." }], isError: false }, ctx);
+	const text = r.content.map((c: any) => c.text ?? "").join("\n");
+	assert.match(text, /\[pi-guard\] review pending \S+ at [0-9a-f]{40} run unknown/);
+	assert.doesNotMatch(text, /\[pi-guard\] reviewed /);
+	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }], () => "complete"), false, "an unknown run never counts, whatever the resolver says");
 });

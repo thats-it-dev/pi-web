@@ -1,7 +1,10 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, appsNeedingPr, asyncRunId, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, defaultRunState, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -461,4 +464,22 @@ test("a pending review counts only once its run is complete, and the latest comp
 test("asyncRunId reads the run id from an async launch result", () => {
 	assert.equal(asyncRunId("Run fan-out: 1/64 used\nAsync: reviewer [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]\n"), "0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b");
 	assert.equal(asyncRunId("Async: worker [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]"), undefined);
+});
+
+test("defaultRunState reads a run's status.json under the given root: complete, partial, failed, missing", () => {
+	const root = mkdtempSync(join(tmpdir(), "guard-runs-"));
+	const put = (id: string, body: string) => {
+		mkdirSync(join(root, id), { recursive: true });
+		writeFileSync(join(root, id, "status.json"), body);
+	};
+	put("done", JSON.stringify({ state: "complete" }));
+	put("part", JSON.stringify({ state: "partial" }));
+	put("bad", JSON.stringify({ state: "failed" }));
+	put("junk", "{not json");
+	assert.equal(defaultRunState("done", root), "complete");
+	assert.equal(defaultRunState("part", root), "running");
+	assert.equal(defaultRunState("bad", root), "failed");
+	assert.equal(defaultRunState("junk", root), "missing");
+	assert.equal(defaultRunState("never", root), "missing");
+	assert.equal(defaultRunState("done", join(root, "gone")), "missing");
 });

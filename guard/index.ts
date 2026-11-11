@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -131,7 +131,7 @@ export function defaultResident(): string[] {
 	}
 }
 
-export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident): Block | { dir: string; snap: string } | undefined {
+export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident): Block | { dir: string; snap: string; async: boolean } | undefined {
 	if (indirectReviewer(input) && reviewApp(JSON.stringify(input), cwd, home)) return { block: true, reason: REASONS.reviewWorkflow };
 	if (input.agent !== "reviewer") return undefined;
 	const task = String(input.task ?? "");
@@ -178,7 +178,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	}
 	if (typeof input.model !== "string" || !loaded.includes(input.model.replace(/^spark\//, ""))) delete input.model;
 	for (const k of ["context", "thinking", "tools", "skill", "usageBudget"]) delete input[k];
-	return { dir, snap };
+	return { dir, snap, async: !!input.async };
 }
 
 export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env, resident: Resident = defaultResident): void {
@@ -188,7 +188,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const child = !!env.PI_SUBAGENT_CHILD;
 	const rewrites = new Set<string>();
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
-	const reviews = new Map<string, { dir: string; snap: string }>();
+	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
 
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
@@ -228,7 +228,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		reviews.delete(event.toolCallId);
 		if (event.isError) return undefined;
 		const text = (event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
-		const runId = asyncRunId(text);
+		// An async launch result holds no review: it is marked pending by run id, and when the id can't be read the
+		// mark names an unknown run, which never counts (fail closed), rather than passing for a finished review.
+		const runId = asyncRunId(text) ?? (scoped.async ? UNKNOWN_RUN : undefined);
 		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewMark(scoped.dir, scoped.snap);
 		return { content: [...(event.content ?? []), { type: "text", text: mark }], structuredContent: event.structuredContent };
 	});

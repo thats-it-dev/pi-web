@@ -139,12 +139,16 @@ export const reviewPendingMark = (dir: string, snap: string, runId: string) => `
 /** The state of a pi-subagents async run: `complete` is the only state that makes a pending review count. */
 export type RunState = (runId: string) => "complete" | "running" | "failed" | "missing";
 
-const ASYNC_RUNS = `/tmp/pi-subagents-uid-${process.getuid?.() ?? 1000}/async-subagent-runs`;
+// pi-subagents' async run dir: its temp root (PI_SUBAGENTS_TEMP_ROOT, else /tmp/pi-subagents-uid-<uid>) + async-subagent-runs.
+const ASYNC_RUNS = join(process.env.PI_SUBAGENTS_TEMP_ROOT?.trim() || `/tmp/pi-subagents-uid-${process.getuid?.() ?? 1000}`, "async-subagent-runs");
 
-/** Reads the run's status.json; a missing or unreadable file is `missing` (the run dir ages out), never `complete`. */
-export function defaultRunState(runId: string): ReturnType<RunState> {
+/** A pending mark whose launch result carried no run id: it can never resolve, so it never counts. */
+export const UNKNOWN_RUN = "unknown";
+
+/** Reads the run's status.json under `root`; a missing or unreadable file is `missing` (the run dir ages out), never `complete`. */
+export function defaultRunState(runId: string, root: string = ASYNC_RUNS): ReturnType<RunState> {
 	try {
-		const state = String((JSON.parse(readFileSync(join(ASYNC_RUNS, runId, "status.json"), "utf8")) as { state?: unknown }).state);
+		const state = String((JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8")) as { state?: unknown }).state);
 		if (state === "complete") return "complete";
 		return /fail|error|stopp|timeout|cancel/i.test(state) ? "failed" : "running";
 	} catch {
@@ -162,7 +166,7 @@ const FINISHED = /\[pi-guard\] reviewed (\S+) at ([0-9a-f]{7,64})/g;
 function completedReviews(text: string, runState: RunState): { dir: string; snap: string; at: number }[] {
 	const out: { dir: string; snap: string; at: number }[] = [];
 	for (const m of text.matchAll(FINISHED)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
-	for (const m of text.matchAll(PENDING)) if (runState(m[3]) === "complete") out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	for (const m of text.matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && runState(m[3]) === "complete") out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
 	return out.sort((a, b) => a.at - b.at);
 }
 
