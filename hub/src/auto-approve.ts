@@ -8,7 +8,8 @@
 //   manual  every dialog reaches the app
 // A dialog outside a running turn (a slash command asking something), an input
 // or editor, or a select with no recognisable allow option always reaches the
-// app, whatever the mode.
+// app, whatever the mode. One exception: in auto, a background subagent's
+// forwarded permission ask (SUBAGENT_ASK) is answered whenever it arrives.
 
 import { resolve, sep } from "node:path";
 import type { ApprovalMode, Dialog } from "../../shared/src/protocol.ts";
@@ -40,7 +41,15 @@ export interface ApprovalContext {
 	tool: PendingTool | null; // the call the dialog is about, when known
 }
 
-export function autoAnswer(d: Pick<Dialog, "method" | "options">, ctx: ApprovalContext): AutoAnswer | null {
+// pi-permission-system's title for a subagent's ask forwarded to this chat. An async subagent (pi-subagents)
+// keeps working after the chat's turn has ended, so in auto mode its asks are answered then too.
+export const SUBAGENT_ASK = /^Permission Required \(Subagent\)/;
+
+export function autoAnswer(d: Pick<Dialog, "method" | "options"> & { title?: string }, ctx: ApprovalContext): AutoAnswer | null {
+	if (ctx.mode === "auto" && !ctx.running && d.method === "select" && SUBAGENT_ASK.test(d.title ?? "")) {
+		const allow = findAllow((d.options ?? []).map((o) => String(o).trim()));
+		return allow === undefined ? null : { value: allow };
+	}
 	if (ctx.mode === "manual" || !ctx.running) return null;
 	if (ctx.mode === "semi" && !(ctx.tool && benignTool(ctx.tool, ctx.cwd))) return null;
 	if (d.method === "confirm") return { confirmed: true };

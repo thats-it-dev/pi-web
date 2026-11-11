@@ -65,3 +65,17 @@ test("benignCommand: read-only shell commands only", () => {
 		assert.equal(benignCommand(bad), false, bad);
 	}
 });
+
+test("auto: a background subagent's permission ask is answered after the parent's turn has ended", () => {
+	// pi-permission-system forwards a subagent's ask to the parent chat with this title; async subagents
+	// (pi-subagents) keep working after the parent's turn is over.
+	const forwarded = { method: "select" as const, title: "Permission Required (Subagent)\nsubagent : reviewer · session 01a1\ntool     : grep", options: ["Yes", "Yes, for this session", "No", "No, with a reason"] };
+	const idle = { mode: "auto" as const, running: false, cwd: CWD, tool: null };
+	assert.deepEqual(autoAnswer(forwarded, idle), { value: "Yes" });
+	// Only auto: semi can't judge a subagent's call it never saw, manual answers nothing.
+	assert.equal(autoAnswer(forwarded, { ...idle, mode: "semi" }), null);
+	assert.equal(autoAnswer(forwarded, { ...idle, mode: "manual" }), null);
+	// The parent's own ask, or any other dialog outside a turn, still goes to the person.
+	assert.equal(autoAnswer({ ...forwarded, title: "Permission Required\ntool : grep" }, idle), null);
+	assert.equal(autoAnswer({ method: "confirm", title: "Permission Required (Subagent)" }, idle), null);
+});
