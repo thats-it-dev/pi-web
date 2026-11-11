@@ -10,6 +10,11 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, existsSy
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { Agent, setGlobalDispatcher } from "undici";
+
+// A worker's first token can take many minutes behind other workers' 120k-token prefills; Node's default 300 s
+// header timeout killed the 6-worker pass on 2026-11-11.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => (a.startsWith("--") ? [a.slice(2), all[i + 1] ?? "true"] : [])).filter((e) => e.length));
 const WORKERS = Number(args.workers ?? 0);

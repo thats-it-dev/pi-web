@@ -375,6 +375,25 @@ the FP8 tune leaves the 35B 453k KV tokens (~3 workers) where NVFP4 weights woul
 
 **Task 3 decision (14:30 PT, Michael):** keep the pi tune FP8 as the orchestrator engine; quantizing it to NVFP4 stays a follow-up.
 
+**Task 4 (14:43–14:56 PT), contention** (`bench/pair-contention.mjs`, workers: 120k-token prompts, 2k output, thinking on;
+orchestrator: 21k prompt, 2k output, medium):
+
+| Workers | Tune decode | Tune p95 gap | Worker TTFT (s) | Worker decode (tok/s) | Readout p95 (35B) |
+|---|---|---|---|---|---|
+| 0 | 20.8 tok/s | 197 ms | — | — | 274 ms |
+| 4 | **9.2 tok/s** | 389 ms | 92 / 144 / 183 / 261 | 15.6 / 26.1 / 24.7 / 82.3 (last one alone) | **259 s** |
+| 6 | bench aborted: Node's 300 s header timeout; the 6th worker's first token was > 5 min away | | | | |
+
+Findings: (1) the two engines contend for the memory bus: the tune drops from 21 to 9 tok/s while four workers decode;
+(2) worker **prefill serialises** on the 35B at ~1300 tok/s, so a cold 120k-token fan-out of four costs 4+ min before
+the last worker starts, which is why briefs must be small and scouts must prefetch; (3) a readout on the 35B queues
+behind those prefills (p95 259 s), far outside the router's 1.5 s budget.
+
+**Readout on the pi tune instead** (same frozen set, idle): exact **73%**, within-one **100%**, engine-correct 89%,
+p50 321 ms, p95 370 ms — better than flash's own 70/100, and the orchestrator engine is never behind worker
+prefills. Decision: `pair-auto` reads out on `qwen3.8-27b-pi` (flash-auto `models.ts`). Worker concurrency: **4**
+(Michael chose throughput over responsiveness; 6 is unmeasured). pi-subagents `config.json` updated.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
