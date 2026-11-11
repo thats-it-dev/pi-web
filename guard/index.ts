@@ -118,7 +118,20 @@ export function upToDate(dir: string, branch: Iterable<unknown>): boolean {
 
 /** Scopes a direct reviewer call on an app: checks verify ran, writes the diff since the last review (or since main)
  *  and rewrites the call's input so the reviewer reads only that, in the app, within the tool budget. */
-export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string): Block | { dir: string; snap: string } | undefined {
+/** Model ids llama-swap reports as loaded and ready; `[]` on any failure. A reviewer may name one of these. */
+export type Resident = () => string[];
+
+export function defaultResident(): string[] {
+	try {
+		const out = execFileSync("curl", ["-s", "--max-time", "2", "http://127.0.0.1:9000/running"], { encoding: "utf8" });
+		const { running } = JSON.parse(out) as { running?: { model?: string; state?: string }[] };
+		return (running ?? []).filter((r) => r.state === "ready" && r.model).map((r) => r.model as string);
+	} catch {
+		return [];
+	}
+}
+
+export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident): Block | { dir: string; snap: string } | undefined {
 	if (indirectReviewer(input) && reviewApp(JSON.stringify(input), cwd, home)) return { block: true, reason: REASONS.reviewWorkflow };
 	if (input.agent !== "reviewer") return undefined;
 	const task = String(input.task ?? "");
@@ -155,11 +168,20 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
 	input.toolBudget = { ...REVIEW_BUDGET };
-	for (const k of ["context", "model", "thinking", "tools", "skill", "usageBudget"]) delete input[k];
+	// A model stays only when it is already loaded: a review must never swap the serving group (flash-next and
+	// the agent pair are exclusive in llama-swap), but the final review may name the resident orchestrator model.
+	let loaded: string[] = [];
+	try {
+		loaded = resident();
+	} catch {
+		loaded = [];
+	}
+	if (typeof input.model !== "string" || !loaded.includes(input.model.replace(/^spark\//, ""))) delete input.model;
+	for (const k of ["context", "thinking", "tools", "skill", "usageBudget"]) delete input[k];
 	return { dir, snap };
 }
 
-export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env): void {
+export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env, resident: Resident = defaultResident): void {
 	const home = env.HOME ?? homedir();
 	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
 	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
@@ -186,7 +208,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		if (block || event.toolName !== "subagent" || !event.input) return block;
 		let scoped: ReturnType<typeof scopeReview>;
 		try {
-			scoped = scopeReview(event.input, branch(), ctx.cwd, home);
+			scoped = scopeReview(event.input, branch(), ctx.cwd, home, resident);
 		} catch (err) {
 			return { block: true, reason: `Blocked: pi-guard could not prepare the review diff (${(err as Error).message.split("\n")[0]}). Check the app's git state (git status in the app), then call the reviewer again.` };
 		}

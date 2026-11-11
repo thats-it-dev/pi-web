@@ -230,3 +230,20 @@ test("an async scoped review keeps async and gets a pending mark; a sync one get
 	assert.match(text(r2), /\[pi-guard\] reviewed \S+ at [0-9a-f]{40}/);
 	assert.doesNotMatch(text(r2), /review pending/);
 });
+
+test("scopeReview keeps a resident model and strips any other, and a failed lookup strips", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 4;\n");
+	const branch = verified(dir);
+	const task = "Review keeb at ~/workspace/apps/keeb";
+	const resident = () => ["qwen3.8-27b-pi", "qwen3.6-35b-a3b-sglang"];
+	const keep: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-27b-pi" };
+	assert.ok(!("block" in (scopeReview(keep, branch, home, home, resident) ?? {})));
+	assert.equal(keep.model, "spark/qwen3.8-27b-pi");
+	const strip: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-flash-next" };
+	scopeReview(strip, branch, home, home, resident);
+	assert.equal(strip.model, undefined);
+	const down: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-27b-pi" };
+	assert.ok(!("block" in (scopeReview(down, branch, home, home, () => { throw new Error("ECONNREFUSED"); }) ?? {})));
+	assert.equal(down.model, undefined);
+});
