@@ -315,6 +315,19 @@ the container cold. Reload llama-swap only when nothing needs the loaded model.
 
 **Task 1 (12:14 PT):** downloads done (bytkim pi tune FP8 33 GB, incoai 27B DFlash2 3.6 GB, unsloth 35B NVFP4, incoai 35B DFlash2 @51ef7b6), serving config in place (`run-27b-pi.sh` :8001 at 0.44, 35B `.env` 0.32 / 6 slots / 600k tokens, llama-swap groups `duo` = pair, `base27` = base), reloaded.
 
+**Task 2 (12:25 PT), co-load:** `--mem-fraction-static` is a fraction of the memory *free when that engine starts*
+(sglang profiles pre-load memory), so the pair boots sequentially. Measured:
+
+| Engine | Boot order | Free at its start | Fraction | Weights | KV pool (tokens) | Free after |
+|---|---|---|---|---|---|---|
+| `qwen3.8-27b-pi` (FP8 + DFlash2) | 1st | 107.2 GB | 0.44 | 27.8 GB | 291,400 (≈1.1 full contexts, `--max-running-requests 3`) | 58.5 GB |
+| `qwen3.6-35b-a3b-sglang` (+ DFlash2) | 2nd | ~58 GB | 0.70 | 23.8 + 1.4 GB | 453,514 (≈3 workers at 150k; 6 slots) | **13.4 GB** |
+
+Floor (10 GB) met. The 35B's first attempt at 0.32 beside the still-loading pi tune failed ("weights leave no GPU
+memory for the KV cache", min viable 0.351): the fractions in the Addendum table were written as if of the box.
+The `.env` now says `MEM_FRACTION_STATIC=0.70`, valid only when the pi tune is already up; llama-swap's `duo`
+group starts members on demand, so the orchestrator must be requested first (plan 2 Task 5 makes pi do that).
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
