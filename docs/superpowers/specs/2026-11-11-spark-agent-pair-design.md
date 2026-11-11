@@ -401,6 +401,8 @@ models, `httpIdleTimeoutMs: 900000` (backup `settings.json.bak-2026-11-11`); `~/
 pair notes; `subagent({action:"models"})` lists every builtin role on the 35B (reviewer and worker from the user
 overrides, scout from its builtin config); the `pair-auto` routing check follows the 6-worker bench.
 
+**Task 5 routing check (15:12 PT):** through `spark/pair-auto`, "thanks!" routed `off` → the 35B (15 output tokens, readout 222 ms) and a design question routed `xhigh` → the pi tune (690 tokens, readout 220 ms); both decisions logged with `virtual: pair-auto`, `source: classified`.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
