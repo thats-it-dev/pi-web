@@ -302,6 +302,14 @@ and its detached worker runner) and unloads flash through llama-swap.
 `~/.pi/agent/models.json` (new `qwen3.8-27b-pi` entry; `qwen3.8-27b` and the 35B gain their `compat` blocks;
 backup `models.json.bak-2026-11-11`).
 
+## Measured (phase 0)
+
+**Task 0 (2026-11-11 12:06 PT):** cad session stopped (pi pid 4169216 and its worker runner), flash-next container
+stopped, `llama-swap /running` empty, MemAvailable 115.9 GB. The cad checkout stays on branch `cad-v1` at
+`5fecb5b` (task 11 step 4) with its four uncommitted files. Lesson: `kill -HUP llama-swap` reloads the config but
+drops its running-model state; the next proxied request re-runs the model's `cmd`, which for `flash serve` restarted
+the container cold. Reload llama-swap only when nothing needs the loaded model.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
