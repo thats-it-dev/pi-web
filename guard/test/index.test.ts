@@ -159,7 +159,7 @@ test("scopeReview: blocks before verify, then writes the diff since main and rew
 	assert.equal(r.dir, dir);
 	assert.match(r.snap, /^[0-9a-f]{40}$/);
 	assert.deepEqual(input.toolBudget, { soft: 12, hard: 20, block: "*" });
-	assert.equal(input.async, false);
+	assert.equal(input.async, undefined, "the guard no longer forces a sync review");
 	assert.equal(input.cwd, dir);
 	assert.equal(input.context, undefined);
 	assert.match(String(input.task), /- src\/a\.ts \(\+1 -1\)/);
@@ -210,4 +210,23 @@ test("tool_result gives the model a cancelled questionnaire's partial answers", 
 	assert.equal(r.details, details);
 	const plain = h.tool_result({ toolCallId: "q2", toolName: "ask_user_question", input: {}, content: [], details: { cancelled: true, answers: [] }, isError: false }, { cwd: "/" });
 	assert.equal(plain, undefined);
+});
+
+test("an async scoped review keeps async and gets a pending mark; a sync one gets the finished mark", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
+	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb", async: true };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r1", input }, ctx), undefined);
+	assert.equal(input.async, true);
+	const r1 = h.tool_result({ toolCallId: "r1", toolName: "subagent", content: [{ type: "text", text: "Async: reviewer [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]" }], isError: false }, ctx);
+	assert.match(text(r1), /\[pi-guard\] review pending \S+ at [0-9a-f]{40} run 0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b/);
+	const sync: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r2", input: sync }, ctx), undefined);
+	assert.equal(sync.async, undefined);
+	const r2 = h.tool_result({ toolCallId: "r2", toolName: "subagent", content: [{ type: "text", text: "## Review\nnothing" }], isError: false }, ctx);
+	assert.match(text(r2), /\[pi-guard\] reviewed \S+ at [0-9a-f]{40}/);
+	assert.doesNotMatch(text(r2), /review pending/);
 });

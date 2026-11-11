@@ -1,4 +1,5 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
+import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 export type Block = { block: true; reason: string };
@@ -131,29 +132,60 @@ export const reviewMark = (dir: string, snap: string) => `${REVIEW_MARK}${dir} a
 const resultText = (m: Entry["message"]) =>
 	Array.isArray(m?.content) ? (m.content as { type?: string; text?: string }[]).map((c) => (c.type === "text" ? c.text ?? "" : "")).join("\n") : "";
 
-/** True when a review the guard scoped returned without error after Michael's last message on the branch. */
-export function reviewedSinceUser(branch: Iterable<unknown>): boolean {
+/** A scoped review launched async: the mark goes on the launch result, and counts once the run completes. */
+export const REVIEW_PENDING_MARK = "[pi-guard] review pending ";
+export const reviewPendingMark = (dir: string, snap: string, runId: string) => `${REVIEW_PENDING_MARK}${dir} at ${snap} run ${runId}`;
+
+/** The state of a pi-subagents async run: `complete` is the only state that makes a pending review count. */
+export type RunState = (runId: string) => "complete" | "running" | "failed" | "missing";
+
+const ASYNC_RUNS = `/tmp/pi-subagents-uid-${process.getuid?.() ?? 1000}/async-subagent-runs`;
+
+/** Reads the run's status.json; a missing or unreadable file is `missing` (the run dir ages out), never `complete`. */
+export function defaultRunState(runId: string): ReturnType<RunState> {
+	try {
+		const state = String((JSON.parse(readFileSync(join(ASYNC_RUNS, runId, "status.json"), "utf8")) as { state?: unknown }).state);
+		if (state === "complete") return "complete";
+		return /fail|error|stopp|timeout|cancel/i.test(state) ? "failed" : "running";
+	} catch {
+		return "missing";
+	}
+}
+
+/** The run id of an async reviewer launch, from pi-subagents' launch result. */
+export const asyncRunId = (resultText: string): string | undefined => /Async: reviewer \[([0-9a-f-]{36})\]/.exec(resultText)?.[1];
+
+const PENDING = /\[pi-guard\] review pending (\S+) at ([0-9a-f]{7,64}) run (\S+)/g;
+const FINISHED = /\[pi-guard\] reviewed (\S+) at ([0-9a-f]{7,64})/g;
+
+/** The reviews a tool result records, in order: finished ones, and pending ones whose run is complete. */
+function completedReviews(text: string, runState: RunState): { dir: string; snap: string; at: number }[] {
+	const out: { dir: string; snap: string; at: number }[] = [];
+	for (const m of text.matchAll(FINISHED)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	for (const m of text.matchAll(PENDING)) if (runState(m[3]) === "complete") out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	return out.sort((a, b) => a.at - b.at);
+}
+
+/** True when a review the guard scoped completed without error after Michael's last message on the branch. */
+export function reviewedSinceUser(branch: Iterable<unknown>, runState: RunState = defaultRunState): boolean {
 	let reviewed = false;
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
 		if (e.type !== "message" || !m) continue;
 		if (m.role === "user") reviewed = false;
-		else if (m.role === "toolResult" && !m.isError && resultText(m).includes(REVIEW_MARK)) reviewed = true;
+		else if (m.role === "toolResult" && !m.isError && completedReviews(resultText(m), runState).length > 0) reviewed = true;
 	}
 	return reviewed;
 }
 
-/** The snapshot commit the last scoped review of `dir` covered, from the marks on the branch. */
-export function lastReview(branch: Iterable<unknown>, dir: string): string | undefined {
+/** The snapshot commit the last completed scoped review of `dir` covered, from the marks on the branch. */
+export function lastReview(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState): string | undefined {
 	let snap: string | undefined;
-	const mark = `${REVIEW_MARK}${dir} at `;
 	for (const raw of branch) {
 		const e = raw as Entry;
 		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
-		const text = resultText(e.message);
-		const at = text.lastIndexOf(mark);
-		if (at >= 0) snap = /^[0-9a-f]{7,64}/.exec(text.slice(at + mark.length))?.[0] ?? snap;
+		for (const r of completedReviews(resultText(e.message), runState)) if (r.dir === dir) snap = r.snap;
 	}
 	return snap;
 }

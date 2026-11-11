@@ -1,7 +1,7 @@
 import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, appsNeedingPr, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -442,4 +442,23 @@ test("a cancelled questionnaire still hands the model the answers Michael gave",
 	assert.equal(partialAnswers(input, { cancelled: true, answers: [] }), undefined);
 	assert.equal(partialAnswers(input, { cancelled: false, answers: details.answers }), undefined);
 	assert.equal(partialAnswers(input, undefined), undefined);
+});
+
+test("a pending review counts only once its run is complete, and the latest complete one sets the base", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const branch = [{ type: "message", message: { role: "user", content: "go" } }, res(reviewPendingMark(dir, "aaaaaaa", "run-a")), res(reviewPendingMark(dir, "bbbbbbb", "run-b"))];
+	const states: Record<string, ReturnType<RunState>> = { "run-a": "complete", "run-b": "running" };
+	const runState: RunState = (id) => states[id] ?? "missing";
+	assert.equal(reviewedSinceUser(branch, runState), true);
+	assert.equal(lastReview(branch, dir, runState), "aaaaaaa");
+	states["run-b"] = "complete";
+	assert.equal(lastReview(branch, dir, runState), "bbbbbbb");
+	assert.equal(reviewedSinceUser(branch, () => "missing"), false);
+	assert.equal(reviewedSinceUser(branch, () => "failed"), false);
+});
+
+test("asyncRunId reads the run id from an async launch result", () => {
+	assert.equal(asyncRunId("Run fan-out: 1/64 used\nAsync: reviewer [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]\n"), "0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b");
+	assert.equal(asyncRunId("Async: worker [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]"), undefined);
 });

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, type ReviewScope, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -151,7 +151,8 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 			return { path, added, removed };
 		});
 	input.task = `${reviewHeader({ dir, base, baseFrom, diffPath, files })}\n${task}`;
-	input.async = false;
+	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
+	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
 	input.toolBudget = { ...REVIEW_BUDGET };
 	for (const k of ["context", "model", "thinking", "tools", "skill", "usageBudget"]) delete input[k];
@@ -159,7 +160,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 }
 
 export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env): void {
-	const home = homedir();
+	const home = env.HOME ?? homedir();
 	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
 	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
 	const child = !!env.PI_SUBAGENT_CHILD;
@@ -204,7 +205,10 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		if (!scoped) return undefined;
 		reviews.delete(event.toolCallId);
 		if (event.isError) return undefined;
-		return { content: [...(event.content ?? []), { type: "text", text: reviewMark(scoped.dir, scoped.snap) }], structuredContent: event.structuredContent };
+		const text = (event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
+		const runId = asyncRunId(text);
+		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewMark(scoped.dir, scoped.snap);
+		return { content: [...(event.content ?? []), { type: "text", text: mark }], structuredContent: event.structuredContent };
 	});
 
 	// Filter in place and return nothing: pi's default summarizer then runs on the same preparation object.
