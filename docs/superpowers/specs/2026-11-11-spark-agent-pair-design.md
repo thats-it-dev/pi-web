@@ -313,6 +313,8 @@ stopped, `llama-swap /running` empty, MemAvailable 115.9 GB. The cad checkout st
 drops its running-model state; the next proxied request re-runs the model's `cmd`, which for `flash serve` restarted
 the container cold. Reload llama-swap only when nothing needs the loaded model.
 
+**Task 1 (12:14 PT):** downloads done (bytkim pi tune FP8 33 GB, incoai 27B DFlash2 3.6 GB, unsloth 35B NVFP4, incoai 35B DFlash2 @51ef7b6), serving config in place (`run-27b-pi.sh` :8001 at 0.44, 35B `.env` 0.32 / 6 slots / 600k tokens, llama-swap groups `duo` = pair, `base27` = base), reloaded.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
