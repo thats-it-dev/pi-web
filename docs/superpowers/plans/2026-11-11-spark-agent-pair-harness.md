@@ -211,6 +211,8 @@ test("the pair notes replace the inline-only ones", () => {
 
 ### Task 6: pi-side config staged (inert until plan 2 switches the model)
 
+> Post-review note (2026-11-11): the `worktreeSetupHook` below was removed after the final review: pi-subagents 0.76 links `node_modules` into worktrees natively (`runs/shared/worktree.js`), and a hook spawned without the exec bit fails every allocation.
+
 **Files:**
 - Create: `~/.pi/agent/extensions/subagent/config.json`
 - Create: `~/.pi/agent/extensions/subagent/setup-worktree.mjs`

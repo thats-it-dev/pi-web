@@ -106,7 +106,7 @@
 - Modify: spec, "Switch" checklist.
 
 **Interfaces:**
-- `settings.json`: `defaultModel: "spark/pair-auto"`; `packages` keeps `"../../workspace/flash-auto"`; `compaction.modelOverrides` gains `"spark/pair-auto"`, `"spark/qwen3.8-27b-pi"` and `"spark/qwen3.6-35b-a3b-sglang"`, each `{ "reserveTokens": 60000 }`; `subagents.defaultModel: "spark/qwen3.6-35b-a3b-sglang"`, `subagents.defaultThinking: "medium"`, `agentOverrides.scout/reviewer/worker.model = "spark/qwen3.6-35b-a3b-sglang"` (reviewer `thinking: "medium"`, scout `"low"`); `httpIdleTimeoutMs: 900000`.
+- `settings.json`: `defaultModel: "spark/pair-auto"` (this is also what makes the flash-auto package register `pair-auto` instead of `flash-auto`); `packages` keeps `"../../workspace/flash-auto"`; `compaction.modelOverrides` gains `"spark/pair-auto"`, `"spark/qwen3.8-27b-pi"` and `"spark/qwen3.6-35b-a3b-sglang"`, each `{ "reserveTokens": 60000 }`; `subagents.defaultModel: "spark/qwen3.6-35b-a3b-sglang"`, `subagents.defaultThinking: "medium"`, `agentOverrides.scout/reviewer/worker.model = "spark/qwen3.6-35b-a3b-sglang"` (reviewer `thinking: "medium"`, scout `"low"`); `httpIdleTimeoutMs: 900000`.
 - `last-model.json`: `{"provider":"spark","modelId":"pair-auto","thinking":"medium"}`.
 
 - [ ] **Step 1: Back up and edit** `settings.json`; validate with `node -e 'JSON.parse(...)'`.
@@ -126,5 +126,5 @@
 ### Task 7: Go / no-go
 
 - [ ] **Step 1: Go** if Task 6's mean critical path < 45 min, no anti-goal occurred, and the harness tests still pass. Write "Verdict: go, <date>, <numbers>"; the pair stays pi's model.
-- [ ] **Step 2: No-go** otherwise: restore `settings.json`, `last-model.json`, `run-27b.sh`, `.env`, `llama-swap.yaml` from the backups; `kill -HUP $(pidof llama-swap)`; one request to `qwen3.8-flash-next` to reload it; `PI_FLASH_AUTO=1` in the hub's environment so flash-auto registers again; restart the hub; write "Verdict: no-go, <reason>, pair config kept in .bak files". The harness changes stay.
+- [ ] **Step 2: No-go** otherwise: restore `settings.json`, `last-model.json`, `run-27b.sh`, `.env`, `llama-swap.yaml` from the backups; `kill -HUP $(pidof llama-swap)`; one request to `qwen3.8-flash-next` to reload it; restoring `settings.json` already makes the package register flash-auto again; restart the hub; write "Verdict: no-go, <reason>, pair config kept in .bak files". The harness changes stay.
 - [ ] **Step 3: Commit** the verdict and update `~/.claude/projects/-home-michael/memory/spark-agent-pair.md`.

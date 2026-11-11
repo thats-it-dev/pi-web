@@ -143,8 +143,7 @@ becomes mode-aware):
    second reviewer per worker.
    For a task group the plan marks as independent, one worker each with `worktree: true`;
    the orchestrator merges the branches in plan order onto the plan branch and reruns verify
-   after each merge. **Worktrees are bare checkouts**, so: a `worktreeSetupHook` symlinks
-   the main checkout's `node_modules` (Playwright browsers already live in `~/.cache`);
+   after each merge. **Worktrees are bare checkouts**, so: pi-subagents links the main checkout's `node_modules` into each one itself (Playwright browsers already live in `~/.cache`);
    workers in worktrees run typecheck and unit tests only, never e2e (ports collide and the
    guard blocks a full e2e outside `verify` anyway); the full `npm run verify` runs once in
    the main checkout after each merge. The plan branch is committed before a fan-out, since
@@ -287,7 +286,10 @@ flash-auto's controller is reimplemented for the pair. pi's default model become
   so a turn never switches; phase 0 records TTFT right after a switch at ~100k context.
 - `flash-auto` (the virtual model that targets flash-next) is no longer registered while the
   pair is pi's model: its fallback path would dispatch to flash-next and trigger the group
-  swap. The package stays installed; it now provides `pair-auto`.
+  swap. The package stays installed; it now provides `pair-auto`. It registers whichever router
+  `settings.json`'s `defaultModel` names (a `pair-auto` default selects the pair; anything else keeps
+  flash-auto), so the switch is one settings edit and the revert is restoring it; `PI_PAIR_AUTO=1` /
+  `PI_FLASH_AUTO=1` override for tests.
 - The virtual model declares `contextWindow: 262144`, the smaller of the two.
 
 ### 3. Phase 0 may start now
@@ -297,8 +299,9 @@ gains a Task 0 that stops that session (pi process `PI_WEB=1`, started 2026-11-1
 and its detached worker runner) and unloads flash through llama-swap.
 
 **Config staged 2026-11-11** (harness plan Task 6, inert until the switch): `~/.pi/agent/extensions/subagent/config.json`
-(parallel 8/6, 45-min deadline, 5-min checkpoint, worktree hook), `~/.pi/agent/extensions/subagent/setup-worktree.mjs`
-(links the main checkout's `node_modules`, reported synthetic), `~/.pi/agent/agents/worker.md` (`acceptance: none`),
+(parallel 8/6, 45-min deadline, 5-min checkpoint; **no worktree hook**: pi-subagents 0.76 links the main checkout's
+`node_modules` into every worktree itself and reports it synthetic, `runs/shared/worktree.js` `linkNodeModulesIfPresent`,
+so the hook the plan described was removed after the final review), `~/.pi/agent/agents/worker.md` (`acceptance: none`),
 `~/.pi/agent/models.json` (new `qwen3.8-27b-pi` entry; `qwen3.8-27b` and the 35B gain their `compat` blocks;
 backup `models.json.bak-2026-11-11`).
 
