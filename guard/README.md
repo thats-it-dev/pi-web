@@ -77,3 +77,24 @@ of the 53 real replies would have been nudged.
 ## Install
 
 Listed in `~/.pi/agent/settings.json` `packages` as `../../workspace/pi-web/guard`.
+
+## Scoped reviews
+
+A `pr` or `gateway-pr` that changes code is blocked until a review the guard scoped has finished since Michael's last
+message, or the app is exactly as the last review left it. Only a direct `subagent` call with agent `reviewer` counts;
+on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session cwd), the guard rewrites that call:
+
+- Blocked until `npm run verify` passed in the app after the last code edit (docs and Markdown edits don't count).
+- The guard snapshots the working tree (uncommitted and untracked files included, in a throwaway index) and writes
+  `/tmp/<name>-review.diff` itself: from the last review's snapshot, or from where the branch left main. Lockfiles,
+  `dist` and source maps are left out. With nothing new since the last review the call is blocked.
+- The task gets a header with the changed files, the base, "verify passed, don't check tests or config", and the
+  budget. The call is forced to `async: false`, `cwd` = the app (so its AGENTS.md is project context) and
+  `toolBudget` `{soft: 12, hard: 20, block: "*"}`; `context`, `model`, `thinking`, `tools`, `skill` overrides are dropped.
+- A reviewer inside a workflow, chain or task list on an app is blocked.
+- When the review returns without error, the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
+  the PR gate and the next review's base read that mark from the session, so both survive a restart.
+
+The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
+first, no test or config spelunking, and the same tool budget in its frontmatter.
+

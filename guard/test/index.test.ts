@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, needsPr } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, TODO_NUDGE_TYPE } from "../rules.ts";
+import piGuard, { codeChanged, needsPr, scopeReview, upToDate } from "../index.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
@@ -118,4 +118,80 @@ test("codeChanged: a branch that only touches docs, Markdown or CI skips the rev
 	assert.equal(codeChanged(dir), true, "a staged code file");
 	git("commit", "-qm", "code");
 	assert.equal(codeChanged(dir), true, "a committed code file");
+});
+
+// --- scoped reviews, against a real git repo under a throwaway home ---
+
+function appRepo() {
+	const home = mkdtempSync(join(tmpdir(), "guard-home-"));
+	const dir = join(home, "workspace", "apps", "keeb");
+	mkdirSync(join(dir, "src"), { recursive: true });
+	const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "pipe" });
+	git("init", "-q", "-b", "main");
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { verify: "true" } }));
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n");
+	git("add", "-A");
+	git("commit", "-qm", "one");
+	git("switch", "-qc", "feat");
+	return { home, dir, git };
+}
+const msg = (role: string, rest: Record<string, unknown>) => ({ type: "message", message: { role, ...rest } });
+const verified = (dir: string) => [
+	msg("assistant", { content: [{ type: "toolCall", id: "v", name: "bash", arguments: { command: `cd ${dir} && npm run verify` } }] }),
+	msg("toolResult", { toolCallId: "v", isError: false, content: [] }),
+];
+
+test("scopeReview: blocks before verify, then writes the diff since main and rewrites the call", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	writeFileSync(join(dir, "src", "new.ts"), "export const b = 1;\n");
+	writeFileSync(join(dir, "package-lock.json"), "{}");
+	const edited = [msg("assistant", { content: [{ type: "toolCall", id: "e", name: "edit", arguments: { path: join(dir, "src", "a.ts") } }] })];
+	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb: daily goal", toolBudget: { hard: 500 }, context: "fork" };
+	assert.deepEqual(scopeReview({ ...input }, edited, home, home), { block: true, reason: REASONS.reviewUnverified });
+	const r = scopeReview(input, [...edited, ...verified(dir)], home, home) as { dir: string; snap: string };
+	assert.equal(r.dir, dir);
+	assert.match(r.snap, /^[0-9a-f]{40}$/);
+	assert.deepEqual(input.toolBudget, { soft: 12, hard: 20, block: "*" });
+	assert.equal(input.async, false);
+	assert.equal(input.cwd, dir);
+	assert.equal(input.context, undefined);
+	assert.match(String(input.task), /- src\/a\.ts \(\+1 -1\)/);
+	assert.match(String(input.task), /- src\/new\.ts \(\+1 -0\)/, "untracked files are in the diff");
+	assert.doesNotMatch(String(input.task), /package-lock/);
+	assert.match(String(input.task), /daily goal$/);
+	const diff = readFileSync("/tmp/keeb-review.diff", "utf8");
+	assert.match(diff, /\+export const a = 2;/);
+	assert.doesNotMatch(diff, /package-lock/);
+});
+
+test("scopeReview: the next review covers only what changed since the last one; nothing new is blocked", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const first: Record<string, unknown> = { agent: "reviewer", task: "Review /tmp/keeb-review.diff" };
+	const { snap } = scopeReview(first, verified(dir), home, home) as { snap: string };
+	const after = [...verified(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snap) }] })];
+	assert.equal(upToDate(dir, after), true);
+	assert.deepEqual(scopeReview({ agent: "reviewer", task: "Review /tmp/keeb-review.diff" }, after, home, home), { block: true, reason: REASONS.reviewNothing });
+	writeFileSync(join(dir, "src", "b.ts"), "export const b = 1;\n");
+	assert.equal(upToDate(dir, after), false);
+	const second: Record<string, unknown> = { agent: "reviewer", task: "Review /tmp/keeb-review.diff" };
+	scopeReview(second, after, home, home);
+	assert.match(String(second.task), /- src\/b\.ts/);
+	assert.doesNotMatch(String(second.task), /- src\/a\.ts/, "a.ts was already reviewed");
+	assert.match(String(second.task), /already reviewed/);
+});
+
+test("scopeReview: a reviewer inside a workflow on an app is blocked; non-app reviews pass untouched", () => {
+	const { home } = appRepo();
+	assert.deepEqual(scopeReview({ chain: [{ agent: "reviewer", task: "review ~/workspace/apps/keeb" }] }, [], home, home), { block: true, reason: REASONS.reviewWorkflow });
+	const plan: Record<string, unknown> = { agent: "reviewer", task: "Review this plan" };
+	assert.equal(scopeReview(plan, [], home, home), undefined);
+	assert.equal(plan.task, "Review this plan");
+});
+
+test("tool_result marks a scoped review so the PR gate sees it", () => {
+	const h = load();
+	const r = h.tool_result({ toolCallId: "unknown", content: [{ type: "text", text: "x" }], isError: false }, { cwd: "/" });
+	assert.equal(r, undefined, "only calls the guard scoped");
 });

@@ -1,4 +1,4 @@
-import { checkShell, reviewedSinceUser, reviewFree } from "../rules.ts";
+import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, checkToolCall, PR_NUDGE_TYPE, prNudge, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env } from "../rules.ts";
@@ -273,14 +273,61 @@ const subCall = (id: string, args: Record<string, unknown>, text = "") => ({
 });
 const toolRes = (id: string, isError = false) => ({ type: "message", message: { role: "toolResult", toolCallId: id, isError, content: [] } });
 
-test("reviewedSinceUser: a reviewer that returned after Michael's last message counts", () => {
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a")]), true);
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review" }), toolRes("a")]), false, "background run: only a receipt");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a", true)]), false, "failed review");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "scout", task: "look" }), toolRes("a")]), false, "not a reviewer");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", async: false }), toolRes("a"), userMsg("now this")]), false, "before the last message");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { workflow: true, async: false }, 'return runs.run("r", { agent: "reviewer", task: "x" })'), toolRes("a")]), true, "inside a workflow");
+const marked = (id: string, dir = "/home/m/workspace/apps/keeb", snap = "abc1234", isError = false) => ({
+	type: "message",
+	message: { role: "toolResult", toolCallId: id, isError, content: [{ type: "text", text: "## Review\nNo issues found." }, { type: "text", text: reviewMark(dir, snap) }] },
+});
+
+test("reviewedSinceUser: only a review the guard scoped and marked, after Michael's last message, counts", () => {
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review" }), marked("a")]), true);
+	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a")]), false, "unscoped: no mark");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), marked("a", undefined, undefined, true)]), false, "failed review");
+	assert.equal(reviewedSinceUser([userMsg("fix it"), marked("a"), userMsg("now this")]), false, "before the last message");
 	assert.equal(reviewedSinceUser([]), false);
+});
+
+test("lastReview: the snapshot of the newest mark for that app", () => {
+	const keeb = "/home/m/workspace/apps/keeb";
+	const branch = [marked("a", keeb, "aaaaaaa"), marked("b", "/home/m/workspace/apps/tips", "bbbbbbb"), userMsg("x"), marked("c", keeb, "ccccccc"), marked("d", keeb, "ddddddd", true)];
+	assert.equal(lastReview(branch, keeb), "ccccccc");
+	assert.equal(lastReview(branch, "/home/m/workspace/apps/tips"), "bbbbbbb");
+	assert.equal(lastReview(branch, "/home/m/workspace/apps/other"), undefined);
+});
+
+test("reviewApp: an apps path in the task, then the diff file name, then the cwd", () => {
+	assert.equal(reviewApp("Review ~/workspace/apps/keeb for X", home, home), "/home/m/workspace/apps/keeb");
+	assert.equal(reviewApp("Review /tmp/touchtype-review.diff", home, home), "/home/m/workspace/apps/touchtype");
+	assert.equal(reviewApp("Review it", "/home/m/workspace/apps/tips/src", home), "/home/m/workspace/apps/tips");
+	assert.equal(reviewApp("Review the plan", home, home), undefined);
+});
+
+test("indirectReviewer: a reviewer inside a workflow, chain or task list", () => {
+	assert.equal(indirectReviewer({ workflow: true, script: 'runs.run("r", { agent: "reviewer" })' }), true);
+	assert.equal(indirectReviewer({ chain: [{ agent: "reviewer", task: "x" }] }), true);
+	assert.equal(indirectReviewer({ tasks: [{ agent: "scout", task: "x" }] }), false);
+	assert.equal(indirectReviewer({ agent: "reviewer", task: "x" }), false);
+	assert.equal(indirectReviewer({ action: "list" }), false);
+});
+
+test("verifiedSinceEdit: a green verify in the app after the last code edit; docs edits don't count", () => {
+	const keeb = "/home/m/workspace/apps/keeb";
+	const edit = (id: string, path: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "edit", arguments: { path } }] } });
+	const verify = (id: string, command = "cd ~/workspace/apps/keeb && npm run verify") => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: { command } }] } });
+	const v = (b: unknown[]) => verifiedSinceEdit(b, keeb, home, home);
+	assert.equal(v([edit("e", `${keeb}/src/a.ts`), verify("v"), toolRes("v")]), true);
+	assert.equal(v([edit("e", `${keeb}/src/a.ts`), verify("v"), toolRes("v", true)]), false, "verify failed");
+	assert.equal(v([verify("v"), toolRes("v"), edit("e", `${keeb}/src/a.ts`)]), false, "code edited after verify");
+	assert.equal(v([verify("v"), toolRes("v"), edit("e", `${keeb}/docs/spec.md`)]), true, "docs edit after verify");
+	assert.equal(v([edit("e", `${keeb}/src/a.ts`), verify("v", "cd ~/workspace/apps/tips && npm run verify"), toolRes("v")]), false, "another app");
+	assert.equal(v([edit("e", `${keeb}/src/a.ts`)]), false, "never verified");
+});
+
+test("reviewHeader names the scope, the verify result and the budget", () => {
+	const h = reviewHeader({ dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "review", diffPath: "/tmp/keeb-review.diff", files: [{ path: "src/a.ts", added: "3", removed: "1" }] });
+	assert.match(h, /- src\/a\.ts \(\+3 -1\)/);
+	assert.match(h, /already reviewed/);
+	assert.match(h, /npm run verify/);
+	assert.match(h, new RegExp(`${REVIEW_BUDGET.hard} tool calls`));
 });
 
 test("pr and gateway-pr are blocked until a reviewer ran, unless only docs, Markdown or CI changed", () => {

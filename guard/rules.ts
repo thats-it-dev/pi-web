@@ -12,7 +12,10 @@ export const REASONS = {
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
-	review: `Blocked: run the reviewer before opening the PR. Write the diff to a file (\`cd <dir> && git diff main...HEAD > /tmp/<name>-review.diff\`) and, if the app generates content or changes with the user's progress, sample output at the first, a middle and the last stage to another file. Then call the \`subagent\` tool with agent "reviewer", \`async: false\` (so it waits for the review) and a task that names Michael's request, \`docs/spec.md\` and those files (call \`subagents_enable\` first if \`subagent\` is not available). Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	review: `Blocked: run the reviewer before opening the PR. Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
+	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
+	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 };
@@ -57,8 +60,9 @@ export type Env = {
 	home: string;
 	hasScript: (dir: string, name: string) => boolean;
 	dirty: (dir: string) => boolean;
-	/** A reviewer subagent finished since Michael's last message. Absent: not checked. */
-	reviewed?: () => boolean;
+	/** The app's current state was reviewed (a scoped reviewer finished since Michael's last message, or nothing
+	 *  changed since the last review). Absent: not checked. */
+	reviewed?: (dir: string) => boolean;
 	/** The branch changes more than docs, Markdown and CI files. */
 	codeChanged?: (dir: string) => boolean;
 	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
@@ -93,7 +97,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
-	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed() && (env.codeChanged?.(dir) ?? true)) return { block: true, reason: REASONS.review };
+	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && (env.codeChanged?.(dir) ?? true)) return { block: true, reason: REASONS.review };
 	return undefined;
 }
 
@@ -109,33 +113,114 @@ export function reviewFree(path: string): boolean {
 type Entry = { type?: string; message?: { role?: string; content?: unknown; toolCallId?: string; isError?: boolean } };
 type ToolCallPart = { type?: string; id?: string; name?: string; arguments?: Record<string, unknown> };
 
-/** A reviewer subagent call that waits for the review (`async: false`; by default subagent returns a receipt
- *  and reviews in the background): direct (`agent: "reviewer"`) or inside a workflow script in the same reply. */
-function reviewerCall(call: ToolCallPart, replyText: string): boolean {
-	if (call.type !== "toolCall" || call.name !== "subagent" || call.arguments?.async !== false) return false;
-	if (call.arguments?.agent === "reviewer") return true;
-	return call.arguments?.workflow !== undefined && /agent:\s*["']reviewer["']/.test(replyText);
-}
+/** Appended to a scoped review's result by the guard; records which app state the review covered. */
+export const REVIEW_MARK = "[pi-guard] reviewed ";
+export const reviewMark = (dir: string, snap: string) => `${REVIEW_MARK}${dir} at ${snap}`;
 
-/** True when a reviewer subagent returned without error after Michael's last message on the branch. */
+const resultText = (m: Entry["message"]) =>
+	Array.isArray(m?.content) ? (m.content as { type?: string; text?: string }[]).map((c) => (c.type === "text" ? c.text ?? "" : "")).join("\n") : "";
+
+/** True when a review the guard scoped returned without error after Michael's last message on the branch. */
 export function reviewedSinceUser(branch: Iterable<unknown>): boolean {
 	let reviewed = false;
-	const pending = new Set<string>();
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
 		if (e.type !== "message" || !m) continue;
-		if (m.role === "user") {
-			reviewed = false;
-			pending.clear();
-		} else if (m.role === "assistant" && Array.isArray(m.content)) {
-			const text = m.content.map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
-			for (const c of m.content as ToolCallPart[]) if (reviewerCall(c, text) && c.id) pending.add(c.id);
-		} else if (m.role === "toolResult" && m.toolCallId && pending.has(m.toolCallId) && !m.isError) {
-			reviewed = true;
-		}
+		if (m.role === "user") reviewed = false;
+		else if (m.role === "toolResult" && !m.isError && resultText(m).includes(REVIEW_MARK)) reviewed = true;
 	}
 	return reviewed;
+}
+
+/** The snapshot commit the last scoped review of `dir` covered, from the marks on the branch. */
+export function lastReview(branch: Iterable<unknown>, dir: string): string | undefined {
+	let snap: string | undefined;
+	const mark = `${REVIEW_MARK}${dir} at `;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
+		const text = resultText(e.message);
+		const at = text.lastIndexOf(mark);
+		if (at >= 0) snap = /^[0-9a-f]{7,64}/.exec(text.slice(at + mark.length))?.[0] ?? snap;
+	}
+	return snap;
+}
+
+/** The app a reviewer call is about: an apps path in the task, then a /tmp/<name>-review.diff, then the cwd. */
+export function reviewApp(task: string, cwd: string, home: string): string | undefined {
+	const named = appDir(task, "", home);
+	if (named) return named;
+	const diff = /\/tmp\/([A-Za-z0-9._-]+)-review\.diff/.exec(task)?.[1];
+	return diff ? join(home, "workspace", "apps", diff) : appDir("", cwd, home);
+}
+
+/** A subagent call that runs a reviewer some way other than a direct `agent: "reviewer"` call. */
+export function indirectReviewer(input: Record<string, unknown>): boolean {
+	if (input.agent !== undefined) return false;
+	const { workflow, chain, tasks, script } = input;
+	return [workflow, chain, tasks, script].some((v) => v !== undefined && /\breviewer\b/.test(typeof v === "string" ? v : JSON.stringify(v)));
+}
+
+/** True when `npm run verify` passed in `dir` after the last edit or write to a code file there. */
+export function verifiedSinceEdit(branch: Iterable<unknown>, dir: string, cwd: string, home: string): boolean {
+	const verifies = new Set<string>();
+	let lastEdit = -1;
+	let lastVerify = -1;
+	let i = 0;
+	for (const raw of branch) {
+		i++;
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const c of m.content as ToolCallPart[]) {
+				if (c.type !== "toolCall") continue;
+				const path = c.arguments?.path;
+				if ((c.name === "edit" || c.name === "write") && typeof path === "string") {
+					const abs = path.replace(/^~(?=\/)/, home);
+					const full = isAbsolute(abs) ? abs : join(cwd, abs);
+					if (full.startsWith(`${dir}/`) && !reviewFree(full.slice(dir.length + 1))) lastEdit = i;
+				}
+				const command = c.arguments?.command;
+				if (c.name === "bash" && typeof command === "string" && /\bnpm\s+run\s+verify\b/.test(command) && appDir(command, cwd, home) === dir && c.id) verifies.add(c.id);
+			}
+		} else if (m.role === "toolResult" && m.toolCallId && verifies.has(m.toolCallId) && !m.isError) {
+			lastVerify = i;
+		}
+	}
+	return lastVerify > lastEdit;
+}
+
+/** Read and search calls a scoped reviewer gets. At `soft` it is told to finish; after `hard` every tool is blocked. */
+export const REVIEW_BUDGET = { soft: 12, hard: 20, block: "*" } as const;
+
+export type ReviewScope = {
+	dir: string;
+	/** Where the diff starts: the last review's snapshot, or the branch point from main. */
+	base: string;
+	baseFrom: "review" | "main";
+	diffPath: string;
+	files: { path: string; added: string; removed: string }[];
+};
+
+/** The scope the guard puts in front of the parent's review task. */
+export function reviewHeader(s: ReviewScope): string {
+	const files = s.files.map((f) => `- ${f.path} (+${f.added} -${f.removed})`).join("\n");
+	const from =
+		s.baseFrom === "review"
+			? `the state the last review covered (${s.base.slice(0, 8)}); everything before it was already reviewed, so don't review it again`
+			: `where the branch left main (${s.base.slice(0, 8)})`;
+	return [
+		"[Review scope, set by pi-guard. Follow it exactly.]",
+		`App: ${s.dir} (your working directory). Its AGENTS.md, if it has one, is already in your context.`,
+		`Diff: ${s.diffPath}, every change from ${from} to the current working tree, uncommitted and new files included, lockfiles and build output left out.`,
+		`Changed files:\n${files}`,
+		"`npm run verify` (typecheck, lint, guardrail tests, unit tests and e2e tests) passed after the last code edit. Don't check whether tests pass or run, and don't read config, CI, lock, test-result, coverage or git files.",
+		`Read the diff first. Open a file outside the list only to check a caller, a definition or a contract the diff depends on. Put independent reads in one turn. You have ${REVIEW_BUDGET.hard} tool calls; at ${REVIEW_BUDGET.soft} write your review.`,
+		"",
+		"[The parent's request]",
+	].join("\n");
 }
 
 // The shell commands and Python code a tool call would run, for bash and context-mode's ctx_* tools.
