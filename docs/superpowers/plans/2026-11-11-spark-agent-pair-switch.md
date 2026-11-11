@@ -73,7 +73,7 @@
 - Modify: spec, "A/B" and "Readout" tables.
 
 **Interfaces:**
-- `node bench/pair-ab.mjs --model <id> --task <file> --effort <level> --out <jsonl>`: runs `pi --mode json -p --model spark/<id> --thinking <level>` on a fixed pi task (the cad Task 3 brief from `~/workspace/apps/cad/.superpowers/sdd/2026-11-10-cad-v1.0/task-3-brief.md`, on a scratch worktree of cad at `c407b57`), with a 25-minute cap; records wall-clock, output tokens, reasoning tokens, tool calls, whether `npm test` passes after, and the engine's DFlash accept length from `/metrics`.
+- `node bench/pair-ab.mjs --model <id> --task <file> --effort <level> --out <jsonl>`: runs `pi --mode json -p --model spark/<id> --thinking <level>` on a fixed pi task (the cad Task 3 brief from `~/workspace/apps/cad/.superpowers/sdd/2026-11-10-cad-v1.0/task-3-brief.md`, on a scratch worktree of cad at `649259e` (the ruling commit just before Task 3's implementation `c407b57`)), with a 25-minute cap; records wall-clock, output tokens, reasoning tokens, tool calls, whether `npm test` passes after, and the engine's DFlash accept length from `/metrics`.
 - Readout bench: flash-auto's `node bench/run.ts --set test --condition idle` with the flash classifier pointed at `qwen3.6-35b-a3b-sglang` (its `FlashOptions.model`); `node bench/report.ts` prints exact and within-one-level accuracy.
 
 - [ ] **Step 1: Pi tune at medium**, twice: `--model qwen3.8-27b-pi --effort medium`. Record.
