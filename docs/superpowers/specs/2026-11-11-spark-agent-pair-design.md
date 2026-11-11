@@ -338,6 +338,19 @@ mostly `low → off`, which changes nothing in the pair (both run on the 35B). C
 accepted: the fallback is medium (tune), and a bias toward medium on close calls can be tuned later from the
 decision log's probabilities. Rows: `~/workspace/flash-auto/results/test-idle-35b.jsonl` (private, gitignored).
 
+**Task 3b (12:34–13:24 PT), A/B — pi tune at medium** on cad Task 3 (brief `task-3-brief.md`, scratch worktree at
+`649259e`, `pi -p -ne -e guard`, 25-min cap):
+
+| Run | Wall | Turns | Tool calls | Output tokens (thinking) | Max context | Finished? |
+|---|---|---|---|---|---|---|
+| 1 | 25 min (cap) | 17 | 20 | 30,586 (≈16,300) | 47k | no; tests not green |
+| 2 | 25 min (cap) | 12 | 13 | 34,494 (≈23,200) | 37k | no; `src/sketch/` written, no tests yet |
+
+Engine during the runs (35B idle): **21.4 tok/s decode, DFlash accept length 3.48**. Wall-clock output rate ≈ 20–23
+tok/s. For scale, flash-next's worker finished this task in ~50 min at 34 tok/s with 86k tokens. The FP8 weights
+read twice the bytes of NVFP4 per step; the tune's token saving (at "medium" it still spent ~2/3 of its tokens
+thinking here) does not cover the gap. Verdict waits for the base runs below.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.
