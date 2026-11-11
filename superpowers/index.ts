@@ -32,22 +32,47 @@ function savedFloor(branch: Iterable<unknown>): string | null {
  *  ~/workspace/apps, finishing-a-development-branch pushes and merges, the review skills send unscoped reviewers). */
 export const EXCLUDED = ["using-git-worktrees", "finishing-a-development-branch", "subagent-driven-development", "requesting-code-review"];
 
+/** Excluded skills whose files executing-plans uses by relative path (`sdd-workspace`, `review-package`, the
+ *  task-start/task-done helpers, code-reviewer.md). Their files are linked with no SKILL.md, so pi never lists them. */
+export const SUPPORT_ONLY = ["subagent-driven-development", "requesting-code-review"];
+
+/** pi's rules, put at the top of a skill's body. Plans run inline: on flash-next a fresh worker per task starts
+ *  cold, re-reads the codebase and thinks for 5-11 min per turn; on the cad run (2026-11-11) 14 of 20 workers
+ *  timed out and the parent redid their tasks in the main session in a fraction of the time. */
+export const PI_NOTES: Record<string, string> = {
+	"writing-plans":
+		"> **In pi:** plans run inline with superpowers:executing-plans: you implement every task yourself, in this session. subagent-driven-development is not available here, so don't offer it, recommend it, or look for it elsewhere on disk (e.g. ~/.claude/plugins). At the handoff, don't ask which execution approach to use; ask only whether the plan captures what they want, then use superpowers:executing-plans.",
+	"executing-plans":
+		"> **In pi:** every plan runs this way. Never switch to subagent-driven-development and never dispatch a `worker` subagent per task. Final review: in an app under ~/workspace/apps, use the thatsit-app skill's Review step (`subagent` with agent `reviewer`; the guard writes the scoped diff) instead of review-package and code-reviewer.md, and finish with its pr steps, not finishing-a-development-branch. Elsewhere, run review-package and call `subagent` with agent `reviewer` on the file it prints.",
+};
+
+/** A skill's SKILL.md for pi: its pi note after the frontmatter, and no plan header pointing at a skill pi doesn't have. */
+export function forPi(name: string, md: string): string {
+	let out = md.replace("superpowers:subagent-driven-development (recommended) or superpowers:executing-plans", "superpowers:executing-plans");
+	const note = PI_NOTES[name];
+	if (!note) return out;
+	const m = /^---\n[\s\S]*?\n---\n/.exec(out);
+	const at = m ? m[0].length : 0;
+	return `${out.slice(0, at)}\n${note}\n\n${out.slice(at)}`;
+}
+
 const SOURCE = join(homedir(), ".pi", "agent", "git", "github.com", "obra", "superpowers", "skills");
 const MANUAL = join(homedir(), ".pi", "agent", "tmp", "superpowers-manual");
 
 /** Writes manual-only copies of the superpowers skills to `out`: each SKILL.md gains disable-model-invocation,
  *  every other file is a symlink to the original, so relative references still resolve. Returns `out`, or
  *  undefined when superpowers is not installed. */
-export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED): string | undefined {
+export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED, supportOnly = SUPPORT_ONLY): string | undefined {
 	if (!existsSync(src)) return undefined;
 	rmSync(out, { recursive: true, force: true });
 	for (const name of readdirSync(src)) {
 		const skill = join(src, name, "SKILL.md");
-		if (exclude.includes(name) || !existsSync(skill)) continue;
+		const support = supportOnly.includes(name);
+		if ((exclude.includes(name) && !support) || !existsSync(skill)) continue;
 		const dir = join(out, name);
 		mkdirSync(dir, { recursive: true });
 		for (const f of readdirSync(join(src, name))) if (f !== "SKILL.md") symlinkSync(join(src, name, f), join(dir, f));
-		writeFileSync(join(dir, "SKILL.md"), manualOnly(readFileSync(skill, "utf8")));
+		if (!support) writeFileSync(join(dir, "SKILL.md"), manualOnly(forPi(name, readFileSync(skill, "utf8"))));
 	}
 	return out;
 }

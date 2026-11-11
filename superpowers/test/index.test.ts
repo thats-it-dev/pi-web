@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import superpowersSwitch, { bootstrap, buildManualSkills, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
+import superpowersSwitch, { bootstrap, buildManualSkills, forPi, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
 
 const entry = (on: boolean) => ({ type: "custom", customType: ENTRY_TYPE, data: { on } });
 
@@ -44,6 +44,36 @@ test("buildManualSkills: copies SKILL.md manual-only, links the rest, leaves out
 	assert.equal(lstatSync(join(out, "brainstorming", "visual.md")).isSymbolicLink(), true);
 	assert.equal(existsSync(join(out, "using-git-worktrees")), false);
 	assert.equal(buildManualSkills(join(src, "missing"), out), undefined);
+});
+
+test("buildManualSkills: links an excluded skill's files for executing-plans, with no SKILL.md so pi never lists it", () => {
+	const src = mkdtempSync(join(tmpdir(), "sp-src-"));
+	mkdirSync(join(src, "subagent-driven-development", "scripts"), { recursive: true });
+	writeFileSync(join(src, "subagent-driven-development", "SKILL.md"), "---\nname: subagent-driven-development\n---\nbody");
+	writeFileSync(join(src, "subagent-driven-development", "scripts", "sdd-workspace"), "#!/bin/sh");
+	const out = join(mkdtempSync(join(tmpdir(), "sp-out-")), "manual");
+	buildManualSkills(src, out);
+	assert.equal(lstatSync(join(out, "subagent-driven-development", "scripts")).isSymbolicLink(), true);
+	assert.equal(existsSync(join(out, "subagent-driven-development", "SKILL.md")), false);
+});
+
+test("forPi: plans run inline; the note goes after the frontmatter and the plan header loses subagent-driven", () => {
+	const plans = forPi("writing-plans", "---\nname: writing-plans\n---\n> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement\n");
+	assert.match(plans, /^---\nname: writing-plans\n---\n\n> \*\*In pi:\*\* plans run inline/);
+	assert.match(plans, /REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement/);
+	assert.match(forPi("executing-plans", "---\nname: executing-plans\n---\nbody"), /never dispatch a `worker` subagent per task/);
+	assert.equal(forPi("brainstorming", "---\nname: b\n---\nbody"), "---\nname: b\n---\nbody");
+});
+
+test("the real superpowers install: writing-plans keeps no route to subagent-driven-development but the pi note", { skip: !existsSync(join(process.env.HOME ?? "", ".pi/agent/git/github.com/obra/superpowers/skills")) }, () => {
+	const out = join(mkdtempSync(join(tmpdir(), "sp-real-")), "manual");
+	buildManualSkills(undefined, out);
+	const plans = readFileSync(join(out, "writing-plans", "SKILL.md"), "utf8");
+	assert.match(plans, /REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement/);
+	assert.match(plans, /In pi:\*\* plans run inline/);
+	assert.equal(existsSync(join(out, "subagent-driven-development", "scripts", "sdd-workspace")), true);
+	assert.equal(existsSync(join(out, "requesting-code-review", "code-reviewer.md")), true);
+	assert.equal(existsSync(join(out, "executing-plans", "scripts", "task-start")), true);
 });
 
 test("bootstrap: the using-superpowers body with the pi tool mapping; null when superpowers is missing", () => {
