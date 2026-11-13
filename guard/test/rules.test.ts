@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
+import { busyWorker, checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -540,4 +540,48 @@ test("a reviewer run that stopped on the output cap is failed, never complete", 
 	mkdirSync(join(root, "r1"));
 	writeFileSync(join(root, "r1", "status.json"), JSON.stringify({ state: "failed", error: 'Subagent produced no output after terminal assistant stopReason "length".' }));
 	assert.equal(defaultRunState("r1", root), "failed");
+});
+
+// A worker launch as pi-subagents records it on the branch: the call, then its launch result naming the run.
+const launch = (call: string, run: string, args: Record<string, unknown>) => [
+	{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: call, name: "subagent", arguments: args }] } },
+	{ type: "message", message: { role: "toolResult", toolCallId: call, content: [{ type: "text", text: `Run fan-out: 1/64 used, 63 remaining\nAsync: ${args.agent} [${run}]\n\nThe async run is detached and running in the background.` }] } },
+];
+const RUN_A = "8c2c7de4-3280-4548-87ad-1dc153a27369";
+const RUN_B = "1a11c8f0-30dc-467d-b866-69ff1e82638d";
+const keebTask = "Work in /home/michael/workspace/apps/keeb on branch feat/x (already checked out). Read the brief first.";
+
+test("verify and e2e wait while an async worker is still in the app's main checkout (keeb run 2026-11-12: a port clash and a commit with no e2e pass)", () => {
+	const state = (states: Record<string, ReturnType<RunState>>): RunState => (id) => states[id] ?? "missing";
+	const home = "/home/michael";
+	const busyEnv = (branch: unknown[], states: Record<string, ReturnType<RunState>>) =>
+		env({ home, cwd: home, busy: (dir) => busyWorker(branch, dir, home, home, state(states)) });
+	const app = "cd ~/workspace/apps/keeb && ";
+	const running = launch("c1", RUN_A, { agent: "worker", task: keebTask, async: true });
+	assert.equal(bash(`${app}npm run verify 2>&1 | tail -40`, busyEnv(running, { [RUN_A]: "running" })), workerBusy(RUN_A));
+	assert.equal(bash(`${app}npm run e2e:one -- e2e/daily.spec.ts`, busyEnv(running, { [RUN_A]: "running" })), workerBusy(RUN_A));
+	assert.equal(bash(`${app}npx playwright test e2e/daily.spec.ts --project=desktop`, busyEnv(running, { [RUN_A]: "running" })), workerBusy(RUN_A));
+	assert.equal(checkToolCall("bg_bash", { command: `${app}npm run verify` }, busyEnv(running, { [RUN_A]: "running" }))?.reason, workerBusy(RUN_A));
+	// Reading the checkout is fine; so is another app.
+	assert.equal(bash(`${app}git status --short && git diff`, busyEnv(running, { [RUN_A]: "running" })), undefined);
+	assert.equal(bash("cd ~/workspace/apps/tips && npm run verify", busyEnv(running, { [RUN_A]: "running" })), undefined);
+	// Once the run ends (or its dir aged out), verify runs.
+	assert.equal(bash(`${app}npm run verify`, busyEnv(running, { [RUN_A]: "complete" })), undefined);
+	assert.equal(bash(`${app}npm run verify`, busyEnv(running, {})), undefined);
+	// A worktree worker works elsewhere; scouts and reviewers don't write.
+	assert.equal(bash(`${app}npm run verify`, busyEnv(launch("c1", RUN_A, { agent: "worker", task: keebTask, async: true, worktree: true }), { [RUN_A]: "running" })), undefined);
+	assert.equal(bash(`${app}npm run verify`, busyEnv(launch("c1", RUN_A, { agent: "reviewer", task: keebTask, async: true }), { [RUN_A]: "running" })), undefined);
+	// The app can come from the call's cwd instead of the task text.
+	const byCwd = launch("c1", RUN_A, { agent: "worker", task: "Read the brief at .superpowers/sdd/x/task-1-brief.md", cwd: "/home/michael/workspace/apps/keeb", async: true });
+	assert.equal(bash(`${app}npm run verify`, busyEnv(byCwd, { [RUN_A]: "running" })), workerBusy(RUN_A));
+	// A resume revives the run under a new id, which inherits the checkout.
+	const revived = [
+		...running,
+		{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "subagent", arguments: { action: "resume", id: RUN_A.slice(0, 8), message: "fix the selector" } }] } },
+		{ type: "message", message: { role: "toolResult", toolCallId: "c2", content: [{ type: "text", text: `Revived async subagent from ${RUN_A}.\nRevived run: ${RUN_B}\nAgent: worker` }] } },
+	];
+	assert.equal(bash(`${app}npm run verify`, busyEnv(revived, { [RUN_A]: "complete", [RUN_B]: "running" })), workerBusy(RUN_B));
+	assert.equal(bash(`${app}npm run verify`, busyEnv(revived, { [RUN_A]: "complete", [RUN_B]: "complete" })), undefined);
+	// Without the hook (an older index.ts) nothing changes.
+	assert.equal(bash(`${app}npm run verify`), undefined);
 });

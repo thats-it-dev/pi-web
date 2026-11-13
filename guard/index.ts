@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -216,6 +216,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			lines,
 			rewrites,
 			orchestrator,
+			busy: (dir) => busyWorker(branch(), dir, ctx.cwd, home),
 		});
 		if (block || event.toolName !== "subagent" || !event.input) return block;
 		let scoped: ReturnType<typeof scopeReview>;

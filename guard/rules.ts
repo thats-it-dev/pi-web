@@ -25,6 +25,11 @@ export const REASONS = {
 		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Merges, commits and `npm run verify` in the main checkout are yours.",
 };
 
+/** A worker launched without `worktree: true` owns the app's main checkout until its run ends: a verify or e2e run
+ *  beside it shares the e2e server port and test-results, and tests half-edited files. */
+export const workerBusy = (runId: string) =>
+	`Blocked: worker ${runId.slice(0, 8)} is still working in this app's main checkout. Its verify and yours would share the e2e server port and test-results, and would test half-edited files. Wait for its result (a message arrives when the run ends; \`subagent\` with action "status" shows progress), then run \`npm run verify\` once. A worker that must run beside you goes in a worktree (\`worktree: true\`).`;
+
 // The app a command works in: from a path to ~/workspace/apps/<name> in the command, else the session cwd.
 export function appDir(command: string, cwd: string, home: string): string | undefined {
 	const apps = join(home, "workspace", "apps");
@@ -122,7 +127,12 @@ export type Env = {
 	rewrites?: Set<string>;
 	/** This session is the agent pair's orchestrator (pair settings, not a subagent child): it never edits app code. */
 	orchestrator?: boolean;
+	/** The run id of a worker still running in the app's main checkout, if any (busyWorker). Absent: not checked. */
+	busy?: (dir: string) => string | undefined;
 };
+
+// Commands that start the e2e server in an app: the verify gate, the e2e scripts, playwright itself.
+const RUNS_E2E = /\bnpm\s+run\s+(?:verify|e2e(?::[\w-]+)?)\b|\bplaywright\s+test\b/;
 
 const INSTALLS = /\b(?:npm\s+(?:ci|i|install)|pnpm\s+(?:i|install)|yarn(?:\s+install)?)\b/;
 
@@ -151,6 +161,10 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	if (sleep && Number(sleep[1]) >= 60) return { block: true, reason: REASONS.ci };
 	if (/\bpython3?\b/.test(command) && pythonRewrite(command) && appDir("", workDir(command, env.cwd, env.home), env.home)) {
 		return { block: true, reason: REASONS.rewrite };
+	}
+	if (RUNS_E2E.test(command) && env.busy) {
+		const worker = env.busy(dir);
+		if (worker) return { block: true, reason: workerBusy(worker) };
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
@@ -282,6 +296,54 @@ export function verifiedSinceEdit(branch: Iterable<unknown>, dir: string, cwd: s
 		}
 	}
 	return lastVerify > lastEdit;
+}
+
+const WORKER_RUN = /Async: worker \[([0-9a-f-]{36})\]/;
+const REVIVED_RUN = /Revived run: ([0-9a-f-]{36})/;
+
+/** Async worker runs launched on an app's main checkout (no `worktree: true`), from the branch: run id -> app dir.
+ *  A resume revives a run under a new id, which inherits the checkout. */
+export function workerRuns(branch: Iterable<unknown>, cwd: string, home: string): Map<string, string> {
+	const launches = new Map<string, string>(); // tool call id -> app dir
+	const resumes = new Map<string, string>(); // tool call id -> the run (or prefix) resumed
+	const runs = new Map<string, string>();
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const c of m.content as ToolCallPart[]) {
+				if (c.type !== "toolCall" || c.name !== "subagent" || !c.id) continue;
+				const a = c.arguments ?? {};
+				if (a.agent === "worker" && a.worktree !== true) {
+					const dir = appDir(String(a.task ?? ""), typeof a.cwd === "string" ? a.cwd : cwd, home);
+					if (dir) launches.set(c.id, dir);
+				} else if (a.action === "resume" && typeof a.id === "string") {
+					resumes.set(c.id, a.id);
+				}
+			}
+		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
+			const text = resultText(m);
+			const dir = launches.get(m.toolCallId);
+			if (dir) {
+				const id = WORKER_RUN.exec(text)?.[1];
+				if (id) runs.set(id, dir);
+			}
+			const resumed = resumes.get(m.toolCallId);
+			if (resumed) {
+				const from = [...runs.keys()].find((id) => id.startsWith(resumed));
+				const id = REVIVED_RUN.exec(text)?.[1];
+				if (from && id) runs.set(id, runs.get(from) as string);
+			}
+		}
+	}
+	return runs;
+}
+
+/** The id of a worker still running in `dir`'s main checkout, if any. A run whose dir aged out never counts. */
+export function busyWorker(branch: Iterable<unknown>, dir: string, cwd: string, home: string, runState: RunState = defaultRunState): string | undefined {
+	for (const [id, d] of workerRuns(branch, cwd, home)) if (d === dir && runState(id) === "running") return id;
+	return undefined;
 }
 
 /** Read and search calls a scoped reviewer gets. At `soft` it is told to finish; after `hard` every tool is blocked. */
