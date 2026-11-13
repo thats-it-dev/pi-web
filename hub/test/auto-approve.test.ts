@@ -37,6 +37,17 @@ test("semi: benign calls are answered, anything else or unknown asks", () => {
 	assert.equal(autoAnswer(ALLOW_DENY, running("semi", null)), null, "no known tool call: ask");
 });
 
+test("semi: reading an attached file under the session's uploads folder is benign; writing there or reading another session's is not", () => {
+	const UP = "/data/uploads/s1";
+	assert.equal(benignTool({ name: "read", args: { path: `${UP}/report.pdf` } }, CWD, UP), true, "read inside uploads");
+	assert.equal(benignTool({ name: "grep", args: { path: UP, pattern: "x" } }, CWD, UP), true, "grep inside uploads");
+	assert.equal(benignTool({ name: "write", args: { path: `${UP}/x` } }, CWD, UP), false, "write inside uploads asks");
+	assert.equal(benignTool({ name: "read", args: { path: "/data/uploads/s2/report.pdf" } }, CWD, UP), false, "another session's uploads");
+	assert.equal(benignTool({ name: "read", args: { path: `${UP}/report.pdf` } }, CWD), false, "no uploads folder known");
+	const ctx = { ...running("semi", { name: "read", args: { path: `${UP}/a.pdf` } }), uploadsDir: UP };
+	assert.deepEqual(autoAnswer(ALLOW_DENY, ctx), { value: "Allow" });
+});
+
 test("benignTool: reads, searches, writes and edits inside the folder; nothing outside; no extension tools", () => {
 	for (const name of ["read", "ls", "find", "grep", "write", "edit"]) {
 		assert.equal(benignTool({ name, args: { path: "src/a.ts" } }, CWD), true, name);

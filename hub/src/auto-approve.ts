@@ -38,6 +38,7 @@ export interface ApprovalContext {
 	mode: ApprovalMode;
 	running: boolean; // a turn is in progress
 	cwd: string; // the session folder
+	uploadsDir?: string; // this session's attached files; reads there are benign too
 	tool: PendingTool | null; // the call the dialog is about, when known
 }
 
@@ -51,7 +52,7 @@ export function autoAnswer(d: Pick<Dialog, "method" | "options"> & { title?: str
 		return allow === undefined ? null : { value: allow };
 	}
 	if (ctx.mode === "manual" || !ctx.running) return null;
-	if (ctx.mode === "semi" && !(ctx.tool && benignTool(ctx.tool, ctx.cwd))) return null;
+	if (ctx.mode === "semi" && !(ctx.tool && benignTool(ctx.tool, ctx.cwd, ctx.uploadsDir))) return null;
 	if (d.method === "confirm") return { confirmed: true };
 	if (d.method !== "select") return null;
 	const options = (d.options ?? []).map((o) => String(o).trim());
@@ -63,12 +64,13 @@ export function autoAnswer(d: Pick<Dialog, "method" | "options"> & { title?: str
 const READS = new Set(["read", "ls", "find", "grep"]);
 const WRITES = new Set(["write", "edit"]);
 
-export function benignTool(tool: PendingTool, cwd: string): boolean {
+export function benignTool(tool: PendingTool, cwd: string, uploadsDir?: string): boolean {
 	const args = (tool.args && typeof tool.args === "object" ? tool.args : {}) as Record<string, unknown>;
 	if (READS.has(tool.name) || WRITES.has(tool.name)) {
 		const path = args.path;
 		if (path === undefined || path === null || path === "") return READS.has(tool.name); // find/grep default to the folder
-		return typeof path === "string" && insideFolder(path, cwd);
+		if (typeof path !== "string") return false;
+		return insideFolder(path, cwd) || (READS.has(tool.name) && uploadsDir !== undefined && insideFolder(path, uploadsDir));
 	}
 	if (tool.name === "bash") return typeof args.command === "string" && benignCommand(args.command);
 	return false;

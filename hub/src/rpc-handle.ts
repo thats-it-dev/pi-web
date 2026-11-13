@@ -58,6 +58,7 @@ export interface RpcHandleOptions {
 	env?: Record<string, string>;
 	promptAckMs?: number; // how long a prompt waits for pi's ack before returning `pending`
 	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
+	uploadsDir?: string; // the hub's uploads root; this session's attached files are under <uploadsDir>/<sessionId>
 	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
@@ -480,7 +481,8 @@ export class RpcHandle implements SessionHandle {
 					prefill: req.prefill,
 					timeout: req.timeout,
 				};
-				const auto = autoAnswer(dialog, { mode: this.approvalMode, running: this.conv.streaming, cwd: this.cwd, tool: this.pendingTool() });
+				const uploadsDir = this.opts.uploadsDir && this.sessionId ? join(this.opts.uploadsDir, this.sessionId) : undefined;
+				const auto = autoAnswer(dialog, { mode: this.approvalMode, running: this.conv.streaming, cwd: this.cwd, uploadsDir, tool: this.pendingTool() });
 				if (auto) {
 					this.write(toRpc({ type: "dialog_response", id: dialog.id, ...auto }));
 					return;

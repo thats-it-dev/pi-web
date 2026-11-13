@@ -35,13 +35,14 @@ try {
 }
 
 const exportDir = join(cfg.dataDir, "exports");
+const uploadsDir = join(cfg.dataDir, "uploads");
 mkdirSync(exportDir, { recursive: true });
 mkdirSync(join(cfg.dataDir, "index"), { recursive: true }); // webhook drop folder
 const index = new SessionIndex(sessionsDir());
 const lastModel = new LastModelStore(join(cfg.dataDir, "last-model.json"));
 const catalog = new ModelCatalog({ piBin: cfg.piBin });
 const registry = new Registry({
-	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, onModelPicked: (c) => lastModel.set(c) }) },
+	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, uploadsDir, onModelPicked: (c) => lastModel.set(c) }) },
 	lookup: index,
 	maxHeadless: cfg.maxHeadless,
 	idleMs: cfg.idleMinutes * 60_000,
