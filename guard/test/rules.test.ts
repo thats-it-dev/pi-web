@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -574,6 +574,30 @@ test("verify and e2e wait while an async worker is still in the app's main check
 	// The app can come from the call's cwd instead of the task text.
 	const byCwd = launch("c1", RUN_A, { agent: "worker", task: "Read the brief at .superpowers/sdd/x/task-1-brief.md", cwd: "/home/michael/workspace/apps/keeb", async: true });
 	assert.equal(bash(`${app}npm run verify`, busyEnv(byCwd, { [RUN_A]: "running" })), workerBusy(RUN_A));
+	// A launch that names no app is tracked too: the run's status.json says where the worker works (its cwd, or the
+	// paths in its tool calls). Until it has shown, it holds every checkout; in a worktree it holds none.
+	const unnamed = launch("c1", RUN_A, { agent: "worker", task: "Read the brief at .superpowers/sdd/x/task-1-brief.md and follow it.", async: true });
+	const root = mkdtempSync(join(tmpdir(), "runs-"));
+	mkdirSync(join(root, RUN_A));
+	const status = (s: object) => writeFileSync(join(root, RUN_A, "status.json"), JSON.stringify({ state: "running", cwd: "/home/michael", ...s }));
+	const unnamedEnv = () => env({ home, cwd: home, busy: (dir) => busyWorker(unnamed, dir, home, home, state({ [RUN_A]: "running" }), (id) => defaultRunDir(id, home, root)) });
+	status({ steps: [{ recentTools: [{ tool: "read", args: "/home/michael/workspace/apps/keeb/.superpowers/sdd/x/task-1-brief.md" }, { tool: "edit", args: "/home/michael/workspace/apps/keeb/src/a.ts" }] }] });
+	assert.equal(bash(`${app}npm run verify`, unnamedEnv()), workerBusy(RUN_A));
+	assert.equal(bash("cd ~/workspace/apps/tips && npm run verify", unnamedEnv()), undefined);
+	status({ steps: [{ recentTools: [{ tool: "bash", args: "cd /home/michael/workspace/apps/keeb && npm test" }] }] });
+	assert.equal(bash(`${app}npm run verify`, unnamedEnv()), workerBusy(RUN_A));
+	status({ cwd: "/home/michael/workspace/apps/keeb", steps: [{ recentTools: [] }] });
+	assert.equal(bash(`${app}npm run verify`, unnamedEnv()), workerBusy(RUN_A));
+	status({ steps: [{ recentTools: [] }] });
+	assert.equal(bash(`${app}npm run verify`, unnamedEnv()), workerBusy(RUN_A), "not shown yet: holds every checkout");
+	assert.equal(bash("cd ~/workspace/apps/tips && npm run verify", unnamedEnv()), workerBusy(RUN_A));
+	status({ steps: [{ recentTools: [{ tool: "edit", args: "/home/michael/workspace/apps/worktrees/keeb/pi-worktree-ab12-0/src/a.ts" }] }] });
+	assert.equal(bash(`${app}npm run verify`, unnamedEnv()), undefined, "a worktree worker holds no main checkout");
+	assert.equal(defaultRunDir(RUN_A, home, root), WORKTREE);
+	// A worktree run's cwd is the app it was cut from; its tool calls tell the truth.
+	status({ cwd: "/home/michael/workspace/apps/keeb", steps: [{ recentTools: [{ tool: "read", args: "/home/michael/workspace/apps/keeb/docs/spec.md" }, { tool: "edit", args: "/home/michael/workspace/apps/worktrees/keeb/pi-worktree-ab12-0/src/a.ts" }] }] });
+	assert.equal(defaultRunDir(RUN_A, home, root), WORKTREE);
+	assert.equal(defaultRunDir("no-such-run", home, root), undefined);
 	// A resume revives the run under a new id, which inherits the checkout.
 	const revived = [
 		...running,

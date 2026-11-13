@@ -301,12 +301,13 @@ export function verifiedSinceEdit(branch: Iterable<unknown>, dir: string, cwd: s
 const WORKER_RUN = /Async: worker \[([0-9a-f-]{36})\]/;
 const REVIVED_RUN = /Revived run: ([0-9a-f-]{36})/;
 
-/** Async worker runs launched on an app's main checkout (no `worktree: true`), from the branch: run id -> app dir.
- *  A resume revives a run under a new id, which inherits the checkout. */
-export function workerRuns(branch: Iterable<unknown>, cwd: string, home: string): Map<string, string> {
-	const launches = new Map<string, string>(); // tool call id -> app dir
+/** Async worker runs launched without `worktree: true`, from the branch: run id -> the app dir the launch named
+ *  (task text or `cwd`), or undefined when it named none (runDir then reads it off the run). A resume revives a
+ *  run under a new id, which inherits the launch's dir. */
+export function workerRuns(branch: Iterable<unknown>, cwd: string, home: string): Map<string, string | undefined> {
+	const launches = new Map<string, string | undefined>(); // tool call id -> app dir
 	const resumes = new Map<string, string>(); // tool call id -> the run (or prefix) resumed
-	const runs = new Map<string, string>();
+	const runs = new Map<string, string | undefined>();
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
@@ -316,33 +317,66 @@ export function workerRuns(branch: Iterable<unknown>, cwd: string, home: string)
 				if (c.type !== "toolCall" || c.name !== "subagent" || !c.id) continue;
 				const a = c.arguments ?? {};
 				if (a.agent === "worker" && a.worktree !== true) {
-					const dir = appDir(String(a.task ?? ""), typeof a.cwd === "string" ? a.cwd : cwd, home);
-					if (dir) launches.set(c.id, dir);
+					launches.set(c.id, appDir(String(a.task ?? ""), typeof a.cwd === "string" ? a.cwd : cwd, home));
 				} else if (a.action === "resume" && typeof a.id === "string") {
 					resumes.set(c.id, a.id);
 				}
 			}
 		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
 			const text = resultText(m);
-			const dir = launches.get(m.toolCallId);
-			if (dir) {
+			if (launches.has(m.toolCallId)) {
 				const id = WORKER_RUN.exec(text)?.[1];
-				if (id) runs.set(id, dir);
+				if (id) runs.set(id, launches.get(m.toolCallId));
 			}
 			const resumed = resumes.get(m.toolCallId);
 			if (resumed) {
 				const from = [...runs.keys()].find((id) => id.startsWith(resumed));
 				const id = REVIVED_RUN.exec(text)?.[1];
-				if (from && id) runs.set(id, runs.get(from) as string);
+				if (from && id) runs.set(id, runs.get(from));
 			}
 		}
 	}
 	return runs;
 }
 
-/** The id of a worker still running in `dir`'s main checkout, if any. A run whose dir aged out never counts. */
-export function busyWorker(branch: Iterable<unknown>, dir: string, cwd: string, home: string, runState: RunState = defaultRunState): string | undefined {
-	for (const [id, d] of workerRuns(branch, cwd, home)) if (d === dir && runState(id) === "running") return id;
+/** Where a run works, read off its status.json: the app whose main checkout its cwd or its tool calls (the
+ *  `recentTools` args pi-subagents keeps per step) are in; `WORKTREE` when they are all in worktrees; undefined when
+ *  the run has not shown yet (no file, no app path). */
+export type RunDir = (runId: string) => string | typeof WORKTREE | undefined;
+export const WORKTREE = Symbol("worktree");
+
+export function defaultRunDir(runId: string, home: string, root: string = ASYNC_RUNS): ReturnType<RunDir> {
+	let status: { cwd?: unknown; steps?: { recentTools?: { args?: unknown }[] }[] };
+	try {
+		status = JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+	const apps = join(home, "workspace", "apps");
+	// A worktree worker may read the main checkout, a main-checkout worker never touches a worktree: any worktree
+	// path means a worktree. Tool calls say more than the cwd, which is the launch's (often `~`, or the app for a worktree run).
+	const found = (texts: string[]): string | typeof WORKTREE | undefined => {
+		let main: string | undefined;
+		for (const text of texts) {
+			for (const m of text.matchAll(/\/workspace\/apps\/([A-Za-z0-9._-]+)(?=\/|\s|$)/g)) {
+				if (m[1] === "worktrees") return WORKTREE;
+				if (!main && text.slice(0, m.index).endsWith(home)) main = join(apps, m[1]);
+			}
+		}
+		return main;
+	};
+	const tools = (status.steps ?? []).flatMap((s) => (s.recentTools ?? []).map((t) => (typeof t.args === "string" ? t.args : "")));
+	return found(tools) ?? found([typeof status.cwd === "string" ? status.cwd : ""]);
+}
+
+/** The id of a worker still running in `dir`'s main checkout, if any. A worker that has not shown where it works
+ *  yet holds every checkout; one in a worktree holds none. A run whose dir aged out never counts. */
+export function busyWorker(branch: Iterable<unknown>, dir: string, cwd: string, home: string, runState: RunState = defaultRunState, runDir: RunDir = (id) => defaultRunDir(id, home)): string | undefined {
+	for (const [id, launched] of workerRuns(branch, cwd, home)) {
+		if (runState(id) !== "running") continue;
+		const at = launched ?? runDir(id);
+		if (at === undefined || at === dir) return id;
+	}
 	return undefined;
 }
 

@@ -14,7 +14,7 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 | push | `git push` | the thatsit-app CLI's `pr` / `ship` |
 | ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr-wait` / `gateway-pr-wait` / `ship` through `bg_bash` |
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
-| worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched on the app without `worktree: true` is still running (the run's status.json says so) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
+| worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched without `worktree: true` is still running in the app (its launch named the app, or its status.json's cwd or tool calls show it there; a worker that has not shown where it works yet holds every app) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
 | rewrite | Python that writes files (`open(..., "w")`, `write_text`) in an app | the edit tool |
 | discard | `git checkout <ref> -- <path>`, `git restore`, `git reset --hard`, only while the app has uncommitted changes | write the test first and run it red before the fix; `git show <ref>:<path>` to look at old code |
 
