@@ -37,6 +37,10 @@
 			<tk-timeseries id="ts-main" y="wpm" goal="40" unit="wpm"></tk-timeseries>
 			<h2>keys, no goal</h2>
 			<tk-bars id="bars-nogoal" label="key" value="wpm" unit="wpm"></tk-bars>
+			<h2>progress</h2>
+			<tk-progress id="prog-main" label="today" unit="min"></tk-progress>
+			<h2>progress, goal reached</h2>
+			<tk-progress id="prog-done" label="today" unit="min"></tk-progress>
 			<h2>practice, 200px</h2>
 			<div id="cal-narrow" style="width:200px"><tk-heatmap id="cal-200" end="2026-11-09" weeks="12" unit="min"></tk-heatmap></div>
 			<h2>empty</h2>
@@ -110,6 +114,8 @@
 				document.getElementById("bars-ms").data = ms;
 				document.getElementById("cal-aside").data = cal;
 				document.getElementById("cal-200").data = cal;
+				const prog = document.getElementById("prog-main"); prog.value = 12; prog.max = 30;
+				const progDone = document.getElementById("prog-done"); progDone.value = 30; progDone.max = 30;
 				document.getElementById("ts-empty").data = [];
 				document.getElementById("ts-one").data = [days[days.length - 1].wpm !== null ? days[days.length - 1] : days.find((d) => d.wpm !== null)];
 			};
