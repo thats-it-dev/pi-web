@@ -199,7 +199,7 @@ export const messageStyles = css`
 	details > summary { cursor: pointer; list-style: none; }
 	details > summary::-webkit-details-marker { display: none; }
 	.think summary { font-size: 0.82em; color: var(--text-muted); font-style: italic; }
-	.think-body { white-space: pre-wrap; font-size: 0.85em; color: var(--text-secondary); border-left: 2px solid var(--line); padding-left: 10px; margin-top: 4px; }
+	.think-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85em; color: var(--text-secondary); border-left: 2px solid var(--line); padding-left: 10px; margin-top: 4px; }
 	.tool { border: 1px solid var(--line); border-radius: var(--radius); font-size: 0.82em; min-width: 0; }
 	.tool summary { display: flex; gap: 8px; align-items: center; padding: 5px 9px; background: var(--panel); min-width: 0; }
 	.tool .name { font-weight: 600; flex: none; }
@@ -214,5 +214,7 @@ export const messageStyles = css`
 	.note { font-size: 0.8em; color: var(--text-muted); font-style: italic; }
 	.marker { border-top: 1px dashed var(--line); padding-top: 6px; }
 	.marker summary, .custom { font-size: 0.8em; color: var(--text-muted); }
+	/* An extension's text (bg_bash output, say) can carry runs with no break opportunity; they wrap rather than widen the column. */
+	.custom { overflow-wrap: anywhere; min-width: 0; }
 	.marker summary { font-family: var(--font-display); letter-spacing: 0.06em; }
 `;

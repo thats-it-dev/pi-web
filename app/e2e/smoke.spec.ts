@@ -293,6 +293,21 @@ test("desktop: a plan opens in a sheet", async ({ page, isMobile }) => {
 	await expect(page.locator("tk-sheet")).toContainText("Plan P");
 });
 
+const CUSTOM_SESSION = "e2e-custom-session";
+
+test("an extension's notice with an unbreakable run wraps instead of widening the chat", async ({ page }) => {
+	await page.goto(`/#/s/${CUSTOM_SESSION}`);
+	const messages = page.locator("pi-messages");
+	await expect(messages.locator(".custom")).toContainText("────");
+	const scroll = page.locator("pi-session .scroll");
+	const fits = () => scroll.evaluate((el) => el.scrollWidth - el.clientWidth);
+	expect(await fits()).toBe(0);
+	// A long path in a thought, once the thought is opened, must not widen it either.
+	await messages.locator("details.think summary").click();
+	await expect(messages.locator(".think-body")).toBeVisible();
+	expect(await fits()).toBe(0);
+});
+
 test("desktop: a session with no progress has no column", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
 	await startChat(page, "plain");

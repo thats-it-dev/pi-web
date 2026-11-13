@@ -82,6 +82,28 @@ writeFileSync(
 		.join("\n") + "\n",
 );
 
+// An extension's notice whose text has an unbreakable run (bg_bash output carries rules of box-drawing characters),
+// and a thought with a long path: neither may widen the chat beyond its column.
+const RULE = "─".repeat(120);
+const LONG_PATH = `/home/e2e/${"deeply-nested-folder/".repeat(8)}file.ts`;
+writeFileSync(
+	join(seedDir, "custom.jsonl"),
+	[
+		{ type: "session", version: 3, id: "e2e-custom-session", timestamp: at, cwd: WORKDIR },
+		{ type: "message", id: "u1", parentId: null, timestamp: at, message: { role: "user", content: [{ type: "text", text: "run the checks" }], timestamp: 1 } },
+		{
+			type: "message",
+			id: "a1",
+			parentId: "u1",
+			timestamp: at,
+			message: { role: "assistant", content: [{ type: "thinking", thinking: `Reading ${LONG_PATH} first.` }, { type: "text", text: "Running." }], timestamp: 2 },
+		},
+		{ type: "custom_message", id: "n1", parentId: "a1", timestamp: at, customType: "bg-bash-done", content: `bg_bash job bg-1 exited 0 after 1m 19s:\n${RULE}\nall good`, display: true },
+	]
+		.map((e) => JSON.stringify(e))
+		.join("\n") + "\n",
+);
+
 const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);
 writeFileSync(join(dataDir, "config.json"), JSON.stringify({ port: PORT, hostname: "localhost:5173", allowedLogin: "dev@local", dev: true, piBin: pi.piBin }));
