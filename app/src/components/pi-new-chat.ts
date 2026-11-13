@@ -1,6 +1,6 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
-import type { DefaultsInfo, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { DefaultsInfo, FileInput, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
 import { routeAttachments } from "../lib/files.ts";
 import { type Draft, getDraft, handOff, resetDraft, updateDraft } from "../lib/draft.ts";
@@ -90,7 +90,7 @@ export class PiNewChat extends LitElement {
 	firstUpdated(): void {
 		const d = getDraft();
 		const c = this.composer;
-		void c?.updateComplete.then(() => c.restore(d.text, d.images));
+		void c?.updateComplete.then(() => c.restore(d.text, d.images, d.files));
 	}
 
 	private get composer(): PiComposer | null {
@@ -136,10 +136,15 @@ export class PiNewChat extends LitElement {
 	// ---- sending ----------------------------------------------------------------
 
 	private onSubmit = (e: Event) => {
-		const { text, images } = (e as CustomEvent<SubmitDetail>).detail;
+		const { text, images, files } = (e as CustomEvent<SubmitDetail>).detail;
 		const parsed = parseInput(text);
+		if (parsed.kind !== "prompt" && files.length) {
+			toast("Files can only go with a message to pi.", "warning"); // bash lines and builtins never reach pi's prompt
+			this.composer?.restore(text, images, files);
+			return;
+		}
 		if (parsed.kind === "builtin" && this.runHere(parsed.name, parsed.args)) return;
-		void this.start(text, images); // anything else needs pi: the session starts with it
+		void this.start(text, images, files); // anything else needs pi: the session starts with it
 	};
 
 	// The commands that make sense before a session exists.
@@ -170,21 +175,21 @@ export class PiNewChat extends LitElement {
 		return false;
 	}
 
-	private async start(text: string, images: ImageInput[]): Promise<void> {
+	private async start(text: string, images: ImageInput[], files: FileInput[]): Promise<void> {
 		if (this.busy) return;
 		this.busy = true;
 		const d = getDraft();
 		const { model, thinking } = this.choice;
 		try {
 			const { sessionId } = await this.api.createSession({ cwd: d.cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}) });
-			handOff(sessionId, { text, images, files: [], approval: d.approval, superpowers: d.superpowers });
+			handOff(sessionId, { text, images, files, approval: d.approval, superpowers: d.superpowers });
 			resetDraft();
 			this.sent = true;
 			location.hash = hrefFor({ name: "session", id: sessionId });
 		} catch (err) {
 			toast((err as Error).message, "error");
-			updateDraft({ text, images }); // kept even if the page was left while the hub answered
-			this.composer?.restore(text, images);
+			updateDraft({ text, images, files }); // kept even if the page was left while the hub answered
+			this.composer?.restore(text, images, files);
 		} finally {
 			this.busy = false;
 		}
@@ -234,6 +239,7 @@ export class PiNewChat extends LitElement {
 				.thinking=${thinking}
 				.folder=${abbreviateCwd(d.cwd, this.homeDir)}
 				.busy=${this.busy}
+				.canImages=${Boolean(model?.input.includes("image"))}
 				@pi-submit=${this.onSubmit}
 				@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
 			></pi-composer>

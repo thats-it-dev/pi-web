@@ -1,7 +1,7 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import type { AppCommand, Capabilities, CommandResult, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, FileInput, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
@@ -69,7 +69,7 @@ export class PiSession extends LitElement {
 	private autoScrollTop = -1; // where the last stick-to-bottom left the chat
 	private dragFromY: number | null = null;
 	private ticker: ReturnType<typeof setInterval> | undefined;
-	private pendingPrompt: { text: string; images: ImageInput[] } | null = null; // accepted but not yet answered by pi
+	private pendingPrompt: { text: string; images: ImageInput[]; files: FileInput[] } | null = null; // accepted but not yet answered by pi
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
 	private swipeFrom: { x: number; y: number } | null = null;
 	private attaching = false; // the sheet closed for the file picker: leave the keyboard down
@@ -232,7 +232,7 @@ export class PiSession extends LitElement {
 			const p = this.pendingPrompt;
 			if (m.command === "prompt" && p) {
 				this.pendingPrompt = null;
-				this.composer?.restore(p.text, p.images); // a no-op if the composer has new text
+				this.composer?.restore(p.text, p.images, p.files); // a no-op if the composer has new text
 			}
 		}
 		else if (m.type === "error") toast(m.message, "error");
@@ -293,29 +293,32 @@ export class PiSession extends LitElement {
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
 		if (msg.superpowers && !superpowersOn(s.snapshot)) await this.run({ type: "prompt", text: "/superpowers on", mode: "send" });
-		await this.send(msg.text, msg.images, "send");
+		await this.send(msg.text, msg.images, msg.files, "send");
 	}
 
 	private onSubmit = (e: Event) => {
-		const { text, images, mode } = (e as CustomEvent<SubmitDetail>).detail;
-		void this.send(text, images, mode);
+		const { text, images, files, mode } = (e as CustomEvent<SubmitDetail>).detail;
+		void this.send(text, images, files, mode);
 	};
 
-	// Failures put the text and images back in the composer.
-	private async send(text: string, images: ImageInput[], mode: PromptMode): Promise<void> {
+	// Failures put the text, images and files back in the composer.
+	private async send(text: string, images: ImageInput[], files: FileInput[], mode: PromptMode): Promise<void> {
 		this.atBottom = true;
 		const parsed = parseInput(text);
 		let ok: boolean;
-		if (parsed.kind === "bash") ok = !this.unavailable("bash") && (await this.ok({ type: "bash", command: parsed.command, excludeFromContext: parsed.excludeFromContext }));
+		if (parsed.kind !== "prompt" && files.length) {
+			toast("Files can only go with a message to pi.", "warning"); // bash lines and builtins never reach pi's prompt
+			ok = false;
+		} else if (parsed.kind === "bash") ok = !this.unavailable("bash") && (await this.ok({ type: "bash", command: parsed.command, excludeFromContext: parsed.excludeFromContext }));
 		else if (parsed.kind === "builtin") ok = await this.runBuiltin(parsed.name, parsed.args);
 		else {
 			const streaming = this.store?.conv.streaming ?? false;
 			this.pendingPrompt = null;
-			const r = await this.run({ type: "prompt", text: parsed.text, images: images.length ? images : undefined, mode: streaming ? mode : "send" });
+			const r = await this.run({ type: "prompt", text: parsed.text, images: images.length ? images : undefined, files: files.length ? files : undefined, mode: streaming ? mode : "send" });
 			ok = Boolean(r?.ok);
-			if (r?.pending) this.pendingPrompt = { text, images }; // may still fail later as a command_error
+			if (r?.pending) this.pendingPrompt = { text, images, files }; // may still fail later as a command_error
 		}
-		if (!ok) this.composer?.restore(text, images);
+		if (!ok) this.composer?.restore(text, images, files);
 	}
 
 	private onAbort = () => void this.run({ type: "abort" });
@@ -542,6 +545,7 @@ export class PiSession extends LitElement {
 					.model=${snap?.state.model ?? null}
 					.thinking=${snap?.state.thinkingLevel ?? null}
 					.searchFiles=${this.searchFiles}
+					.canImages=${Boolean(snap?.state.model?.input.includes("image"))}
 					@pi-submit=${this.onSubmit}
 					@pi-abort=${this.onAbort}
 					@pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}
