@@ -403,6 +403,26 @@ overrides, scout from its builtin config); the `pair-auto` routing check follows
 
 **Task 5 routing check (15:12 PT):** through `spark/pair-auto`, "thanks!" routed `off` → the 35B (15 output tokens, readout 222 ms) and a design question routed `xhigh` → the pi tune (690 tokens, readout 220 ms); both decisions logged with `virtual: pair-auto`, `source: classified`.
 
+**Task 6 benchmark (2026-11-12, keeb chart migration, PR thats-it-dev/keeb#22):** Michael's one-line prompt ("update keeb in @touchtype to use the new charts in @kit…; the history chart, the per-key bars, the stat cards and the daily bar can each be their own task"), superpowers on, model `pair-auto`. First attempt (12:25 PT) ran with superpowers off and cwd `~`: no brainstorm, 49 reads, 121k context, no subagents — stopped. Second attempt 12:47 → PR open 16:27 → CI green 16:31 PT (**3 h 44 min**; +513/−512 over 15 files; 385 unit, 127 e2e, knip green; d3 removed).
+
+| Phase | Wall-clock | Notes |
+|---|---|---|
+| Brainstorm (xhigh) | 12:48–13:23 (35 min) | one question to Michael, answered 13:18; spec committed 13:23 |
+| Plan + briefs (medium from here) | 13:23–13:50 (27 min) | 5 tasks, group A = 1/2/4 |
+| Group A: 3 workers in worktrees + 2 scouts | 14:06–14:17 (11 min) | scouts 3.2/4.6 min (35B low); workers 5.3/9.4/10.4 min (35B medium, 20/26/24 of 40 tools); first dispatch failed ("worktree isolation requires a git repository": session cwd is `~`), relaunched with `cwd` |
+| Merge + e2e fixups by the orchestrator | 14:23–15:17 (54 min) | 18 e2e failures from workers' assertions vs the kit DOM; 2 fix commits; node_modules wiped at 14:23 and 15:27 (below) |
+| Task 3 worker | 15:23–15:26 (3 min) | |
+| Whole-diff reviewer | 15:27–15:35 (9 min, failed) | 80 KB diff overflowed the 56k window; ENOENT on a file Task 3 deleted; two earlier reviewer calls blocked by the guard ("spawnSync git ENOENT", below) |
+| Task 5 (inline) | 15:41 | |
+| 3 per-task reviewers in parallel | 15:53–16:20 (27 min) | t2+4 OK in 8 min (soft budget); t3+5 OK in 17 min, 30k output tokens; **t1 failed three times with stopReason `length`** (32,768 output tokens of thinking, the same two sentences repeated 84 times; the two revivals produced 32,768 tokens and zero tool calls); the orchestrator reviewed Task 1 itself |
+| PR + CI | 16:26–16:31 | a docs commit vanished (reflog empty) and was redone |
+
+Orchestrator: 221 turns, 155k output tokens (~100k thinking), peak context 202k; mean wall tok/s over 174 turns ≥150 tokens = 16.4 (dips to 6–10 tok/s while workers decoded, 14:07–14:13 PT). Subagent wall tok/s: workers 17–23, reviewers 30–41 with tools, 78–96 pure thinking. Reviewer findings: five P2s, all rejected by the orchestrator with evidence; no code changed from review.
+
+Harness faults found: (1) **guard `appDir` regex takes a trailing period** — "…/apps/touchtype." in the task sentence became a non-existent dir, so `git read-tree` threw ENOENT and the reviewer was blocked twice (reproduced with the exact call); (2) **worker briefs said "Fresh worktree, no node_modules. First run `npm ci`"** but pi-subagents symlinks the worktree's node_modules to the main checkout's (worktree.js `linkNodeModulesIfPresent`), so three concurrent `npm ci` runs deleted the main checkout's packages through the link (wipes at 14:23, 15:27, 15:42); (3) **35B reviewer runaway thinking** at medium on a 22 KB diff, three times, never emitting a verdict; (4) the session cwd is `~` even with the chat folder set, so subagent calls need an explicit `cwd`; (5) the first attempt shows a prompt with superpowers off gets no plan at all.
+
+Fixed the same day (Michael's picks + his rule "the orchestrator shouldn't try to fix things itself"): the guard strips sentence punctuation from app names; blocks `npm ci`/`install` inside `~/workspace/apps/worktrees`; in pair mode (settings.json names the pair, no `PI_SUBAGENT_CHILD`) blocks edit/write and shell writes (sed -i, rm, mv, cp, redirects, git checkout --, npm install) to app code, leaving docs, `.superpowers/` and Markdown open; the pair notes say so (no npm ci in worktrees, red verify → resume the worker, failed reviewer → re-dispatch once on a smaller diff, never self-review, runaway → fresh worker with the checkpoint). `reviewer.md` runs at thinking low; the 35B gets Qwen's thinking-mode sampling with `presence_penalty` 1.5 (the loop ran on the model-card defaults, which have none) and a 16k output cap at low. Still open: the session cwd (hub) and superpowers-off-by-default for app folders.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.

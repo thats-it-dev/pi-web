@@ -30,8 +30,11 @@ if (!running.running?.some((r) => r.model === MODEL && r.state === "ready")) {
 	process.exit(3);
 }
 
-const brief = readFileSync(TASK, "utf8");
-const prompt = `${brief}\n\nWork in ${CWD}. Do not open a PR and do not push. When done, run \`npm test\` and stop.`;
+// The brief was written for the real app checkout; every mention of it is rewritten to the scratch checkout so the
+// run can never touch ~/workspace/apps/<app> itself.
+const appDir = join(homedir(), "workspace", "apps", "cad");
+const brief = readFileSync(TASK, "utf8").replaceAll(appDir, CWD).replaceAll("~/workspace/apps/cad", CWD);
+const prompt = `${brief}\n\nWork only in ${CWD} (a scratch checkout). Do not open a PR, do not push, do not switch branches. When done, run \`npm test\` and stop.`;
 const sessionsRoot = join(homedir(), ".pi", "agent", "sessions", `--${CWD.replace(/^\//, "").replaceAll("/", "-")}--`);
 const before = new Set(safeList(sessionsRoot));
 
@@ -53,7 +56,10 @@ function safeList(dir) {
 
 const acceptBefore = await acceptLen();
 const t0 = Date.now();
-const pi = spawnSync("pi", ["-p", "--model", `spark/${MODEL}`, "--thinking", EFFORT, prompt], { cwd: CWD, encoding: "utf8", timeout: CAP_MS, maxBuffer: 64 * 1024 * 1024 });
+// Headless pi hangs at startup with the full package set (2026-11-11: one of the npm packages, not the guard), so
+// run with extension discovery off and only the guard loaded: this measures the model, not the harness.
+const guard = join(homedir(), "workspace", "pi-web", "guard", "index.ts");
+const pi = spawnSync("pi", ["-p", "-ne", "-e", guard, "--model", `spark/${MODEL}`, "--thinking", EFFORT, prompt], { cwd: CWD, encoding: "utf8", timeout: CAP_MS, maxBuffer: 64 * 1024 * 1024 });
 const wallMs = Date.now() - t0;
 const acceptAfter = await acceptLen();
 
