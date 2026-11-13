@@ -4,6 +4,7 @@ import type { ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { type MentionEntry, applyMention, mentionAt } from "../lib/mention.ts";
 import { checkImageFile } from "../lib/images.ts";
+import { summarizeAttachments } from "../../../shared/src/attachments.ts";
 import { UNAVAILABLE_IN_TERMINAL } from "../render/sheets.ts";
 import { enterSends } from "../lib/mobile.ts";
 
@@ -344,7 +345,7 @@ export class PiComposer extends LitElement {
 
 	render() {
 		const menu = this.menu;
-		const queued = [...this.queue.steering.map((t) => ["steer", t]), ...this.queue.followUp.map((t) => ["follow-up", t])];
+		const queued = [...this.queue.steering.map((t) => ["steer", summarizeAttachments(t)]), ...this.queue.followUp.map((t) => ["follow-up", summarizeAttachments(t)])];
 		return html`<div class="inner">
 			${queued.length ? html`<div class="queue" aria-label="Queued messages">${queued.map(([k, t]) => html`<span class="chip"><span class="label">${k}</span> ${t}</span>`)}</div>` : nothing}
 			${menu ? this.renderMenu(menu) : nothing}

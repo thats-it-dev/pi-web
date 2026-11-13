@@ -6,6 +6,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage, SessionSummary } from "../../shared/src/protocol.ts";
+import { summarizeAttachments } from "../../shared/src/attachments.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import { historyFromText, parseEntries } from "../../shared/src/session-file.ts";
 
@@ -39,7 +40,7 @@ export function summarize(file: string, text: string, mtimeMs: number): FileSumm
 			const m = e.message;
 			if (m?.role === "user") {
 				userMessages++;
-				firstPrompt ??= contentText(m.content).trim().slice(0, 200) || null;
+				firstPrompt ??= summarizeAttachments(contentText(m.content)).trim().slice(0, 200) || null;
 			} else if (m?.role === "assistant") {
 				if (m.provider && m.model) model = `${m.provider}/${m.model}`;
 				const u = m.usage;

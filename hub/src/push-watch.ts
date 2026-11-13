@@ -4,6 +4,7 @@
 
 import { basename } from "node:path";
 import type { Dialog, Snapshot } from "../../shared/src/protocol.ts";
+import { summarizeAttachments } from "../../shared/src/attachments.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import type { Registry } from "./registry.ts";
 import { type TurnOutcome, watchTurns } from "./turns.ts";
@@ -96,7 +97,7 @@ export function sessionTitle(snap: Snapshot): string {
 	const name = snap.state?.sessionName?.trim();
 	if (name) return clip(name);
 	const first = snap.conv.messages.find((m) => m.role === "user");
-	const line = first ? (contentText(first.content).trim().split("\n")[0] ?? "") : "";
+	const line = first ? (summarizeAttachments(contentText(first.content)).trim().split("\n")[0] ?? "") : "";
 	return clip(line.trim() || basename(snap.cwd) || "pi");
 }
 

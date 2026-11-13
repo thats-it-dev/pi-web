@@ -1,3 +1,4 @@
+import { summarizeAttachments } from "../../../shared/src/attachments.ts";
 import { css, html, nothing } from "lit";
 import { APPROVAL_MODES, type ApprovalMode, type Dialog, type ForkPoint, type ModelInfo, type Snapshot, type ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { abbreviateCwd, formatCost, formatTokens } from "../lib/format.ts";
@@ -126,7 +127,7 @@ export function dialogSheet(d: Dialog, seenAt: number, respond: (a: DialogAnswer
 export function forkSheet(points: ForkPoint[], onFork: (p: ForkPoint) => void) {
 	if (!points.length) return html`<p class="hint">There are no earlier messages to fork from yet.</p>`;
 	return html`<p class="hint">Start a new session from one of your earlier messages.</p>
-		<div class="forks">${points.map((p) => html`<button class="fork" @click=${() => onFork(p)}>${p.text.slice(0, 240)}</button>`)}</div>`;
+		<div class="forks">${points.map((p) => html`<button class="fork" @click=${() => onFork(p)}>${summarizeAttachments(p.text).slice(0, 240)}</button>`)}</div>`;
 }
 
 export const sheetStyles = css`

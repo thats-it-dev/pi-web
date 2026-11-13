@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import type { AgentMessage, Dialog, LiveState, ModelInfo, PiEvent, SessionStats, WatchStreamFrame } from "../../shared/src/protocol.ts";
+import { formatAttachments } from "../../shared/src/attachments.ts";
 import { LastModelStore } from "../src/last-model.ts";
 import { Viewers } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
@@ -652,6 +653,11 @@ test("closedSession titles: name, else first prompt line, else the folder; clipp
 	assert.equal(closedSession({ ...base, firstPrompt: "line one\nline two" }).title, "line one");
 	assert.equal(closedSession(base).title, "proj");
 	assert.equal(closedSession({ ...base, name: "n".repeat(80) }).title, `${"n".repeat(59)}…`);
+});
+
+test("turnsFrom: a user message that carried files is summarised, not sent with the block", () => {
+	const turns = turnsFrom([{ role: "user", content: formatAttachments("fix the parser", [{ name: "report.pdf", size: 1258291, path: "/data/uploads/s1/report.pdf", inline: null }]) }], {});
+	assert.deepEqual(turns, [{ i: 0, role: "you", text: "fix the parser · 1 file" }]);
 });
 
 test("turnsFrom: user → you, assistant text → agent, toolCall blocks → tool lines 'name · first arg line', toolResult messages skipped, text clipped to 240 chars", () => {

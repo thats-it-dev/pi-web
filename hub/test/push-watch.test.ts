@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentMessage, LiveState, Snapshot } from "../../shared/src/protocol.ts";
+import { formatAttachments } from "../../shared/src/attachments.ts";
 import { sessionTitle, Viewers, watchPush } from "../src/push-watch.ts";
 import { Registry } from "../src/registry.ts";
 import type { TurnOutcome } from "../src/turns.ts";
@@ -128,6 +129,12 @@ test("sessionTitle prefers the session name, falls back to the folder, and is cl
 	assert.equal(sessionTitle(h.snapshot()), "fix the parser");
 	const snap = h.snapshot();
 	assert.equal(sessionTitle({ ...snap, state: { ...snap.state, sessionName: "x".repeat(80) } }), `${"x".repeat(59)}…`);
+});
+
+test("sessionTitle summarises a first message that carried files", () => {
+	const h = new FakeHandle("s-1", "/work/proj");
+	h.conv.messages.push(user(formatAttachments("fix the parser", [{ name: "report.pdf", size: 1258291, path: "/data/uploads/s1/report.pdf", inline: null }])));
+	assert.equal(sessionTitle(h.snapshot()), "fix the parser · 1 file");
 });
 
 test("stop() ends watching", async () => {

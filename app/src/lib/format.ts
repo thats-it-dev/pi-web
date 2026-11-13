@@ -1,3 +1,4 @@
+import { summarizeAttachments } from "../../../shared/src/attachments.ts";
 import type { AgentMessage, SessionSummary } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 
@@ -38,7 +39,7 @@ export function abbreviateCwd(cwd: unknown, home: string): string {
 }
 
 export function sessionTitle(s: { name: string | null; firstPrompt: string | null }): string {
-	return s.name || s.firstPrompt?.split("\n")[0].slice(0, 80) || "new session";
+	return s.name || (s.firstPrompt && summarizeAttachments(s.firstPrompt).split("\n")[0].slice(0, 80)) || "new session";
 }
 
 export interface SessionGroup {

@@ -5,6 +5,7 @@
 import { basename } from "node:path";
 import type { LiveStats } from "../../shared/src/live-stats.ts";
 import type { AgentMessage, ToolRun, WatchSession, WatchTurn } from "../../shared/src/protocol.ts";
+import { summarizeAttachments } from "../../shared/src/attachments.ts";
 import { contentText } from "../../shared/src/reducer.ts";
 import type { SessionHandle } from "./handle.ts";
 import { sessionTitle } from "./push-watch.ts";
@@ -70,7 +71,7 @@ export function turnsFrom(messages: AgentMessage[], tools: Record<string, ToolRu
 		if (t) out.push({ i: out.length, role, text: clipTo(t, TURN_MAX) });
 	};
 	for (const m of messages) {
-		if (m.role === "user") add("you", contentText(m.content));
+		if (m.role === "user") add("you", summarizeAttachments(contentText(m.content)));
 		else if (m.role === "assistant") {
 			add("agent", contentText(m.content));
 			if (!Array.isArray(m.content)) continue;

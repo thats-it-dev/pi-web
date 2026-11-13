@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "../../../shared/src/protocol.ts";
+import { formatAttachments } from "../../../shared/src/attachments.ts";
 import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatElapsed, formatTokens, groupSessions, parseArgsRaw, relativeTime, sessionTitle, summarizeToolArgs, truncateOutput, wordCount } from "./format.ts";
 
 const s = (over: Partial<SessionSummary>): SessionSummary => ({
@@ -46,6 +47,10 @@ describe("format", () => {
 		expect(sessionTitle({ name: "katsu", firstPrompt: "How do I…" })).toBe("katsu");
 		expect(sessionTitle({ name: null, firstPrompt: "line one\nline two" })).toBe("line one");
 		expect(sessionTitle({ name: null, firstPrompt: null })).toBe("new session");
+	});
+	it("titles a first prompt that carried files by its summary", () => {
+		const text = formatAttachments("fix the parser", [{ name: "report.pdf", size: 1258291, path: "/data/uploads/s1/report.pdf", inline: null }]);
+		expect(sessionTitle({ name: null, firstPrompt: text })).toBe("fix the parser · 1 file");
 	});
 	it("groups by folder in recency order and filters by query", () => {
 		const list = [s({ id: "a", cwd: "/home/m/site", name: "portfolio" }), s({ id: "b", cwd: "/home/m" , firstPrompt: "katsu" }), s({ id: "c", cwd: "/home/m/site", firstPrompt: "nav" })];

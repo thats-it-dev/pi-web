@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionIndex, historyFromText, knownCwds, sessionsDir, summarize } from "../src/sessions.ts";
+import { formatAttachments } from "../../shared/src/attachments.ts";
 
 const line = (o: object) => `${JSON.stringify(o)}\n`;
 const header = (id: string, cwd: string, ts = "2026-10-07T01:23:32.125Z") => line({ type: "session", version: 3, id, timestamp: ts, cwd });
@@ -109,6 +110,16 @@ test("knownCwds ranks folders by session count and always includes home", async 
 	// Fixture cwds don't exist on this machine, so only the real home survives the existence filter.
 	assert.deepEqual(knownCwds(list, home), [home]);
 	assert.deepEqual(knownCwds([{ ...list[0], cwd: tmpdir() }, { ...list[1], cwd: tmpdir() }], home), [tmpdir(), home]);
+});
+
+test("firstPrompt summarises a first message that carried files", async () => {
+	const root = mkdtempSync(join(tmpdir(), "pi-web-files-"));
+	const dir = join(root, "--files--");
+	mkdirSync(dir);
+	const text = formatAttachments("fix the parser", [{ name: "report.pdf", size: 1258291, path: "/data/uploads/s1/report.pdf", inline: null }]);
+	writeFileSync(join(dir, "2026-10-09T00-00-00-000Z_fff.jsonl"), header("fff", "/nonexistent/files", "2026-10-09T00:00:00.000Z") + msg("u1", null, user(text)));
+	const list = await new SessionIndex(root).list();
+	assert.equal(list[0]?.firstPrompt, "fix the parser · 1 file");
 });
 
 test("non-object JSON lines are ignored in listing and history", async () => {
