@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 import { startTerminalPi } from "../../hub/test/support/terminal-pi.ts";
 
@@ -207,6 +207,23 @@ test("phone: send with the button, then find the session from the menu", async (
 });
 
 const E2E_ENV_FILE = join(tmpdir(), "pi-web-e2e-env.json"); // written by hub-for-e2e.ts
+
+test("attach a text file: the chip shows in the sent message and the hub saved it for pi", async ({ page }) => {
+	const e2e = JSON.parse(readFileSync(E2E_ENV_FILE, "utf8")) as { socketPath: string };
+	await page.goto("/#/new");
+	await page.locator("pi-composer input[data-kind=file]").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello from a file") });
+	await expect(page.locator("pi-composer .chip.file")).toContainText("notes.txt");
+	await page.getByLabel("Message").fill("read it");
+	await page.getByRole("button", { name: "send" }).click();
+	await expect(page).toHaveURL(/#\/s\//);
+	const user = page.locator("pi-messages .user");
+	await expect(user).toContainText("read it");
+	await expect(user.locator(".chip.file")).toContainText("notes.txt");
+	await expect(user).not.toContainText("hello from a file");
+	await expect(user).not.toContainText("<pi-web");
+	const sessionId = decodeURIComponent(page.url().split("#/s/")[1]?.split(/[/?]/)[0] ?? "");
+	expect(readFileSync(join(dirname(e2e.socketPath), "uploads", sessionId, "notes.txt"), "utf8")).toBe("hello from a file");
+});
 
 test("terminal: a pi open in a terminal is live in the app, and prompts from either side show in both", async ({ page, isMobile }) => {
 	test.skip(isMobile, "desktop flow");
