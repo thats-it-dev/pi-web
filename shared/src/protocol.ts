@@ -181,9 +181,16 @@ export interface ImageInput {
 	mimeType: string;
 }
 
+export interface FileInput {
+	name: string; // the original basename, as picked
+	mimeType: string; // what the browser said, may be ""
+	size: number; // raw bytes, so a chip can show it without decoding
+	data: string; // base64, no data: prefix
+}
+
 export type AppCommand =
 	| { type: "attach" } // start pi for this session if needed; otherwise a no-op
-	| { type: "prompt"; text: string; images?: ImageInput[]; mode: PromptMode }
+	| { type: "prompt"; text: string; images?: ImageInput[]; files?: FileInput[]; mode: PromptMode }
 	| { type: "abort" }
 	| { type: "set_model"; provider: string; modelId: string }
 	| { type: "set_thinking"; level: ThinkingLevel }
