@@ -248,6 +248,7 @@ test("desktop: the progress column shows to-dos and subagents beside the chat", 
 	await page.goto(`/#/s/${TODO_SESSION}`);
 	const aside = page.locator("tk-shell [slot=aside]");
 	await expect(aside).toContainText("to-dos");
+	await expect(aside.locator("h2", { hasText: "to-dos" })).toContainText("3/3"); // the count lives here, not on the header
 	await expect(aside).toContainText("3/3");
 	await expect(aside.locator("section.run")).toContainText("tool calls");
 	await expect(aside.locator("section.run")).toContainText(/reviewer\s*not yet/);
@@ -302,14 +303,14 @@ test("mid width: progress is a drawer beside the docked session list", async ({ 
 	await expect(page).toHaveURL(new RegExp(`#/s/${TODO_SESSION}$`));
 });
 
-test("phone: a badge opens the progress drawer; Escape, the dimmed area and Back close it", async ({ page, isMobile }) => {
+test("phone: the Progress button opens the drawer; Escape, the dimmed area and Back close it", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await page.goto(`/#/s/${TODO_SESSION}`);
 	const drawer = page.locator("tk-shell [slot=aside]");
 	await expect(drawer).toContainText("to-dos");
 	await expect(drawer).not.toBeInViewport();
-	const badge = page.getByRole("button", { name: "Progress" });
-	await expect(badge).toHaveText("•"); // to-dos get the plain dot, not a count
+	const badge = page.getByRole("button", { name: "Progress", exact: true });
+	await expect(badge).toHaveText(""); // no badge: the count is in the drawer's to-dos heading
 	await badge.click();
 	await expect(drawer).toBeInViewport();
 	await page.keyboard.press("Escape");
@@ -347,10 +348,10 @@ test("phone: scrolling down tucks the header away completely, scrolling up bring
 	await expect(shell).not.toHaveAttribute("header-tucked");
 });
 
-test("phone: finished subagents still get a badge", async ({ page, isMobile }) => {
+test("phone: finished subagents still get a Progress button, with no badge", async ({ page, isMobile }) => {
 	test.skip(!isMobile, "phone flow");
 	await page.goto(`/#/s/${SUBAGENT_SESSION}`);
-	await expect(page.getByRole("button", { name: "Progress" })).toHaveText("•");
+	await expect(page.getByRole("button", { name: "Progress", exact: true })).toHaveText("");
 });
 
 test("phone: the plan sheet opens above the progress drawer", async ({ page, isMobile }) => {
@@ -379,7 +380,7 @@ test("desktop: a subagent row opens its transcript read-only, back to parent ret
 	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await expect(aside.locator(".child")).toHaveAttribute("aria-current", "true"); // the column stays live and marks it
-	await expect(thread.getByRole("button", { name: "Progress, •", exact: true })).toBeVisible(); // the thread's header keeps the badge
+	await expect(thread.getByRole("button", { name: "Progress", exact: true })).toBeVisible(); // the thread's header keeps the button
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await thread.getByRole("button", { name: "back to parent" }).click();
 	await expect(thread).toHaveCount(0);
@@ -408,7 +409,7 @@ test("phone: badge, row, thread full screen, back returns to the parent chat", a
 	await expect(thread).toContainText("Child task: list the files here");
 	await expect(drawer).not.toBeInViewport();
 	await expect(page.locator("pi-child-thread textarea, pi-child-thread input")).toHaveCount(0);
-	await expect(thread.getByRole("button", { name: /^Progress/ })).toHaveText("•");
+	await expect(thread.getByRole("button", { name: "Progress", exact: true })).toHaveText("");
 	await expect(page.locator("pi-composer textarea")).toBeHidden();
 	await page.goBack(); // the drawer's entry was replaced: this lands on the parent chat
 	await expect(thread).toHaveCount(0);

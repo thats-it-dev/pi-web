@@ -17,7 +17,7 @@ import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
 import { nextTucked } from "../lib/mobile.ts";
-import { badgeLabel } from "../render/progress.ts";
+import { hasProgress } from "../render/progress.ts";
 import { markdownStyles } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
 import { parseDialogTitle } from "../lib/dialog-title.ts";
@@ -427,7 +427,7 @@ export class PiSession extends LitElement {
 		const from = this.swipeFrom;
 		this.swipeFrom = null;
 		const t = e.changedTouches[0];
-		if (!from || !t || !this.progress || badgeLabel(this.progress.view) === null) return;
+		if (!from || !t || !this.progress || !hasProgress(this.progress.view)) return;
 		const dx = t.clientX - from.x;
 		if (dx <= -SWIPE && Math.abs(t.clientY - from.y) < Math.abs(dx))
 			this.dispatchEvent(new CustomEvent("tk-show-panel", { detail: { panel: "aside" }, bubbles: true, composed: true }));
@@ -519,16 +519,15 @@ export class PiSession extends LitElement {
 		const cwd = snap?.cwd ?? s.cwdHint;
 		const statuses = [cwd ? abbreviateCwd(cwd, this.home) : null, ...Object.values(snap?.statuses ?? {})].filter((x): x is string => Boolean(x));
 		const dialog = s.dialogs[0];
-		const label = this.announced ? badgeLabel(this.announced.view) : null;
 		return html`
 			<div class="chat">
 				<!-- The chat stays mounted under a thread (hidden, so out of the tab order): the draft and scroll position survive. -->
 				${this.childKey
-					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"} .badge=${label}></pi-child-thread>`
+					? html`<pi-child-thread .api=${this.api} .sessionId=${this.sessionId} .childKey=${this.childKey} .heading=${heading} .live=${s.status === "live"}></pi-child-thread>`
 					: nothing}
 				<!-- The header scrolls with the chat (sticky at the top) so tucking it frees its space for messages. -->
 				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll} @touchstart=${this.onDragStart} @touchmove=${this.onDragMove}>
-					<pi-header .store=${s} .version=${this.version} .heading=${heading} .badge=${label} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
+					<pi-header .store=${s} .version=${this.version} .heading=${heading} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
 				</div>
 				${this.childKey ? nothing : this.renderTray(snap)}

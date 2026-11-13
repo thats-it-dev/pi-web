@@ -17,12 +17,11 @@ const ACTIVITY = { working: "working", idle: "idle", waiting: "waiting on you" }
 
 const liveTodos = (todos: Todo[]) => todos.filter((t) => t.status !== "deleted");
 
-// Running subagents are counted; anything else in the panel (to-dos included) is a plain dot.
-export function badgeLabel(view: ProgressView): string | null {
-	const running = view.subagents.recent.concat(view.subagents.earlier).filter((c) => c.state === "running").length;
-	if (running) return `◐ ${running}`;
+// Whether the panel has anything to show. The header's Progress button carries no badge;
+// counts (to-dos done/total, running subagents) live in the panel's section headings.
+export function hasProgress(view: ProgressView): boolean {
 	const todos = view.todos ? liveTodos(view.todos).length : 0;
-	return view.goal || view.plan || view.pr || todos || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
+	return Boolean(view.goal || view.plan || view.pr || todos || view.subagents.recent.length || view.subagents.earlier.length);
 }
 
 // At most `max` items, centred on `focus`; returns the slice and how many were left out.

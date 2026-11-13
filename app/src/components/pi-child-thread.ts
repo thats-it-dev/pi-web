@@ -21,7 +21,6 @@ export class PiChildThread extends LitElement {
 		childKey: { attribute: false },
 		heading: { attribute: false },
 		live: { attribute: false },
-		badge: { attribute: false },
 		child: { state: true },
 		conv: { state: true },
 		error: { state: true },
@@ -31,7 +30,6 @@ export class PiChildThread extends LitElement {
 	declare childKey: string;
 	declare heading: string; // the parent's title
 	declare live: boolean; // the parent session is live
-	declare badge: string | null; // the parent's progress count, for the Progress button; null shows none
 	declare child: SubagentChild | null;
 	declare conv: Conversation | null;
 	declare error: string | null;
@@ -64,7 +62,6 @@ export class PiChildThread extends LitElement {
 		this.childKey = "";
 		this.heading = "";
 		this.live = false;
-		this.badge = null;
 		this.child = null;
 		this.conv = null;
 		this.error = null;
@@ -137,7 +134,7 @@ export class PiChildThread extends LitElement {
 	render() {
 		const c = this.child;
 		return html`
-			<tk-header menu-label="Open sessions" aside-label="Progress" aside-badge=${this.badge ?? ""}>
+			<tk-header menu-label="Open sessions" aside-label="Progress">
 				<h1 slot="title">
 					<span class="crumb">${this.heading} ›</span>
 					${c ? html`<span class="glyph ${c.state}" role="img" aria-label=${c.state}>${GLYPH[c.state]}</span>${c.agent} · ${c.task}` : nothing}

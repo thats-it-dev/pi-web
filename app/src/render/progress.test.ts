@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SubagentChild, Todo } from "../../../shared/src/progress.ts";
 import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { ProgressView } from "../lib/progress-store.ts";
-import { badgeLabel, renderProgress } from "./progress.ts";
+import { hasProgress, renderProgress } from "./progress.ts";
 
 const empty = (): ProgressView => ({ goal: null, plan: null, todos: null, subagents: { recent: [], earlier: [] }, pr: null, activity: "idle", runs: null, empty: true });
 const child = (over: Partial<SubagentChild> = {}): SubagentChild => ({
@@ -100,16 +100,15 @@ describe("renderProgress", () => {
 	});
 });
 
-describe("badgeLabel", () => {
+describe("hasProgress", () => {
 	it("covers every case, finished subagents included", () => {
-		expect(badgeLabel(empty())).toBeNull();
-		expect(badgeLabel({ ...empty(), empty: false, goal: { text: "g", status: "active", waiting: false, updatedAt: null } })).toBe("•");
-		expect(badgeLabel({ ...empty(), subagents: { recent: [child({ state: "running" }), child({ key: "x", state: "running" }), child({ key: "y" })], earlier: [] } })).toBe("◐ 2");
-		expect(badgeLabel({ ...empty(), subagents: { recent: [child()], earlier: [] } })).toBe("•");
-		expect(badgeLabel({ ...empty(), subagents: { recent: [], earlier: [child({ state: "failed" })] } })).toBe("•");
-		expect(badgeLabel({ ...empty(), todos: [todo(1, "completed"), todo(2, "pending"), todo(3, "deleted")] })).toBe("•"); // no count
-		expect(badgeLabel({ ...empty(), todos: [todo(3, "deleted")] })).toBeNull();
-		expect(badgeLabel({ ...empty(), todos: [todo(1, "pending")], subagents: { recent: [child({ state: "running" })], earlier: [] } })).toBe("◐ 1");
+		expect(hasProgress(empty())).toBe(false);
+		expect(hasProgress({ ...empty(), empty: false, goal: { text: "g", status: "active", waiting: false, updatedAt: null } })).toBe(true);
+		expect(hasProgress({ ...empty(), subagents: { recent: [child({ state: "running" })], earlier: [] } })).toBe(true);
+		expect(hasProgress({ ...empty(), subagents: { recent: [child()], earlier: [] } })).toBe(true);
+		expect(hasProgress({ ...empty(), subagents: { recent: [], earlier: [child({ state: "failed" })] } })).toBe(true);
+		expect(hasProgress({ ...empty(), todos: [todo(1, "completed"), todo(2, "deleted")] })).toBe(true);
+		expect(hasProgress({ ...empty(), todos: [todo(3, "deleted")] })).toBe(false);
 	});
 
 	it("a waiting goal gets a waiting pill next to its status", () => {
@@ -176,7 +175,7 @@ describe("pr section", () => {
 		expect(f.html).toMatch(/href=https:\/\/gh\/o\/r\/pull\/7 target="_blank" rel="noopener"/);
 		expect(f.text).toContain("#7 · Add thing");
 		expect(f.text).not.toContain("CI");
-		expect(badgeLabel(pr())).toBe("•");
+		expect(hasProgress(pr())).toBe(true);
 	});
 	it("passed shows the preview links", () => {
 		const { f } = mount(pr({ ci: "passed", preview: "https://p.example", gatewayPreview: "https://g.example" }));
