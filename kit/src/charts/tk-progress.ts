@@ -24,16 +24,13 @@ export class TkProgress extends LitElement {
 	declare unit: string;
 
 	static styles = css`
-		:host {
-			display: block; box-sizing: border-box; width: 100%; max-width: 30rem;
-			background: var(--panel); border-radius: var(--radius); padding: 10px 12px;
-			color: var(--text-primary);
-		}
-		.label { font-size: 13px; line-height: 1.4; color: var(--text-secondary); }
-		.nums { font-size: 20px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; margin-top: 2px; }
+		:host { display: block; box-sizing: border-box; width: 100%; }
+		.head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+		.label { font-size: 13px; color: var(--text-secondary); }
+		.nums { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 		.track {
-			position: relative; height: 10px; margin-top: 8px;
-			border-radius: 5px; background: var(--bg); overflow: hidden;
+			position: relative; height: 10px; margin-top: 6px;
+			border-radius: var(--radius); background: var(--panel); overflow: hidden;
 		}
 		.fill {
 			position: absolute; left: 0; top: 0; bottom: 0;
@@ -63,8 +60,10 @@ export class TkProgress extends LitElement {
 		const pct = Math.floor(frac * 100);
 		const reached = m > 0 && v >= m;
 		return html`
-			${this.label ? html`<div class="label">${this.label}</div>` : nothing}
-			<div class="nums">${compact(v)} / ${compact(m)}${this.unit ? ` ${this.unit}` : nothing}</div>
+			<div class="head">
+				<span class="label">${this.label}</span>
+				<span class="nums">${compact(v)} / ${compact(m)}${this.unit ? ` ${this.unit}` : nothing}</span>
+			</div>
 			<div class="track" role="progressbar" aria-label=${this.label || "progress"} aria-valuemin="0" aria-valuemax=${m} aria-valuenow=${Math.min(v, m)}>
 				<div class="fill ${reached ? "done" : ""}" style="width:${pct}%"></div>
 			</div>
