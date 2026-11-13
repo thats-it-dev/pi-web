@@ -2,7 +2,7 @@
 name: reviewer
 description: Reviews a code diff for correctness bugs, with evidence. Read-only, budgeted, diff-first.
 tools: read, grep, find, ls
-thinking: medium
+thinking: low
 toolBudget: {"soft": 12, "hard": 20, "block": "*"}
 systemPromptMode: replace
 inheritProjectContext: true
