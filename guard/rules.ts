@@ -13,7 +13,7 @@ export const REASONS = {
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
-	review: `Blocked: run the reviewer before opening the PR. Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	review: `Blocked: run the reviewer before opening the PR. Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
@@ -201,6 +201,37 @@ export type RunState = (runId: string) => "complete" | "running" | "failed" | "m
 // pi-subagents' async run dir: its temp root (PI_SUBAGENTS_TEMP_ROOT, else /tmp/pi-subagents-uid-<uid>) + async-subagent-runs.
 const ASYNC_RUNS = join(process.env.PI_SUBAGENTS_TEMP_ROOT?.trim() || `/tmp/pi-subagents-uid-${process.getuid?.() ?? 1000}`, "async-subagent-runs");
 
+/** The reply text the reviewer.md contract asks for: a `## Review` block with findings or a merge verdict, or the exact
+ *  `No issues found.` line. A reviewer that stops mid-review, or writes its report inside its reasoning, returns neither
+ *  (keeb run 2026-11-12 22:45), and a review the orchestrator cannot act on must not open the PR gate. */
+export function reviewVerdict(text: string): boolean {
+	if (/\bNo issues found\b/.test(text)) return true;
+	return /^\s*#+\s*Review\b/m.test(text) && /^\s*-\s*(Finding|Merge verdict)\s*:/m.test(text);
+}
+
+/** Appended instead of the reviewed mark when a sync review returns without a verdict. */
+export const REVIEW_NO_VERDICT = "[pi-guard] review ended without a verdict: the reply has no `## Review` block with findings or a merge verdict, and no `No issues found.` line (the reviewer stopped mid-review or left its report in its reasoning). This review does not count: call the reviewer again, same task, and read its reply before going on.";
+
+/** The reviewer's reply text of a finished run, or undefined when it cannot be read: a review the guard can't read never counts. */
+export type RunText = (runId: string) => string | undefined;
+
+/** Joins the text parts of every assistant message in the run's session file (status.json `sessionFile`): never
+ *  thinking, never tool results, so a verdict quoted inside a file the reviewer read does not count. */
+export function defaultRunText(runId: string, root: string = ASYNC_RUNS): string | undefined {
+	try {
+		const file = String((JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8")) as { sessionFile?: unknown }).sessionFile ?? "");
+		const out: string[] = [];
+		for (const line of readFileSync(file, "utf8").split("\n")) {
+			if (!line.trim()) continue;
+			const e = JSON.parse(line) as Entry;
+			if (e.type === "message" && e.message?.role === "assistant") for (const t of resultText(e.message).split("\n")) if (t.trim()) out.push(t);
+		}
+		return out.join("\n");
+	} catch {
+		return undefined;
+	}
+}
+
 /** A pending mark whose launch result carried no run id: it can never resolve, so it never counts. */
 export const UNKNOWN_RUN = "unknown";
 
@@ -221,34 +252,35 @@ export const asyncRunId = (resultText: string): string | undefined => /Async: re
 const PENDING = /\[pi-guard\] review pending (\S+) at ([0-9a-f]{7,64}) run (\S+)/g;
 const FINISHED = /\[pi-guard\] reviewed (\S+) at ([0-9a-f]{7,64})/g;
 
-/** The reviews a tool result records, in order: finished ones, and pending ones whose run is complete. */
-function completedReviews(text: string, runState: RunState): { dir: string; snap: string; at: number }[] {
+/** The reviews a tool result records, in order: finished ones (the guard wrote that mark only after seeing a verdict),
+ *  and pending ones whose run is complete and whose reply holds a verdict. */
+function completedReviews(text: string, runState: RunState, runText: RunText): { dir: string; snap: string; at: number }[] {
 	const out: { dir: string; snap: string; at: number }[] = [];
 	for (const m of text.matchAll(FINISHED)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
-	for (const m of text.matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && runState(m[3]) === "complete") out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	for (const m of text.matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && runState(m[3]) === "complete" && reviewVerdict(runText(m[3]) ?? "")) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
 	return out.sort((a, b) => a.at - b.at);
 }
 
 /** True when a review the guard scoped completed without error after Michael's last message on the branch. */
-export function reviewedSinceUser(branch: Iterable<unknown>, runState: RunState = defaultRunState): boolean {
+export function reviewedSinceUser(branch: Iterable<unknown>, runState: RunState = defaultRunState, runText: RunText = defaultRunText): boolean {
 	let reviewed = false;
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
 		if (e.type !== "message" || !m) continue;
 		if (m.role === "user") reviewed = false;
-		else if (m.role === "toolResult" && !m.isError && completedReviews(resultText(m), runState).length > 0) reviewed = true;
+		else if (m.role === "toolResult" && !m.isError && completedReviews(resultText(m), runState, runText).length > 0) reviewed = true;
 	}
 	return reviewed;
 }
 
 /** The snapshot commit the last completed scoped review of `dir` covered, from the marks on the branch. */
-export function lastReview(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState): string | undefined {
+export function lastReview(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
 	let snap: string | undefined;
 	for (const raw of branch) {
 		const e = raw as Entry;
 		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
-		for (const r of completedReviews(resultText(e.message), runState)) if (r.dir === dir) snap = r.snap;
+		for (const r of completedReviews(resultText(e.message), runState, runText)) if (r.dir === dir) snap = r.snap;
 	}
 	return snap;
 }

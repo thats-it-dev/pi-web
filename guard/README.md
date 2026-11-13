@@ -93,8 +93,13 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   budget. The call is forced to `async: false`, `cwd` = the app (so its AGENTS.md is project context) and
   `toolBudget` `{soft: 12, hard: 20, block: "*"}`; `context`, `model`, `thinking`, `tools`, `skill` overrides are dropped.
 - A reviewer inside a workflow, chain or task list on an app is blocked.
-- When the review returns without error, the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
-  the PR gate and the next review's base read that mark from the session, so both survive a restart.
+- When the review returns without error and its reply holds a verdict (a `## Review` block with a finding or a merge
+  verdict line, or `No issues found.`), the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
+  the PR gate and the next review's base read that mark from the session, so both survive a restart. A reply without
+  a verdict (the reviewer stopped mid-review, or left its report in its reasoning, as the 35B did at thinking low on
+  2026-11-12) gets a `review ended without a verdict` note instead and counts for nothing, so the PR stays blocked
+  and the next review covers the same changes. An async review's reply is read from its run's session file when its
+  pending mark is resolved; an unreadable transcript never counts.
 
 The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
 first, no test or config spelunking, and the same tool budget in its frontmatter.

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -244,6 +244,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		// An async launch result holds no review: it is marked pending by run id, and when the id can't be read the
 		// mark names an unknown run, which never counts (fail closed), rather than passing for a finished review.
 		const runId = asyncRunId(text) ?? (scoped.async ? UNKNOWN_RUN : undefined);
+		// A sync result is the review itself: without a verdict it gets a note, never the mark, so the PR gate stays shut and
+		// the next review starts from the same base. (An async run's reply is checked when its pending mark is resolved.)
+		if (!runId && !reviewVerdict(text)) return { content: [...(event.content ?? []), { type: "text", text: REVIEW_NO_VERDICT }], structuredContent: event.structuredContent };
 		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewMark(scoped.dir, scoped.snap);
 		return { content: [...(event.content ?? []), { type: "text", text: mark }], structuredContent: event.structuredContent };
 	});

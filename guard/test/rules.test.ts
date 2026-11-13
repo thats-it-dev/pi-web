@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -453,12 +453,13 @@ test("a pending review counts only once its run is complete, and the latest comp
 	const branch = [{ type: "message", message: { role: "user", content: "go" } }, res(reviewPendingMark(dir, "aaaaaaa", "run-a")), res(reviewPendingMark(dir, "bbbbbbb", "run-b"))];
 	const states: Record<string, ReturnType<RunState>> = { "run-a": "complete", "run-b": "running" };
 	const runState: RunState = (id) => states[id] ?? "missing";
-	assert.equal(reviewedSinceUser(branch, runState), true);
-	assert.equal(lastReview(branch, dir, runState), "aaaaaaa");
+	const verdict = () => "No issues found.";
+	assert.equal(reviewedSinceUser(branch, runState, verdict), true);
+	assert.equal(lastReview(branch, dir, runState, verdict), "aaaaaaa");
 	states["run-b"] = "complete";
-	assert.equal(lastReview(branch, dir, runState), "bbbbbbb");
-	assert.equal(reviewedSinceUser(branch, () => "missing"), false);
-	assert.equal(reviewedSinceUser(branch, () => "failed"), false);
+	assert.equal(lastReview(branch, dir, runState, verdict), "bbbbbbb");
+	assert.equal(reviewedSinceUser(branch, () => "missing", verdict), false);
+	assert.equal(reviewedSinceUser(branch, () => "failed", verdict), false);
 });
 
 test("asyncRunId reads the run id from an async launch result", () => {
@@ -608,4 +609,44 @@ test("verify and e2e wait while an async worker is still in the app's main check
 	assert.equal(bash(`${app}npm run verify`, busyEnv(revived, { [RUN_A]: "complete", [RUN_B]: "complete" })), undefined);
 	// Without the hook (an older index.ts) nothing changes.
 	assert.equal(bash(`${app}npm run verify`), undefined);
+});
+
+// --- a review without a verdict never counts (keeb run 2026-11-12 22:45: the reviewer's report stayed in its reasoning) ---
+
+test("reviewVerdict: the reviewer.md report shapes count, a mid-review line or nothing does not", () => {
+	assert.equal(reviewVerdict("## Review\n- Finding: P2, off by one, src/a.ts:3, evidence, fix\n- Checked: a.ts\n- Merge verdict: OK with notes"), true);
+	assert.equal(reviewVerdict("## Review\n- Checked: every hunk\n- Merge verdict: OK"), true);
+	assert.equal(reviewVerdict("No issues found."), true);
+	assert.equal(reviewVerdict("Run fan-out: 1/64 used\n\nNo issues found.\nMission: cf39d943 (completed)"), true);
+	assert.equal(reviewVerdict("Now let me check one more thing — how `tk-stat` renders its `.value`:\nMission: cf39d943 (completed)"), false);
+	assert.equal(reviewVerdict(""), false);
+	assert.equal(reviewVerdict("## Review"), false, "a heading alone is not a verdict");
+	assert.equal(reviewVerdict('{"reviewFindings": ["No blockers."]}'), false, "the JSON report is not the contract");
+});
+
+test("pending reviews count only when the finished run's reply holds a verdict", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const branch = [{ type: "message", message: { role: "user", content: "go" } }, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))];
+	const complete: RunState = () => "complete";
+	assert.equal(reviewedSinceUser(branch, complete, () => "## Review\n- Merge verdict: OK"), true);
+	assert.equal(lastReview(branch, dir, complete, () => "No issues found."), "aaaaaaa");
+	assert.equal(reviewedSinceUser(branch, complete, () => "Now let me check one more thing:"), false, "no verdict");
+	assert.equal(lastReview(branch, dir, complete, () => "Now let me check one more thing:"), undefined);
+	assert.equal(reviewedSinceUser(branch, complete, () => undefined), false, "transcript gone: fail closed");
+	// A finished (sync) mark was only written after the guard saw a verdict, so it needs no transcript.
+	assert.equal(reviewedSinceUser([...branch, res(reviewMark(dir, "bbbbbbb"))], () => "missing", () => undefined), true);
+});
+
+test("defaultRunText: the assistant's replies from the run's session file named in status.json", () => {
+	const root = mkdtempSync(join(tmpdir(), "guard-runtext-"));
+	const session = join(root, "session.jsonl");
+	const entry = (role: string, content: unknown) => JSON.stringify({ type: "message", message: { role, content } });
+	writeFileSync(session, [entry("user", "Task: review"), entry("assistant", [{ type: "thinking", thinking: "## Review\n- Merge verdict: OK" }, { type: "text", text: "Let me check" }, { type: "toolCall", id: "t", name: "read", arguments: {} }]), entry("toolResult", [{ type: "text", text: "- Merge verdict: OK (in a file the reviewer read)" }]), entry("assistant", [{ type: "text", text: "No issues found." }])].join("\n") + "\n");
+	mkdirSync(join(root, "run-x"));
+	writeFileSync(join(root, "run-x", "status.json"), JSON.stringify({ state: "complete", sessionFile: session }));
+	assert.equal(defaultRunText("run-x", root), "Let me check\nNo issues found.", "text parts only: never thinking, never tool results");
+	assert.equal(defaultRunText("run-missing", root), undefined);
+	writeFileSync(join(root, "run-x", "status.json"), JSON.stringify({ state: "complete", sessionFile: join(root, "gone.jsonl") }));
+	assert.equal(defaultRunText("run-x", root), undefined);
 });

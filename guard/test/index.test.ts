@@ -226,7 +226,7 @@ test("an async scoped review keeps async and gets a pending mark; a sync one get
 	const sync: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r2", input: sync }, ctx), undefined);
 	assert.equal(sync.async, undefined);
-	const r2 = h.tool_result({ toolCallId: "r2", toolName: "subagent", content: [{ type: "text", text: "## Review\nnothing" }], isError: false }, ctx);
+	const r2 = h.tool_result({ toolCallId: "r2", toolName: "subagent", content: [{ type: "text", text: "## Review\n- Checked: a.ts\n- Merge verdict: OK" }], isError: false }, ctx);
 	assert.match(text(r2), /\[pi-guard\] reviewed \S+ at [0-9a-f]{40}/);
 	assert.doesNotMatch(text(r2), /review pending/);
 });
@@ -271,4 +271,24 @@ test("with the agent pair in settings.json, the parent session is the orchestrat
 	assert.equal(load(() => false, { HOME: home, PI_SUBAGENT_CHILD: "1" }).tool_call(edit, { cwd: home }), undefined);
 	writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ defaultModel: "spark/flash-auto" }));
 	assert.equal(load(() => false, { HOME: home }).tool_call(edit, { cwd: home }), undefined);
+});
+
+test("a sync scoped review that returns without a verdict gets a note instead of the reviewed mark", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 6;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
+	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r3", input }, ctx), undefined);
+	const r = h.tool_result({ toolCallId: "r3", toolName: "subagent", content: [{ type: "text", text: "Now let me check one more thing — how `tk-stat` renders its `.value`:\nMission: cf39d943 (completed)" }], isError: false }, ctx);
+	assert.doesNotMatch(text(r), /\[pi-guard\] reviewed /);
+	assert.doesNotMatch(text(r), /review pending/);
+	assert.match(text(r), /\[pi-guard\] review ended without a verdict/);
+	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }]), false);
+	// The same call again is not "nothing to review": the app is still unreviewed at this state.
+	const again: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r4", input: again }, { ...ctx, sessionManager: { getBranch: () => [...verified(dir), { type: "message", message: { role: "toolResult", toolCallId: "r3", content: r.content } }] } }), undefined);
+	const ok = h.tool_result({ toolCallId: "r4", toolName: "subagent", content: [{ type: "text", text: "## Review\n- Checked: a.ts\n- Merge verdict: OK" }], isError: false }, ctx);
+	assert.match(text(ok), /\[pi-guard\] reviewed \S+ at [0-9a-f]{40}/);
 });
