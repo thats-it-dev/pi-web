@@ -26,9 +26,13 @@ describe("thinkingLevelsFor", () => {
 });
 
 describe("chatMenu rows", () => {
+	it("always lists attach file, after attach image when that is shown", () => {
+		expect(menuRows(view).map((r) => r.label).slice(0, 3)).toEqual(["attach image", "attach file", "folder"]);
+		expect(menuRows({ ...view, canImages: false }).map((r) => r.label).slice(0, 2)).toEqual(["attach file", "folder"]);
+	});
 	it("omits attach image when the model takes no images", () => {
 		expect(menuRows({ ...view, canImages: false }).map((r) => r.label)).not.toContain("attach image");
-		expect(menuRows(view).map((r) => r.label)).toEqual(["attach image", "folder", "model", "approvals", "superpowers"]);
+		expect(menuRows(view).map((r) => r.label)).toEqual(["attach image", "attach file", "folder", "model", "approvals", "superpowers"]);
 	});
 
 	it("a fixed folder row is not clickable and says fixed once a chat starts", () => {

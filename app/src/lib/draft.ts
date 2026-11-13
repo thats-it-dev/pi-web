@@ -1,8 +1,9 @@
-import type { ApprovalMode, ImageInput, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { ApprovalMode, FileInput, ImageInput, ThinkingLevel } from "../../../shared/src/protocol.ts";
 
 export interface Draft {
 	text: string;
 	images: ImageInput[];
+	files: FileInput[];
 	cwd: string;
 	model: { provider: string; modelId: string } | null;
 	thinking: ThinkingLevel | null;
@@ -13,11 +14,12 @@ export interface Draft {
 export interface Handoff {
 	text: string;
 	images: ImageInput[];
+	files: FileInput[];
 	approval: ApprovalMode | null;
 	superpowers: boolean;
 }
 
-const fresh = (): Draft => ({ text: "", images: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
+const fresh = (): Draft => ({ text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 
 // The new-chat draft and the first message waiting for its session; one per tab.
 let draft = fresh();

@@ -18,12 +18,12 @@ export interface ChatMenuView {
 
 export interface ChatMenuHandlers {
 	step(s: MenuStep): void;
-	attach(): void;
+	attach(kind: "image" | "file"): void;
 	pickCwd(path: string): void;
 	toggleSuperpowers(): void;
 }
 
-export type MenuRowKey = "attach" | "folder" | "model" | "approvals" | "superpowers";
+export type MenuRowKey = "attach" | "file" | "folder" | "model" | "approvals" | "superpowers";
 
 export interface MenuRow {
 	key: MenuRowKey;
@@ -44,6 +44,7 @@ export function thinkingLevelsFor(_m: ModelInfo | null, known: ThinkingLevel[]):
 export function menuRows(v: ChatMenuView): MenuRow[] {
 	const rows: MenuRow[] = [];
 	if (v.canImages) rows.push({ key: "attach", label: "attach image", value: "", disabled: false });
+	rows.push({ key: "file", label: "attach file", value: "", disabled: false });
 	rows.push(
 		v.cwdFixed
 			? { key: "folder", label: "folder", value: v.cwd, disabled: true, hint: FOLDER_FIXED_HINT }
@@ -55,11 +56,12 @@ export function menuRows(v: ChatMenuView): MenuRow[] {
 	return rows;
 }
 
-// Lucide icons (ISC): image-plus, folder, cpu, shield-check and zap.
+// Lucide icons (ISC): image-plus, paperclip, folder, cpu, shield-check and zap.
 const icon = (body: SVGTemplateResult) =>
 	html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICONS: Record<MenuRowKey, TemplateResult> = {
 	attach: icon(svg`<path d="M16 5h6" /><path d="M19 2v6" /><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /><circle cx="9" cy="9" r="2" />`),
+	file: icon(svg`<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />`),
 	folder: icon(svg`<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />`),
 	model: icon(svg`<rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2" /><path d="M15 20v2" /><path d="M2 15h2" /><path d="M2 9h2" /><path d="M20 15h2" /><path d="M20 9h2" /><path d="M9 2v2" /><path d="M9 20v2" />`),
 	approvals: icon(svg`<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" />`),
@@ -87,7 +89,7 @@ export function chatMenu(v: ChatMenuView, on: ChatMenuHandlers): TemplateResult 
 					<span class="sw ${checked ? "on" : ""}" aria-hidden="true"><i></i></span>
 				</button>`;
 			}
-			return html`<button class="mrow" @click=${() => (r.key === "attach" ? on.attach() : on.step(r.key as MenuStep))}>${body}</button>`;
+			return html`<button class="mrow" @click=${() => (r.key === "attach" ? on.attach("image") : r.key === "file" ? on.attach("file") : on.step(r.key as MenuStep))}>${body}</button>`;
 		})}</div>`;
 	}
 	const back = html`<button class="back u" @click=${() => on.step("root")}>‹ ${STEP_TITLES[v.step]}</button>`;

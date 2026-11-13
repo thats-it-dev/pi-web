@@ -1,16 +1,18 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
-import type { ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { FileInput, ImageInput, ModelInfo, PromptMode, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import { type SlashItem, filterSlash, slashQuery } from "../lib/slash.ts";
 import { type MentionEntry, applyMention, mentionAt } from "../lib/mention.ts";
 import { checkImageFile } from "../lib/images.ts";
-import { summarizeAttachments } from "../../../shared/src/attachments.ts";
+import { formatBytes, summarizeAttachments } from "../../../shared/src/attachments.ts";
+import { type Attachment, acceptFiles, attachmentBytes, readAsBase64, routeAttachments } from "../lib/files.ts";
 import { UNAVAILABLE_IN_TERMINAL } from "../render/sheets.ts";
 import { enterSends } from "../lib/mobile.ts";
 
 export interface SubmitDetail {
 	text: string;
 	images: ImageInput[];
+	files: FileInput[];
 	mode: PromptMode;
 }
 
@@ -21,10 +23,11 @@ export type FileSearch = (query: string, signal: AbortSignal) => Promise<Mention
 
 type Menu = { kind: "slash"; items: SlashItem[] } | { kind: "files"; items: MentionEntry[] };
 
-// Lucide icons (ISC): plus, arrow-up and square.
+// Lucide icons (ISC): plus, arrow-up, square and paperclip.
 const PLUS_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="M12 5v14" /></svg>`;
 const SEND_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7" /><path d="M12 19V5" /></svg>`;
 const STOP_ICON = html`<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect width="14" height="14" x="5" y="5" rx="2" /></svg>`;
+export const CLIP_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
 
 export class PiComposer extends LitElement {
 	static properties = {
@@ -39,10 +42,11 @@ export class PiComposer extends LitElement {
 		folder: { attribute: false },
 		busy: { attribute: false },
 		searchFiles: { attribute: false },
+		canImages: { attribute: false },
 		text: { state: true },
 		cursor: { state: true },
 		files: { state: true },
-		images: { state: true },
+		attachments: { state: true },
 		menuIndex: { state: true },
 		menuDismissed: { state: true },
 	};
@@ -57,10 +61,11 @@ export class PiComposer extends LitElement {
 	declare folder: string | null; // an unsent chat shows its folder after the model
 	declare busy: boolean; // the last send is still being taken (an unsent chat starting its session)
 	declare searchFiles: FileSearch | null;
+	declare canImages: boolean; // the model can see images; decided at send time, so an early drop still routes right
 	declare text: string;
 	declare cursor: number;
 	declare files: MentionEntry[];
-	declare images: ImageInput[];
+	declare attachments: Attachment[];
 	declare menuIndex: number;
 	declare menuDismissed: boolean;
 	private pressTimer: ReturnType<typeof setTimeout> | undefined;
@@ -83,7 +88,11 @@ export class PiComposer extends LitElement {
 			.opt code { font-family: var(--font-mono); flex: none; }
 			.opt code.path { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 			.opt span { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-			.thumbs { display: flex; gap: 6px; }
+			.attachments { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+			.chip.file { display: inline-flex; align-items: center; gap: 6px; border-style: solid; padding: 4px 8px; font-size: 0.78rem; color: var(--text); cursor: pointer; }
+			.chip.file svg { width: 14px; height: 14px; flex: none; color: var(--text-secondary); }
+			.chip.file .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+			.chip.file .size { color: var(--text-muted); flex: none; }
 			.thumb img { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); }
 			.box { display: grid; gap: 2px; padding: 4px 0 0; }
 			textarea { width: 100%; min-width: 0; border: 0; padding: 4px 0; resize: none; background: transparent; line-height: 1.45; max-height: 40vh; outline: none; }
@@ -116,10 +125,11 @@ export class PiComposer extends LitElement {
 		this.folder = null;
 		this.busy = false;
 		this.searchFiles = null;
+		this.canImages = false;
 		this.text = "";
 		this.cursor = 0;
 		this.files = [];
-		this.images = [];
+		this.attachments = [];
 		this.menuIndex = 0;
 		this.menuDismissed = false;
 	}
@@ -134,10 +144,13 @@ export class PiComposer extends LitElement {
 	}
 
 	// Put a failed message back unless the user already started typing again.
-	restore(text: string, images: ImageInput[]): void {
-		if (this.text || this.images.length) return;
+	restore(text: string, images: ImageInput[], files: FileInput[] = []): void {
+		if (this.text || this.attachments.length) return;
 		this.text = text;
-		this.images = images;
+		this.attachments = [
+			...images.map((image): Attachment => ({ kind: "image", name: `image.${image.mimeType.split("/")[1] ?? "png"}`, size: Math.floor((image.data.length * 3) / 4), image })),
+			...files.map((file): Attachment => ({ kind: "file", file })),
+		];
 	}
 
 	private get textarea(): HTMLTextAreaElement | null {
@@ -189,10 +202,11 @@ export class PiComposer extends LitElement {
 
 	private submit(mode: PromptMode): void {
 		const text = this.text.trim();
-		if (this.busy || (!text && this.images.length === 0)) return;
-		this.dispatchEvent(new CustomEvent<SubmitDetail>("pi-submit", { detail: { text, images: this.images, mode }, bubbles: true, composed: true }));
+		if (this.busy || (!text && this.attachments.length === 0)) return;
+		const { images, files } = routeAttachments(this.attachments, this.canImages);
+		this.dispatchEvent(new CustomEvent<SubmitDetail>("pi-submit", { detail: { text, images, files, mode }, bubbles: true, composed: true }));
 		this.text = "";
-		this.images = [];
+		this.attachments = [];
 		this.cursor = 0;
 		this.menuIndex = 0;
 		if (matchMedia("(pointer: coarse)").matches) this.textarea?.blur(); // put the keyboard away on a phone
@@ -297,26 +311,41 @@ export class PiComposer extends LitElement {
 
 	private onFiles = async (e: Event) => {
 		const input = e.target as HTMLInputElement;
-		const files = [...(input.files ?? [])];
+		let files = [...(input.files ?? [])];
 		input.value = "";
-		const read = (f: File) =>
-			new Promise<ImageInput>((resolve, reject) => {
-				const r = new FileReader();
-				r.onload = () => resolve({ mimeType: f.type, data: String(r.result).replace(/^data:[^,]*,/, "") });
-				r.onerror = () => reject(r.error);
-				r.readAsDataURL(f);
-			});
-		const accepted = files.filter((f) => checkImageFile(f));
-		if (accepted.length < files.length) toast("Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached.", "warning");
-		const results = await Promise.allSettled(accepted.map(read));
-		const ok = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-		if (ok.length < accepted.length) toast("An image couldn't be read.", "error");
-		if (ok.length) this.images = [...this.images, ...ok];
+		if (input.dataset.kind === "image") {
+			const accepted = files.filter((f) => checkImageFile(f));
+			if (accepted.length < files.length) toast("Only PNG, JPEG, GIF or WebP images up to 5 MB can be attached.", "warning");
+			files = accepted;
+		}
+		await this.addFiles(files);
 	};
 
-	// Opens the file picker; the ＋ menu's attach image row calls this.
-	pickImages(): void {
-		this.renderRoot.querySelector<HTMLInputElement>("input[type=file]")?.click();
+	// Anything picked, dropped or pasted. Images that pass the image checks stay images until send time.
+	async addFiles(files: File[]): Promise<void> {
+		const { ok, error } = acceptFiles(files, attachmentBytes(this.attachments));
+		if (error) toast(error, "warning");
+		const results = await Promise.allSettled(
+			ok.map(async (f): Promise<Attachment> => {
+				const data = await readAsBase64(f);
+				return checkImageFile(f) ? { kind: "image", name: f.name, size: f.size, image: { mimeType: f.type, data } } : { kind: "file", file: { name: f.name, mimeType: f.type, size: f.size, data } };
+			}),
+		);
+		const added = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+		if (added.length < ok.length) toast("A file couldn't be read.", "error");
+		if (added.length) this.attachments = [...this.attachments, ...added];
+	}
+
+	private onPaste = (e: ClipboardEvent) => {
+		const files = [...(e.clipboardData?.files ?? [])];
+		if (!files.length) return; // plain text pastes as text
+		e.preventDefault();
+		void this.addFiles(files);
+	};
+
+	// Opens a file picker; the ＋ menu's attach rows call this.
+	pickFiles(kind: "image" | "file"): void {
+		this.renderRoot.querySelector<HTMLInputElement>(`input[type=file][data-kind=${kind}]`)?.click();
 	}
 
 	willUpdate(): void {
@@ -349,23 +378,27 @@ export class PiComposer extends LitElement {
 		return html`<div class="inner">
 			${queued.length ? html`<div class="queue" aria-label="Queued messages">${queued.map(([k, t]) => html`<span class="chip"><span class="label">${k}</span> ${t}</span>`)}</div>` : nothing}
 			${menu ? this.renderMenu(menu) : nothing}
-			${this.images.length
-				? html`<div class="thumbs">${this.images.map(
-						(img, i) => html`<button class="thumb" aria-label="Remove image" @click=${() => (this.images = this.images.filter((_, j) => j !== i))}><img alt="" src="data:${img.mimeType};base64,${img.data}" /></button>`,
-					)}</div>`
+			${this.attachments.length
+				? html`<div class="attachments">${this.attachments.map((a, i) => {
+						const remove = () => (this.attachments = this.attachments.filter((_, j) => j !== i));
+						return a.kind === "image"
+							? html`<button class="thumb" aria-label="Remove image" @click=${remove}><img alt="" src="data:${a.image.mimeType};base64,${a.image.data}" /></button>`
+							: html`<button class="chip file" aria-label=${`Remove ${a.file.name}`} @click=${remove}>${CLIP_ICON}<span class="name">${a.file.name}</span><span class="size">${formatBytes(a.file.size)}</span></button>`;
+					})}</div>`
 				: nothing}
 			<div class="box">
-				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu ? "true" : "false"} aria-activedescendant=${menu ? `slash-opt-${Math.min(this.menuIndex, menu.items.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, / for commands, @ for files"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey} @keyup=${this.onCaret} @click=${this.onCaret}></textarea>
+				<textarea role="combobox" aria-autocomplete="list" aria-controls="slash-menu" aria-expanded=${menu ? "true" : "false"} aria-activedescendant=${menu ? `slash-opt-${Math.min(this.menuIndex, menu.items.length - 1)}` : nothing} aria-label="Message" rows="1" placeholder=${this.detached ? "continue here" : this.streaming ? "steer pi, or hold send to queue a follow-up" : "message pi, / for commands, @ for files"} .value=${this.text} @input=${this.onInput} @keydown=${this.onKey} @keyup=${this.onCaret} @click=${this.onCaret} @paste=${this.onPaste}></textarea>
 				<div class="row">
 					<button class="icon" aria-label="Chat options" @click=${() => this.openSheet("menu")}>${PLUS_ICON}</button>
-					<input class="sr-only" type="file" accept="image/*" multiple tabindex="-1" aria-hidden="true" @change=${this.onFiles} />
+					<input class="sr-only" type="file" data-kind="image" accept="image/*" multiple tabindex="-1" aria-hidden="true" @change=${this.onFiles} />
+					<input class="sr-only" type="file" data-kind="file" multiple tabindex="-1" aria-hidden="true" @change=${this.onFiles} />
 					<div class="lead">
 						<button class="model u" aria-label=${`Model ${this.model?.name ?? "not loaded"}`} @click=${() => this.openSheet("model")}>
 							${this.model ? html`<b>${this.model.name}</b>${this.thinking ? ` · ${this.thinking}` : nothing}` : "model"}
 						</button>
 						${this.folder ? html`<span class="folder">&nbsp;· ${this.folder}</span>` : nothing}
 					</div>
-					${this.streaming && !this.text.trim() && !this.images.length
+					${this.streaming && !this.text.trim() && !this.attachments.length
 						? html`<button class="icon stop" aria-label="stop" @click=${() => this.dispatchEvent(new CustomEvent("pi-abort", { bubbles: true, composed: true }))}>${STOP_ICON}</button>`
 						: html`<button class="icon send" aria-label=${this.streaming ? "steer" : "send"} ?disabled=${this.busy} aria-busy=${this.busy ? "true" : "false"} @pointerdown=${this.onPressStart} @pointerup=${this.onPressEnd} @pointerleave=${this.onPressEnd} @pointercancel=${this.onPressCancel} @click=${this.onSendClick}>${SEND_ICON}</button>`}
 				</div>

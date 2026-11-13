@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import type { DefaultsInfo, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
+import { routeAttachments } from "../lib/files.ts";
 import { type Draft, getDraft, handOff, resetDraft, updateDraft } from "../lib/draft.ts";
 import { abbreviateCwd } from "../lib/format.ts";
 import { hrefFor } from "../lib/route.ts";
@@ -82,7 +83,7 @@ export class PiNewChat extends LitElement {
 
 	disconnectedCallback(): void {
 		const c = this.composer;
-		if (!this.sent && c) updateDraft({ text: c.text, images: c.images }); // kept for when the user comes back
+		if (!this.sent && c) updateDraft({ text: c.text, ...routeAttachments(c.attachments, c.canImages) }); // kept for when the user comes back
 		super.disconnectedCallback();
 	}
 
@@ -176,7 +177,7 @@ export class PiNewChat extends LitElement {
 		const { model, thinking } = this.choice;
 		try {
 			const { sessionId } = await this.api.createSession({ cwd: d.cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}) });
-			handOff(sessionId, { text, images, approval: d.approval, superpowers: d.superpowers });
+			handOff(sessionId, { text, images, files: [], approval: d.approval, superpowers: d.superpowers });
 			resetDraft();
 			this.sent = true;
 			location.hash = hrefFor({ name: "session", id: sessionId });
@@ -274,10 +275,10 @@ export class PiNewChat extends LitElement {
 			},
 			{
 				step: (s) => (this.menuStep = s),
-				attach: () => {
+				attach: (kind) => {
 					this.attaching = true;
 					this.sheet = null;
-					this.composer?.pickImages();
+					this.composer?.pickFiles(kind);
 				},
 				pickCwd: (path) => {
 					this.edit({ cwd: path });

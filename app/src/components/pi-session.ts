@@ -592,10 +592,10 @@ export class PiSession extends LitElement {
 			},
 			{
 				step: (s) => (this.menuStep = s),
-				attach: () => {
+				attach: (kind) => {
 					this.attaching = true;
 					this.sheet = null;
-					this.composer?.pickImages();
+					this.composer?.pickFiles(kind);
 				},
 				pickCwd: () => {},
 				toggleSuperpowers: () => void this.run({ type: "prompt", text: `/superpowers ${superpowersOn(snap) ? "off" : "on"}`, mode: "send" }),
