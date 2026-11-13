@@ -40,8 +40,9 @@ question, with no `pr`, `ship` or `gateway-pr` (through `bash` or `bg_bash`) aft
 publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
 message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, and never hand Michael commands to run.
 
-None of these three nudges fires while a `bg_bash` job the run started has not sent its `bg-bash-done` message:
-ending the turn is the plan then, and the done message starts the next one.
+None of these three nudges fires while a `bg_bash` job the run started has not sent its `bg-bash-done` message, or
+an async `subagent` run it launched or revived has not sent its `subagent-notify` message: ending the turn is the plan
+then, and the done message starts the next one.
 At most 2 per user prompt.
 
 ## pr timeouts and CI waits

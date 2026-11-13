@@ -526,6 +526,26 @@ export function waitingOnBgJob(run: Msg[]): boolean {
 	return open.size > 0;
 }
 
+// The run launched (or revived) an async subagent run whose subagent-notify message has not arrived: same plan, the
+// orchestrator ends its turn and pi-subagents wakes it with the result (keeb runs 2026-11-12, nudged while the worker ran).
+// The notice names the run's directory, so its id is matched anywhere in the text; a sync launch opens nothing.
+export function waitingOnAsyncRun(run: Msg[]): boolean {
+	const open = new Set<string>();
+	for (const m of run) {
+		if (m.role === "toolResult" && m.toolName === "subagent") {
+			const text = textOf(m);
+			const d = m.details as { asyncId?: unknown } | undefined;
+			const id = /Async: \S+ \[([0-9a-f-]{36})\]/.exec(text)?.[1] ?? /Revived run: ([0-9a-f-]{36})/.exec(text)?.[1] ?? (typeof d?.asyncId === "string" ? d.asyncId : undefined);
+			if (id) open.add(id);
+		} else if (m.role === "custom" && m.customType === "subagent-notify") {
+			for (const id of [...open]) if (textOf(m).includes(id)) open.delete(id);
+		}
+	}
+	return open.size > 0;
+}
+
+const waitingOnBackground = (run: Msg[]) => waitingOnBgJob(run) || waitingOnAsyncRun(run);
+
 // The reply puts a question to Michael: a sentence of prose ends in "?" (markdown emphasis and closing
 // brackets aside; "a?.b" or "?q=" don't count). pi-web replies close with a "TL;DR:" line, so the question is rarely the last character.
 // Code blocks and quotes don't count.
@@ -548,7 +568,7 @@ export function shouldNudge(messages: Msg[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBgJob(run)) return false;
+	if (waitingOnBackground(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (run.at(-2)?.role !== "toolResult") return false;
@@ -586,7 +606,7 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBgJob(run)) return false;
+	if (waitingOnBackground(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (asksUser(textOf(last))) return false;
@@ -633,7 +653,7 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBgJob(run)) return false;
+	if (waitingOnBackground(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (asksUser(textOf(last))) return false;

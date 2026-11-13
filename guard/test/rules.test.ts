@@ -650,3 +650,42 @@ test("defaultRunText: the assistant's replies from the run's session file named 
 	writeFileSync(join(root, "run-x", "status.json"), JSON.stringify({ state: "complete", sessionFile: join(root, "gone.jsonl") }));
 	assert.equal(defaultRunText("run-x", root), undefined);
 });
+
+// --- async subagent runs hold the nudges like bg_bash jobs (keeb runs 2026-11-12 20:16 and 23:42: nudged while the worker ran) ---
+
+const RUN_W = "05b6b587-d63e-4ca2-840a-3e642a55876e";
+const RUN_V = "79294cfd-e523-4cfe-a8fd-346fee8607b9";
+const subLaunch = (agent: string) => ({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: `c-${agent}`, name: "subagent", arguments: { agent, task: "do it" } }] });
+const asyncStarted = (agent: string, run: string) => ({ role: "toolResult", toolName: "subagent", content: [{ type: "text", text: `Run fan-out: 1/64 used\nAsync: ${agent} [${run}]\n\nThe async run is detached and running in the background.` }], details: { asyncId: run } });
+const revived = (from: string, run: string) => ({ role: "toolResult", toolName: "subagent", content: [{ type: "text", text: `Revived async subagent from ${from}. Revived run: ${run}\nAgent: worker` }] });
+const notify = (outcome: "completed" | "failed", run: string) => ({ role: "custom", customType: "subagent-notify", content: `Background task ${outcome}: **worker**\n\nworker:\n\nImplemented.\n\nRetention-managed async directory: /tmp/pi-subagents-uid-1000/async-subagent-runs/${run}` });
+
+test("no end-of-turn nudge while an async subagent run of the turn has not reported back", () => {
+	const keeb = editApp("/home/m/workspace/apps/keeb/src/x.ts");
+	const waiting = [user, keeb, result, subLaunch("worker"), asyncStarted("worker", RUN_W), say("Worker is on it; you'll get a notice when it's done.")];
+	assert.equal(shouldNudge(waiting), false);
+	assert.equal(shouldNudgeTodos(waiting, [{ id: 1, subject: "plural helper", status: "in_progress" }]), false);
+	assert.equal(shouldNudgePr(waiting, ["/home/m/workspace/apps/keeb"]), false);
+	// The run id from details when the text has none.
+	const bare = { ...asyncStarted("worker", RUN_W), content: [{ type: "text", text: "launched" }] };
+	assert.equal(shouldNudge([user, keeb, result, subLaunch("worker"), bare, say("Running.")]), false);
+	// A reviewer run holds too: its result decides the next step.
+	assert.equal(shouldNudgePr([user, keeb, result, subLaunch("reviewer"), asyncStarted("reviewer", RUN_V), say("Reviewer running.")], ["/home/m/workspace/apps/keeb"]), false);
+});
+
+test("nudges come back once the run's subagent-notify message arrived, and a revived run holds until its own", () => {
+	const keeb = editApp("/home/m/workspace/apps/keeb/src/x.ts");
+	const done = [user, keeb, result, subLaunch("worker"), asyncStarted("worker", RUN_W), say("Running."), notify("completed", RUN_W), keeb, result, say("")];
+	assert.equal(shouldNudge(done), true);
+	assert.equal(shouldNudgeTodos(done, [{ id: 1, subject: "plural helper", status: "in_progress" }]), true);
+	assert.equal(shouldNudgePr(done, ["/home/m/workspace/apps/keeb"]), true);
+	// Another run's notice does not count.
+	assert.equal(shouldNudge([user, keeb, result, subLaunch("worker"), asyncStarted("worker", RUN_W), notify("completed", RUN_V), say("")]), false);
+	// A failed run reports back too; resuming it opens a new run that holds until its own notice.
+	const failedThenRevived = [user, keeb, result, subLaunch("worker"), asyncStarted("worker", RUN_W), say("Running."), notify("failed", RUN_W), subLaunch("worker"), revived(RUN_W, RUN_V), say("Resumed.")];
+	assert.equal(shouldNudge(failedThenRevived), false);
+	assert.equal(shouldNudge([...failedThenRevived, notify("completed", RUN_V), keeb, result, say("")]), true);
+	// A sync launch result is the run itself: nothing to wait for.
+	const sync = { role: "toolResult", toolName: "subagent", content: [{ type: "text", text: "Run fan-out: 1/64 used\n\nImplemented.\nMission: abc (completed)" }], details: { mode: "single", results: [] } };
+	assert.equal(shouldNudge([user, keeb, result, subLaunch("worker"), sync, say("")]), true);
+});
