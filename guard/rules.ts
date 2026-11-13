@@ -19,6 +19,10 @@ export const REASONS = {
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
+	worktreeInstall:
+		"Blocked: a pi-subagents worktree shares the main checkout's node_modules through a symlink, so `npm ci` or `npm install` here deletes the packages of the main checkout and of every other worktree. The packages are already installed: run typecheck and tests straight away. If a dependency really must change, say so in your result and let the orchestrator do it in the main checkout.",
+	orchestrator:
+		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Merges, commits and `npm run verify` in the main checkout are yours.",
 };
 
 // The app a command works in: from a path to ~/workspace/apps/<name> in the command, else the session cwd.
@@ -39,10 +43,45 @@ export function appDir(command: string, cwd: string, home: string): string | und
 
 // The app in a path relative to ~/workspace/apps: its first segment, or the second under `worktrees/`
 // (pi-subagents cuts worktrees at ~/workspace/apps/worktrees/<app>/pi-worktree-<run>-<i>).
+// A trailing dot is the sentence's, not the name's ("…in /home/m/workspace/apps/keeb." made a dir that does not exist).
 function appName(rel: string): string | undefined {
 	const m = /^([A-Za-z0-9._-]+)(?:\/([A-Za-z0-9._-]+))?/.exec(rel);
 	if (!m) return undefined;
-	return m[1] === "worktrees" ? m[2] : m[1];
+	const name = (m[1] === "worktrees" ? m[2] : m[1])?.replace(/\.+$/, "");
+	return name || undefined;
+}
+
+/** pi's settings put the agent pair in charge: the pair orchestrator (or the pi tune) as the session model, the MoE as the subagent default. */
+export function pairSettings(settings: unknown): boolean {
+	const s = settings as { defaultModel?: unknown; subagents?: { defaultModel?: unknown } } | undefined;
+	const main = typeof s?.defaultModel === "string" ? s.defaultModel : "";
+	const sub = typeof s?.subagents?.defaultModel === "string" ? s.subagents.defaultModel : "";
+	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
+}
+
+/** The file is app code: inside an app (or one of its worktrees) and not docs, Markdown, CI config or the plan workspace. */
+export function appCodePath(raw: string, cwd: string, home: string): boolean {
+	const expanded = raw.replace(/^(~|\$HOME|\$\{HOME\})(?=\/)/, home);
+	const path = isAbsolute(expanded) ? expanded : join(cwd, expanded);
+	const apps = join(home, "workspace", "apps");
+	if (!path.startsWith(`${apps}/`)) return false;
+	let rel = path.slice(apps.length + 1);
+	rel = rel.startsWith("worktrees/") ? rel.split("/").slice(3).join("/") : rel.split("/").slice(1).join("/");
+	return rel !== "" && !/^(?:docs|\.superpowers|\.github)\//.test(rel) && !/\.md$/i.test(rel);
+}
+
+const WRITES = /(?:^|[\s|])(?:sed\s+(?:-\S+\s+)*-[A-Za-z]*i|perl\s+(?:-\S+\s+)*-[A-Za-z]*i|tee|rm|mv|cp|truncate|git\s+apply|git\s+checkout\s+\S+\s+--|git\s+restore|npm\s+(?:i|install|uninstall|rm)|pnpm\s+(?:add|remove|i|install)|yarn\s+(?:add|remove))(?![\w-])|(?<![0-9&])>{1,2}(?!&)/;
+
+/** A shell command that writes app code: a writing verb or a redirect in a segment that names an app code path. */
+export function writesAppCode(command: string, cwd: string, home: string): boolean {
+	const dir = workDir(command, cwd, home);
+	for (const seg of command.split(/;|&&|\|\||\n/)) {
+		const bare = seg.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "");
+		if (!WRITES.test(bare)) continue;
+		const paths = bare.split(/\s+/).filter((t) => /^(?:~|\$HOME|\/|\.{1,2}\/)|\/|\.[A-Za-z0-9]{1,6}$/.test(t) && !/^[<>|&;-]/.test(t));
+		if (paths.some((p) => appCodePath(p, dir, home))) return true;
+	}
+	return false;
 }
 
 // The directory a command runs in: its leading `cd`, else the session cwd.
@@ -81,7 +120,11 @@ export type Env = {
 	lines?: (path: string) => number | undefined;
 	/** Paths whose overwrite was already blocked once; the second try goes through. */
 	rewrites?: Set<string>;
+	/** This session is the agent pair's orchestrator (pair settings, not a subagent child): it never edits app code. */
+	orchestrator?: boolean;
 };
+
+const INSTALLS = /\b(?:npm\s+(?:ci|i|install)|pnpm\s+(?:i|install)|yarn(?:\s+install)?)\b/;
 
 const GIT = String.raw`\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+`;
 
@@ -99,6 +142,8 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	const dir = appDir(command, env.cwd, env.home);
 	if (!dir) return undefined;
 	if (/\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/.test(command)) return { block: true, reason: REASONS.push };
+	if (INSTALLS.test(command) && workDir(command, env.cwd, env.home).startsWith(`${join(env.home, "workspace", "apps", "worktrees")}/`)) return { block: true, reason: REASONS.worktreeInstall };
+	if (env.orchestrator && writesAppCode(command, env.cwd, env.home)) return { block: true, reason: REASONS.orchestrator };
 	if (/\bgh\s+(?:run\s+(?:list|watch)|pr\s+checks)\b/.test(command)) return { block: true, reason: REASONS.ci };
 	if (/\bgh\s+run\s+view\b/.test(command) && !/--log-failed\b/.test(command)) return { block: true, reason: REASONS.ci };
 	// A short sleep (a server starting, a deploy propagating) is fine; CI polling used minutes.
@@ -302,6 +347,9 @@ export function checkToolCall(toolName: string, input: Record<string, unknown>, 
 		if (v) return v;
 	}
 	if (python.some((code) => pythonRewrite(code) && appDir(code, env.cwd, env.home))) return { block: true, reason: REASONS.rewrite };
+	if (env.orchestrator && (toolName === "edit" || toolName === "write") && typeof input.path === "string" && appCodePath(input.path, env.cwd, env.home)) {
+		return { block: true, reason: REASONS.orchestrator };
+	}
 	if (toolName === "write" && typeof input.path === "string") return checkOverwrite(input.path, env);
 	return undefined;
 }

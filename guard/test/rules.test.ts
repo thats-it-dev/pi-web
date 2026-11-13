@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { checkShell, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, appsNeedingPr, asyncRunId, defaultRunState, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -482,4 +482,62 @@ test("defaultRunState reads a run's status.json under the given root: complete, 
 	assert.equal(defaultRunState("junk", root), "missing");
 	assert.equal(defaultRunState("never", root), "missing");
 	assert.equal(defaultRunState("done", join(root, "gone")), "missing");
+});
+
+test("appDir drops the sentence punctuation after an app path (keeb run 2026-11-12: 'in …/apps/touchtype.' made a dir that does not exist)", () => {
+	assert.equal(appDir("Review the changes on branch feat/x in /home/m/workspace/apps/keeb.\n\n1. Read the spec", home, home), "/home/m/workspace/apps/keeb");
+	assert.equal(appDir("see /home/m/workspace/apps/keeb.", home, home), "/home/m/workspace/apps/keeb");
+	assert.equal(appDir("see /home/m/workspace/apps/worktrees/keeb/pi-worktree-ab12-0.", home, home), "/home/m/workspace/apps/keeb");
+	assert.equal(appDir("see /home/m/workspace/apps/my.app/src", home, home), "/home/m/workspace/apps/my.app");
+});
+
+test("installing packages inside a pi-subagents worktree is blocked: its node_modules is a symlink to the main checkout's", () => {
+	const wt = "cd ~/workspace/apps/worktrees/keeb/pi-worktree-ab12-0 && ";
+	assert.equal(bash(`${wt}npm ci`), REASONS.worktreeInstall);
+	assert.equal(bash(`${wt}npm ci 2>&1 | tail -5`), REASONS.worktreeInstall);
+	assert.equal(bash(`${wt}npm install`), REASONS.worktreeInstall);
+	assert.equal(bash(`${wt}npm i -D vitest`), REASONS.worktreeInstall);
+	assert.equal(bash(`${wt}pnpm install`), REASONS.worktreeInstall);
+	assert.equal(bash("npm ci", env({ cwd: "/home/m/workspace/apps/worktrees/keeb/pi-worktree-ab12-0" })), REASONS.worktreeInstall);
+	assert.equal(bash(`${wt}npm run typecheck && npm test`), undefined);
+	assert.equal(bash(`${app}npm ci`), undefined);
+	assert.equal(bash("npm ci", env({ cwd: "/home/m/workspace/apps/keeb" })), undefined);
+});
+
+test("the orchestrator of the agent pair never edits app code itself; docs, plans and briefs are fine", () => {
+	const o = env({ orchestrator: true });
+	const code = "/home/m/workspace/apps/keeb/src/ui/card.ts";
+	assert.equal(checkToolCall("edit", { path: code, edits: [] }, o)?.reason, REASONS.orchestrator);
+	assert.equal(checkToolCall("write", { path: "/home/m/workspace/apps/keeb/e2e/daily.spec.ts", content: "" }, o)?.reason, REASONS.orchestrator);
+	assert.equal(checkToolCall("write", { path: "~/workspace/apps/keeb/package.json", content: "" }, o)?.reason, REASONS.orchestrator);
+	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/apps/worktrees/keeb/pi-worktree-ab12-0/src/a.ts", edits: [] }, o)?.reason, REASONS.orchestrator);
+	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/apps/keeb/docs/superpowers/plans/2026-11-12-x.md", edits: [] }, o), undefined);
+	assert.equal(checkToolCall("write", { path: "/home/m/workspace/apps/keeb/.superpowers/sdd/x/task-1-brief.md", content: "" }, o), undefined);
+	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/apps/keeb/README.md", edits: [] }, o), undefined);
+	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/pi-web/guard/rules.ts", edits: [] }, o), undefined);
+	// Shell writes to app code count too; running, merging and committing do not.
+	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`, o), REASONS.orchestrator);
+	assert.equal(bash("rm /home/m/workspace/apps/keeb/src/ui/card.ts", o), REASONS.orchestrator);
+	assert.equal(bash(`${app}cat > e2e/daily.spec.ts <<'EOF'\nx\nEOF`, o), REASONS.orchestrator);
+	assert.equal(bash(`${app}git checkout 6339a62 -- src/stats/history-section.ts`, env({ orchestrator: true, dirty: () => false })), REASONS.orchestrator);
+	assert.equal(bash(`${app}npm run verify`, o), undefined);
+	assert.equal(bash(`${app}git merge 6339a62 && git commit -m "merge"`, o), undefined);
+	assert.equal(bash(`${app}npm run verify > /tmp/verify.log 2>&1; tail -20 /tmp/verify.log`, o), undefined);
+	assert.equal(bash(`${app}sed -i 's/- \\[ \\]/- [x]/' docs/superpowers/plans/x.md`, o), undefined);
+	// Not the orchestrator (inline mode, or a worker child): nothing changes.
+	assert.equal(checkToolCall("edit", { path: code, edits: [] }, env())?.reason, undefined);
+	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`), undefined);
+});
+
+test("pairSettings reads the pair from pi's settings", () => {
+	assert.equal(pairSettings({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+	assert.equal(pairSettings({ defaultModel: "spark/flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
+	assert.equal(pairSettings(undefined), false);
+});
+
+test("a reviewer run that stopped on the output cap is failed, never complete", () => {
+	const root = mkdtempSync(join(tmpdir(), "runs-"));
+	mkdirSync(join(root, "r1"));
+	writeFileSync(join(root, "r1", "status.json"), JSON.stringify({ state: "failed", error: 'Subagent produced no output after terminal assistant stopReason "length".' }));
+	assert.equal(defaultRunState("r1", root), "failed");
 });

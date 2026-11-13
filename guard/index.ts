@@ -5,11 +5,20 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, checkToolCall, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
 type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
+
+/** pi's settings.json under `home`, or undefined when it is missing or unreadable. */
+function readSettings(home: string): unknown {
+	try {
+		return JSON.parse(readFileSync(join(home, ".pi", "agent", "settings.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+}
 
 function hasScript(dir: string, name: string): boolean {
 	try {
@@ -186,6 +195,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
 	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
 	const child = !!env.PI_SUBAGENT_CHILD;
+	// With the agent pair in pi's settings, the parent session orchestrates and never edits app code (rules.ts).
+	const orchestrator = !child && pairSettings(readSettings(home));
 	const rewrites = new Set<string>();
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
@@ -204,6 +215,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			codeChanged,
 			lines,
 			rewrites,
+			orchestrator,
 		});
 		if (block || event.toolName !== "subagent" || !event.input) return block;
 		let scoped: ReturnType<typeof scopeReview>;

@@ -146,3 +146,12 @@ test("the pair notes replace the inline-only ones", () => {
 	assert.match(forPi("writing-plans", md.replace("executing-plans", "writing-plans"), PI_NOTES_PAIR), /\*\*Parallel group:\*\* <letter>/);
 	assert.doesNotMatch(forPi("writing-plans", md.replace("executing-plans", "writing-plans"), PI_NOTES_PAIR), /subagent-driven-development is not available/);
 });
+
+test("the pair notes keep the orchestrator out of the code: no npm ci in worktrees, failures go back to a worker, a capped reviewer is re-dispatched", () => {
+	const md = "---\nname: executing-plans\n---\nbody";
+	const notes = forPi("executing-plans", md, PI_NOTES_PAIR);
+	assert.match(notes, /never run `npm ci` or `npm install` in a worktree/);
+	assert.match(notes, /never edit, write or delete app code yourself/);
+	assert.match(notes, /stopReason `length`/);
+	assert.doesNotMatch(notes, /finish the task inline/);
+});
