@@ -423,6 +423,15 @@ Harness faults found: (1) **guard `appDir` regex takes a trailing period** — "
 
 Fixed the same day (Michael's picks + his rule "the orchestrator shouldn't try to fix things itself"): the guard strips sentence punctuation from app names; blocks `npm ci`/`install` inside `~/workspace/apps/worktrees`; in pair mode (settings.json names the pair, no `PI_SUBAGENT_CHILD`) blocks edit/write and shell writes (sed -i, rm, mv, cp, redirects, git checkout --, npm install) to app code, leaving docs, `.superpowers/` and Markdown open; the pair notes say so (no npm ci in worktrees, red verify → resume the worker, failed reviewer → re-dispatch once on a smaller diff, never self-review, runaway → fresh worker with the checkpoint). `reviewer.md` runs at thinking low; the 35B gets Qwen's thinking-mode sampling with `presence_penalty` 1.5 (the loop ran on the model-card defaults, which have none) and a 16k output cap at low. Still open: the session cwd (hub) and superpowers-off-by-default for app folders.
 
+**Pi tune at NVFP4 (2026-11-12 evening, Michael's call: switch):** A/B of `bytkim/Qwen3.8-27B-pi-FP8` (30.9 GB) against `grandslam77/Qwen3.8-27B-pi-NVFP4` (llm-compressor compressed-tensors NVFP4, BF16 lm_head and embeddings, 19.2 GB loaded), same sglang image, flags and DFlash2 draft, same loaded 35B, same prompts (`bench/pair-orch.mjs`: 20k-token prose summary, a plan from the keeb kit-charts spec, a code task; thinking medium, 3000 output tokens; and `bench/pair-contention.mjs --workers 4`). Results in `bench/results/orch-ab.jsonl` and `contention-ab.jsonl`:
+
+| build | prose decode | plan | code | 4 workers | TTFT 20k | switch TTFT 100k | DFlash accept (prose/plan/code) |
+|---|---|---|---|---|---|---|---|
+| FP8 | 23.0 tok/s | 30.6 | 29.6 | 8.7 | 23.4 s | 156 s | 2.95 / 5.45 / 3.6 |
+| NVFP4 | 32.3 | 47.1 | 43.1 | 13.9 | 15.0 s | 99 s | 3.55 / 5.03 / 3.75 |
+
+1.4-1.6× on decode, 1.6× under worker load, prefill faster too, 35B per-stream speeds unchanged. Quality at task level is unverified (the build was calibrated on 512 chat samples); the next real pi tasks are the check. `~/run-27b-pi.sh` now serves the NVFP4 build under the same name `qwen3.8-27b-pi`; the FP8 recipe is `~/run-27b-pi-fp8.sh` (revert = swap the model-path back and reboot the pair in order). Lesson re-learned: `--mem-fraction-static` is of memory free at boot, so an engine booted beside the loaded 35B needs ~0.85, not 0.44; llama-swap unloads one model with `POST /api/models/unload/<model>`.
+
 ## Left to the builder
 
 - Exact fractions, `max-total-tokens`, concurrency and the compaction reserve, from phase 0.

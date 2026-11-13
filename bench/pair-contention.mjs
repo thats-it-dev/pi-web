@@ -20,6 +20,9 @@ const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => (a.star
 const WORKERS = Number(args.workers ?? 0);
 const PROMPT_TOKENS = Number(args["prompt-tokens"] ?? 120000);
 const BASE = args.base ?? "http://127.0.0.1:9000";
+// The orchestrator engine may sit outside llama-swap (an A/B build on its own port): its chat URL and metrics port.
+const ORCH_BASE = args["orch-base"] ?? BASE;
+const ORCH_PORT = Number(args["orch-port"] ?? 8001);
 const OUT = args.out ?? join(dirname(fileURLToPath(import.meta.url)), "results", "contention.jsonl");
 const ORCH = args.orch ?? "qwen3.8-27b-pi";
 const MOE = args.moe ?? "qwen3.6-35b-a3b-sglang";
@@ -57,14 +60,14 @@ function prompt(tokens, tag) {
 	return body;
 }
 
-async function stream(model, content, extra, label) {
+async function stream(model, content, extra, label, base = BASE) {
 	const t0 = performance.now();
 	let first = null;
 	let last = null;
 	let tokens = 0;
 	const gaps = [];
 	let usage = null;
-	const res = await fetch(`${BASE}/v1/chat/completions`, {
+	const res = await fetch(`${base}/v1/chat/completions`, {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ model, messages: [{ role: "user", content }], max_tokens: OUTPUT_TOKENS, stream: true, stream_options: { include_usage: true }, ...extra }),
@@ -138,13 +141,13 @@ async function metrics(port) {
 	}
 }
 
-const run = { ts: new Date().toISOString(), workers: WORKERS, promptTokens: PROMPT_TOKENS, outputTokens: OUTPUT_TOKENS };
+const run = { ts: new Date().toISOString(), workers: WORKERS, promptTokens: PROMPT_TOKENS, outputTokens: OUTPUT_TOKENS, orch: ORCH, orchBase: ORCH_BASE };
 const workerPrompts = Array.from({ length: WORKERS }, (_, i) => prompt(PROMPT_TOKENS, `w${i}`));
 const orchPrompt = prompt(20000, "orch");
 
 const workers = workerPrompts.map((p, i) => stream(MOE, p, { chat_template_kwargs: { enable_thinking: true } }, `worker-${i}`));
 await new Promise((r) => setTimeout(r, 1500)); // let the workers' prefills start first
-const orch = stream(ORCH, orchPrompt, { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "medium" } }, "orchestrator");
+const orch = stream(ORCH, orchPrompt, { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "medium" } }, "orchestrator", ORCH_BASE);
 const probes = [];
 const probeLoop = (async () => {
 	for (let i = 0; i < 10; i++) {
@@ -152,7 +155,7 @@ const probeLoop = (async () => {
 		await new Promise((r) => setTimeout(r, 3000));
 	}
 })();
-const midMetrics = new Promise((r) => setTimeout(async () => r({ orch: await metrics(8001), moe: await metrics(8888) }), 20000));
+const midMetrics = new Promise((r) => setTimeout(async () => r({ orch: await metrics(ORCH_PORT), moe: await metrics(8888) }), 20000));
 const results = await Promise.all([orch, ...workers]);
 await probeLoop;
 const m = await midMetrics;
@@ -160,7 +163,7 @@ const m = await midMetrics;
 // Switch cost: the same 100k prompt warm on the MoE, then cold on the orchestrator.
 const sw = prompt(100000, "switch");
 await stream(MOE, sw, { chat_template_kwargs: { enable_thinking: false } }, "switch-warm-moe");
-const switched = await stream(ORCH, sw, { chat_template_kwargs: { enable_thinking: false } }, "switch-cold-orch");
+const switched = await stream(ORCH, sw, { chat_template_kwargs: { enable_thinking: false } }, "switch-cold-orch", ORCH_BASE);
 
 for (const r of results) appendFileSync(OUT, JSON.stringify({ ...run, ...r }) + "\n");
 probes.sort((a, b) => a - b);
