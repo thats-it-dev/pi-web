@@ -3,7 +3,7 @@ import { sharedStyles, toast } from "@thatsit/kit";
 import type { DefaultsInfo, FileInput, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
 import { routeAttachments } from "../lib/files.ts";
-import { DropTarget } from "../lib/drop.ts";
+import { DropTarget, dragHasFiles } from "../lib/drop.ts";
 import { type Draft, getDraft, handOff, resetDraft, updateDraft } from "../lib/draft.ts";
 import { abbreviateCwd } from "../lib/format.ts";
 import { hrefFor } from "../lib/route.ts";
@@ -101,12 +101,15 @@ export class PiNewChat extends LitElement {
 		this.dropTarget.enter(e);
 		this.dragOver = this.dropTarget.over;
 	};
-	private onDragOver = (e: DragEvent) => e.preventDefault(); // or the browser opens the file
+	private onDragOver = (e: DragEvent) => {
+		if (dragHasFiles(e)) e.preventDefault(); // or the browser opens the file; a text drag keeps its default drop into the textarea
+	};
 	private onDragLeave = () => {
 		this.dropTarget.leave();
 		this.dragOver = this.dropTarget.over;
 	};
 	private onDrop = (e: DragEvent) => {
+		if (!dragHasFiles(e)) return;
 		e.preventDefault();
 		const files = this.dropTarget.drop(e);
 		this.dragOver = false;

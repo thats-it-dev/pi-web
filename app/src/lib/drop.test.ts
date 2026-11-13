@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DropTarget } from "./drop.ts";
+import { DropTarget, dragHasFiles } from "./drop.ts";
 
 const drag = (types: string[], files: File[] = []) => ({ dataTransfer: { types, files } }) as unknown as DragEvent;
+
+describe("dragHasFiles", () => {
+	it("is true only for a drag that carries files, so a text drag keeps the browser's default drop", () => {
+		expect(dragHasFiles(drag(["Files"]))).toBe(true);
+		expect(dragHasFiles(drag(["text/plain"]))).toBe(false);
+		expect(dragHasFiles({} as DragEvent)).toBe(false);
+	});
+});
 
 describe("DropTarget", () => {
 	it("over turns on at the first file dragenter and off after the matching dragleaves", () => {
