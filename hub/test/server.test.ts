@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -246,6 +246,36 @@ test("commands: validated, 404 for unknown sessions, forwarded to the session's 
 	const r = await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "prompt", text: "hi", mode: "send" });
 	assert.deepEqual(r.body, { result: { ok: true }, sessionId: "disk-1" });
 	assert.deepEqual(handles.get("disk-1")?.received.at(-1), { type: "prompt", text: "hi", mode: "send" });
+});
+
+test("commands: a prompt with files is saved under uploads/<session> and the handle gets the rewritten text, for rpc and bridge handles", async () => {
+	registry.close("disk-1");
+	const files = [{ name: "a.txt", mimeType: "text/plain", size: 5, data: Buffer.from("hello").toString("base64") }];
+	const r = await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "prompt", text: "look", files, mode: "send" });
+	assert.equal(r.status, 200);
+	assert.equal(readFileSync(join(root, "uploads", "disk-1", "a.txt"), "utf8"), "hello");
+	const got = handles.get("disk-1")?.received.at(-1) as { text: string; files?: unknown };
+	assert.ok(got.text.startsWith("look\n\n<pi-web-attachments>\n"), got.text);
+	assert.ok(got.text.includes("contents inlined below"));
+	assert.equal(got.files, undefined);
+
+	const term = new FakeHandle("disk-1", work, null, { kind: "bridge", pid: 31338 });
+	assert.equal(registry.attachBridge(term), "attached");
+	await call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "prompt", text: "again", files, mode: "send" });
+	const viaBridge = term.received.at(-1) as { text: string; files?: unknown };
+	assert.ok(viaBridge.text.includes(`→ ${join(root, "uploads", "disk-1", "a (2).txt")}`), viaBridge.text);
+	assert.equal(viaBridge.files, undefined);
+	term.leave();
+});
+
+test("commands: malformed files are a 400; a file over 20 MB is a 413", async () => {
+	registry.close("disk-1");
+	const prompt = (files: unknown) => call(port, "POST", "/api/sessions/disk-1/commands", GOOD, { type: "prompt", text: "x", files, mode: "send" });
+	assert.equal((await prompt("nope")).status, 400);
+	assert.equal((await prompt([{ name: 1 }])).status, 400);
+	const big = { name: "big.bin", mimeType: "", size: 21 * 1024 * 1024, data: "A".repeat(28 * 1024 * 1024) };
+	assert.equal((await prompt([big])).status, 413);
+	assert.equal(existsSync(join(root, "uploads", "disk-1", "big.bin")), false);
 });
 
 test("history reads the file when no process is running", async () => {

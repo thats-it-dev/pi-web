@@ -12,6 +12,7 @@ import type { LastModelStore, ModelChoice } from "./last-model.ts";
 import { type Catalog, type ModelCatalog, modelKey, resolveChoice } from "./model-catalog.ts";
 import { ImageStore } from "./images.ts";
 import { HttpError } from "./errors.ts";
+import { withAttachments } from "./attachments.ts";
 import { FileLister } from "./files.ts";
 import { ReplayCache, handleIndexWebhook } from "./index-webhook.ts";
 import type { Outbox } from "./notes-outbox.ts";
@@ -45,6 +46,7 @@ export interface HubDeps {
 	catalog?: Pick<ModelCatalog, "get">; // models for /api/defaults and new sessions; absent means none known
 	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
 	notesOutbox?: Outbox; // forwards ring notes to ring-profile; absent (ringProfileUrl "") means notes are only stored
+	uploadsDir?: string; // where prompt attachments are saved, one folder per session; default <dataDir>/uploads
 	now?: () => number;
 }
 
@@ -58,6 +60,7 @@ export function createHubServer(deps: HubDeps): Server {
 	const fileLister = new FileLister();
 	const replays = new ReplayCache();
 	const images = deps.images ?? new ImageStore();
+	const uploadsDir = deps.uploadsDir ?? join(cfg.dataDir, "uploads");
 	const catalog = deps.catalog ?? { get: async (): Promise<Catalog> => ({ models: [], piDefault: null, levels: {} }) };
 
 	async function route(req: IncomingMessage, res: ServerResponse, cors: Cors): Promise<void> {
@@ -168,7 +171,8 @@ export function createHubServer(deps: HubDeps): Server {
 			if (m === "POST" && action === "commands") {
 				const cmd = parseCommand(await readJson(req));
 				const h = await registry.ensure(id);
-				const result = await h.command(cmd);
+				// Files are saved here, before any handle kind sees the command: a terminal pi over the bridge reads only text and images.
+				const result = await h.command(cmd.type === "prompt" ? await withAttachments(cmd, join(uploadsDir, h.sessionId)) : cmd);
 				return sendJson(res, 200, { result: images.outgoing(h.sessionId, result), sessionId: h.sessionId }, cors);
 			}
 			if (m === "POST" && action === "close") {
@@ -361,6 +365,12 @@ function parseCommand(body: unknown): AppCommand {
 	if (typeof type !== "string" || !(APP_COMMAND_TYPES as readonly string[]).includes(type)) throw new HttpError(400, `Unknown command: ${String(type)}`);
 	const cmd = body as AppCommand;
 	if (cmd.type === "prompt" && typeof cmd.text !== "string") throw new HttpError(400, "A prompt needs text");
+	if (cmd.type === "prompt" && cmd.files !== undefined && !(Array.isArray(cmd.files) && cmd.files.every(isFileInput))) throw new HttpError(400, "Bad files");
 	if (cmd.type === "set_approval" && !APPROVAL_MODES.includes(cmd.mode)) throw new HttpError(400, `Approval mode must be one of ${APPROVAL_MODES.join(", ")}`);
 	return cmd;
+}
+
+function isFileInput(v: unknown): boolean {
+	const f = v as Record<string, unknown> | null;
+	return typeof f === "object" && f !== null && typeof f.name === "string" && typeof f.mimeType === "string" && typeof f.data === "string" && typeof f.size === "number";
 }

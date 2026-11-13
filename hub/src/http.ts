@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { HttpError } from "./errors.ts";
 
 export type Cors = Record<string, string>;
-const MAX_BODY = 50 * 1024 * 1024; // prompts can carry images
+const MAX_BODY = 64 * 1024 * 1024; // prompts can carry images and files (40 MB raw, 53 MB as base64)
 
 export function sendJson(res: ServerResponse, status: number, body: unknown, cors: Cors): void {
 	res.writeHead(status, { ...cors, "content-type": "application/json", "cache-control": "no-store" });
