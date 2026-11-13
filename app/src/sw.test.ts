@@ -22,11 +22,11 @@ async function dispatch(handler: (e: any) => void, event: Record<string, unknown
 	await done;
 }
 
-test("a push shows an untitled notification tagged with the session", async () => {
+test("a push shows its text as the title, with an empty body, tagged with the session", async () => {
 	const { handlers, self } = loadWorker();
 	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "s-1", title: "ignored", kind: "needs_you" }) } });
-	expect(self.registration.showNotification).toHaveBeenCalledWith("", {
-		body: "Needs you.",
+	expect(self.registration.showNotification).toHaveBeenCalledWith("Needs you.", {
+		body: "",
 		tag: "s-1",
 		renotify: true,
 		data: { sessionId: "s-1" },
@@ -48,8 +48,8 @@ test("each kind has its own text, and a bad payload still shows something", asyn
 		},
 	});
 	await dispatch(handlers.push, { data: null });
-	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Stopped with an error.", "Something happened.", "Something happened.", "Something happened."]);
-	expect(show.mock.calls.every((c) => c[0] === "")).toBe(true);
+	expect(show.mock.calls.map((c) => c[0])).toEqual(["Finished.", "Stopped with an error.", "Something happened.", "Something happened.", "Something happened."]);
+	expect(show.mock.calls.every((c) => c[1].body === "")).toBe(true);
 	expect(show.mock.calls.at(-1)?.[1].tag).toBe("pi-web");
 });
 
@@ -72,7 +72,7 @@ test("tapping a notification with the app closed opens the session", async () =>
 	expect(self.clients.openWindow).toHaveBeenLastCalledWith("/");
 });
 
-test("sw falls back to PUSH_BODY without body, and shows body when it is a non-empty string", async () => {
+test("sw falls back to PUSH_BODY without body, and shows the body text as the title when it is a non-empty string", async () => {
 	const { handlers, self } = loadWorker();
 	const show = self.registration.showNotification;
 	const push = (p: object) => dispatch(handlers.push, { data: { json: () => p } });
@@ -82,7 +82,7 @@ test("sw falls back to PUSH_BODY without body, and shows body when it is a non-e
 	await push({ sessionId: "a", kind: "finished", body: "Fixed the parser." });
 	await push({ sessionId: "", kind: "query" });
 	await push({ sessionId: "", kind: "query", body: "Question waiting" });
-	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Finished.", "Finished.", "Fixed the parser.", "Question waiting", "Question waiting"]);
+	expect(show.mock.calls.map((c) => c[0])).toEqual(["Finished.", "Finished.", "Finished.", "Fixed the parser.", "Question waiting", "Question waiting"]);
 });
 
 test("the notification tag is the payload's tag, else the session, else pi-web", async () => {
