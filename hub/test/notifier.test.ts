@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Dialog, PushPayload, Snapshot, WatchQuery } from "../../shared/src/protocol.ts";
-import { Notifier, shortTitle } from "../src/notifier.ts";
+import { Notifier } from "../src/notifier.ts";
 import type { TurnOutcome } from "../src/turns.ts";
 import { dialogQueryId } from "../src/watch.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
@@ -42,44 +42,28 @@ const select: Dialog = { id: "d2", method: "select", title: "Which branch?", opt
 const piQuery: WatchQuery = { id: "dialog:s-1:d1", source: "pi", sessionId: "s-1", label: "pi · fix", text: "Run tests?", options: ["yes", "no"], createdAt: 1 };
 const ringQuery: WatchQuery = { id: "rp:1", source: "ring-profile", sessionId: null, label: "ring · follow-up", text: "How did you sleep?", options: [], createdAt: 1 };
 
-test("shortTitle joins project and event, cutting the project to fit 24 characters", () => {
-	assert.equal(shortTitle("pi-web", "approve?"), "pi-web · approve?");
-	const long = shortTitle("ring-profile-experiments-2026", "done");
-	assert.ok(long.length <= 24, long);
-	assert.ok(long.endsWith(" · done"), long);
-	assert.ok(long.includes("…"), long);
-	assert.equal(shortTitle("", "error"), "pi · error");
-});
-
-test("finished with a TL;DR: the agent's title and summary", async () => {
+test("finished with a TL;DR: the summary alone, no title", async () => {
 	const t = setup();
 	await t.n.turn(finished("Fixed the upload limit.\n\nTL;DR [413 fixed]: Notes 413 fixed."), snap());
-	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "413 fixed", kind: "finished", body: "Notes 413 fixed." }]);
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", kind: "finished", body: "Notes 413 fixed." }]);
 });
 
-test("finished without a TL;DR: '<project> · done' and the clipped reply", async () => {
+test("finished without a TL;DR: the clipped reply", async () => {
 	const t = setup();
 	await t.n.turn(finished("y".repeat(300)), snap("s-1", "/work/proj"));
 	assert.equal(t.pushed.length, 1);
-	assert.equal(t.pushed[0].title, "proj · done");
 	assert.equal(t.pushed[0].kind, "finished");
 	assert.equal(t.pushed[0].body, `${"y".repeat(159)}…`);
+	assert.ok(!("title" in t.pushed[0]));
 });
 
-test("a TL;DR title over 24 characters is cut to 24", async () => {
-	const t = setup();
-	await t.n.turn(finished(`TL;DR [${"t".repeat(40)}]: short.`), snap());
-	assert.ok(t.pushed[0].title.length <= 24);
-	assert.ok(t.pushed[0].title.startsWith("tttt"));
-});
-
-test("dialog: confirm says approve?, select says question; body is the dialog message", async () => {
+test("dialog: body is the dialog message, no title", async () => {
 	const t = setup();
 	await t.n.dialog("s-1", confirm, snap("s-1", "/work/x", [confirm]));
 	await t.n.dialog("s-1", select, snap("s-1", "/work/x", [confirm, select]));
 	assert.deepEqual(t.pushed, [
-		{ sessionId: "s-1", title: "x · approve?", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Run tests?\nnpm test" },
-		{ sessionId: "s-1", title: "x · question", kind: "needs_you", tag: dialogQueryId("s-1", select), body: "Which branch?" },
+		{ sessionId: "s-1", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Run tests?\nnpm test" },
+		{ sessionId: "s-1", kind: "needs_you", tag: dialogQueryId("s-1", select), body: "Which branch?" },
 	]);
 });
 
@@ -110,7 +94,7 @@ test("a dialog raised while its session is viewed is held, then pushed when view
 	assert.deepEqual(t.pushed.map((p) => p.sessionId), ["s-2"]);
 	viewed = false;
 	await t.n.viewingEnded("s-1");
-	assert.deepEqual(t.pushed.map((p) => p.title), ["y · question", "x · approve?"]);
+	assert.deepEqual(t.pushed.map((p) => p.body), ["Which branch?", "Run tests?\nnpm test"]);
 	assert.deepEqual(t.delivered, [dialogQueryId("s-2", select), dialogQueryId("s-1", confirm)]);
 	await t.n.viewingEnded("s-1"); // held ones are gone, pushed or dropped
 	assert.equal(t.pushed.length, 2);
@@ -123,10 +107,10 @@ test("turn with needs_you sends nothing (dialogs alert through dialog())", async
 	assert.deepEqual(t.delivered, []);
 });
 
-test("error: '<project> · error' with the error text", async () => {
+test("error: the error text", async () => {
 	const t = setup();
 	await t.n.turn({ sessionId: "s-1", kind: "error", messageIndex: 1, text: "model unreachable" }, snap());
-	assert.deepEqual(t.pushed, [{ sessionId: "s-1", title: "x · error", kind: "error", body: "model unreachable" }]);
+	assert.deepEqual(t.pushed, [{ sessionId: "s-1", kind: "error", body: "model unreachable" }]);
 });
 
 test("a session being viewed gets no push; another session still does", async () => {
@@ -139,7 +123,7 @@ test("a session being viewed gets no push; another session still does", async ()
 test("a ring-profile query pushes its text and is marked delivered, whatever is being viewed", async () => {
 	const t = setup({ viewing: () => true });
 	await t.n.query(ringQuery);
-	assert.deepEqual(t.pushed, [{ sessionId: "", title: "ring · question", kind: "query", tag: "rp:1", body: "How did you sleep?" }]);
+	assert.deepEqual(t.pushed, [{ sessionId: "", kind: "query", tag: "rp:1", body: "How did you sleep?" }]);
 	assert.deepEqual(t.delivered, ["rp:1"]);
 });
 
@@ -168,11 +152,10 @@ test("ring miss and answered receipts", async () => {
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "yes" });
 	await t.n.ringAlert({ kind: "answered", query: piQuery, option: "a very long option text indeed" });
 	assert.deepEqual(t.pushed.slice(0, 2), [
-		{ sessionId: "s-1", title: "Didn't catch that", kind: "query", tag: piQuery.id, body: "pi · fix: yes, no" },
-		{ sessionId: "s-1", title: "Answered: yes", kind: "query", tag: piQuery.id, body: "pi · fix" },
+		{ sessionId: "s-1", kind: "query", tag: piQuery.id, body: "Didn't catch that. pi · fix: yes, no" },
+		{ sessionId: "s-1", kind: "query", tag: piQuery.id, body: "Answered yes: pi · fix" },
 	]);
-	assert.ok(t.pushed[2].title.length <= 24);
-	assert.ok(t.pushed[2].title.startsWith("Answered: a very"));
+	assert.equal(t.pushed[2].body, "Answered a very long option text indeed: pi · fix");
 });
 
 test("a throwing push never throws out", async () => {
@@ -192,7 +175,7 @@ test("a pending dialog gets one 'waiting' push after 15 minutes", async () => {
 	t.timers[0].fn();
 	await new Promise((r) => setImmediate(r));
 	assert.equal(t.pushed.length, 2);
-	assert.deepEqual(t.pushed[1], { sessionId: "s-1", title: "x · waiting", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Still waiting: Run tests?\nnpm test" });
+	assert.deepEqual(t.pushed[1], { sessionId: "s-1", kind: "needs_you", tag: dialogQueryId("s-1", confirm), body: "Still waiting: Run tests?\nnpm test" });
 });
 
 test("a dialog resolved before the timer sends no reminder", async () => {
@@ -223,13 +206,13 @@ test("the same dialog pushed again schedules no second timer", async () => {
 	assert.equal(t.timers.length, 1);
 });
 
-test("a ring-profile query gets 'ring · waiting' too", async () => {
+test("a ring-profile query gets a 'Still waiting' reminder too", async () => {
 	const t = setup();
 	await t.n.query(ringQuery);
 	assert.equal(t.timers.length, 1);
 	t.timers[0].fn();
 	await new Promise((r) => setImmediate(r));
-	assert.deepEqual(t.pushed[1], { sessionId: "", title: "ring · waiting", kind: "query", tag: "rp:1", body: "Still waiting: How did you sleep?" });
+	assert.deepEqual(t.pushed[1], { sessionId: "", kind: "query", tag: "rp:1", body: "Still waiting: How did you sleep?" });
 });
 
 test("no timer when the push did not go out", async () => {
@@ -289,7 +272,7 @@ test("viewing ends and stays ended for 5 s: the held dialog is pushed", async ()
 	assert.deepEqual(t.pushed, []);
 	grace(t)[0].fn();
 	await new Promise((r) => setImmediate(r));
-	assert.deepEqual((t.pushed as PushPayload[]).map((p) => p.title), ["x · approve?"]);
+	assert.deepEqual((t.pushed as PushPayload[]).map((p) => p.body), ["Run tests?\nnpm test"]);
 });
 
 test("false, true, false: only the last grace period flushes", async () => {

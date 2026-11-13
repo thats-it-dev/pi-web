@@ -55,7 +55,8 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith(fromNetwork().catch(() => caches.match(req).then((hit) => hit || Response.error())));
 });
 
-// Push (spec §5.5). The payload is { sessionId, title, kind } and optionally a short body line and a tag (same tag = replaces the earlier notification).
+// Push (spec §5.5). The payload is { sessionId, kind } and optionally a short body line and a tag (same tag = replaces the earlier notification).
+// The notification has no title: the OS shows the app name, then the body.
 const PUSH_BODY = { finished: "Finished.", needs_you: "Needs you.", error: "Stopped with an error.", query: "Question waiting" };
 
 self.addEventListener("push", (event) => {
@@ -64,10 +65,9 @@ self.addEventListener("push", (event) => {
 		p = (event.data && event.data.json()) || {};
 	} catch {}
 	const sessionId = typeof p.sessionId === "string" ? p.sessionId : "";
-	const title = typeof p.title === "string" && p.title ? p.title : "pi";
 	const stock = typeof p.kind === "string" && Object.hasOwn(PUSH_BODY, p.kind) ? PUSH_BODY[p.kind] : "Something happened.";
 	const body = typeof p.body === "string" && p.body ? p.body : stock;
-	event.waitUntil(self.registration.showNotification(title, { body, tag: (typeof p.tag === "string" && p.tag) || sessionId || "pi-web", renotify: true, data: { sessionId }, icon: "/icons/icon-192.png" }));
+	event.waitUntil(self.registration.showNotification("", { body, tag: (typeof p.tag === "string" && p.tag) || sessionId || "pi-web", renotify: true, data: { sessionId }, icon: "/icons/icon-192.png" }));
 });
 
 // A tap opens the session: an open window is told where to go (and focused), else a new one opens there.

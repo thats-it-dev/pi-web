@@ -17,14 +17,12 @@ const ACTIVITY = { working: "working", idle: "idle", waiting: "waiting on you" }
 
 const liveTodos = (todos: Todo[]) => todos.filter((t) => t.status !== "deleted");
 
+// Running subagents are counted; anything else in the panel (to-dos included) is a plain dot.
 export function badgeLabel(view: ProgressView): string | null {
-	if (view.todos) {
-		const list = liveTodos(view.todos);
-		if (list.length) return `${list.filter((t) => t.status === "completed").length}/${list.length}`;
-	}
 	const running = view.subagents.recent.concat(view.subagents.earlier).filter((c) => c.state === "running").length;
 	if (running) return `◐ ${running}`;
-	return view.goal || view.plan || view.pr || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
+	const todos = view.todos ? liveTodos(view.todos).length : 0;
+	return view.goal || view.plan || view.pr || todos || view.subagents.recent.length || view.subagents.earlier.length ? "•" : null;
 }
 
 // At most `max` items, centred on `focus`; returns the slice and how many were left out.

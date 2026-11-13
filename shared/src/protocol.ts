@@ -293,9 +293,9 @@ export interface UpdateResult {
 // Web Push (spec §5.5). The payload names the session, why, and optionally a line of detail.
 export type PushKind = "finished" | "needs_you" | "error" | "query";
 
+// No title: the notification shows the app name and the body only.
 export interface PushPayload {
 	sessionId: string;
-	title: string;
 	kind: PushKind;
 	tag?: string; // notifications with the same tag replace each other; absent means one per session
 	body?: string; // a short line of detail, clipped to 160 characters; absent means the kind's stock text

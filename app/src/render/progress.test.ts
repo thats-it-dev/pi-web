@@ -107,7 +107,9 @@ describe("badgeLabel", () => {
 		expect(badgeLabel({ ...empty(), subagents: { recent: [child({ state: "running" }), child({ key: "x", state: "running" }), child({ key: "y" })], earlier: [] } })).toBe("◐ 2");
 		expect(badgeLabel({ ...empty(), subagents: { recent: [child()], earlier: [] } })).toBe("•");
 		expect(badgeLabel({ ...empty(), subagents: { recent: [], earlier: [child({ state: "failed" })] } })).toBe("•");
-		expect(badgeLabel({ ...empty(), todos: [todo(1, "completed"), todo(2, "pending"), todo(3, "deleted")] })).toBe("1/2");
+		expect(badgeLabel({ ...empty(), todos: [todo(1, "completed"), todo(2, "pending"), todo(3, "deleted")] })).toBe("•"); // no count
+		expect(badgeLabel({ ...empty(), todos: [todo(3, "deleted")] })).toBeNull();
+		expect(badgeLabel({ ...empty(), todos: [todo(1, "pending")], subagents: { recent: [child({ state: "running" })], earlier: [] } })).toBe("◐ 1");
 	});
 
 	it("a waiting goal gets a waiting pill next to its status", () => {

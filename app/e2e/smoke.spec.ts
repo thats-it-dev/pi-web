@@ -309,7 +309,7 @@ test("phone: a badge opens the progress drawer; Escape, the dimmed area and Back
 	await expect(drawer).toContainText("to-dos");
 	await expect(drawer).not.toBeInViewport();
 	const badge = page.getByRole("button", { name: "Progress" });
-	await expect(badge).toHaveText("3/3");
+	await expect(badge).toHaveText("•"); // to-dos get the plain dot, not a count
 	await badge.click();
 	await expect(drawer).toBeInViewport();
 	await page.keyboard.press("Escape");

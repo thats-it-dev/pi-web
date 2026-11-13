@@ -67,7 +67,7 @@ test("send posts an encrypted, VAPID-signed message to every subscription", asyn
 	push.subscribe(sub("/one"));
 	push.subscribe(sub("/two"));
 	seen.length = 0;
-	await push.send({ sessionId: "s-1", title: "fix the parser", kind: "finished" });
+	await push.send({ sessionId: "s-1", kind: "finished" });
 	assert.deepEqual(seen.map((r) => r.path).sort(), ["/one", "/two"]);
 	for (const r of seen) {
 		assert.equal(r.headers["content-encoding"], "aes128gcm");
@@ -86,7 +86,7 @@ test("a 404 or 410 removes the subscription; other failures keep it and log", as
 	statuses.set("/gone", 410);
 	statuses.set("/missing", 404);
 	statuses.set("/broken", 500);
-	await push.send({ sessionId: "s", title: "t", kind: "error" });
+	await push.send({ sessionId: "s", kind: "error" });
 	assert.deepEqual(push.list().map((s) => s.endpoint).sort(), [`${base}/broken`, `${base}/fine`, "http://127.0.0.1:1/closed"].sort());
 	assert.ok(logs.some((l) => l.includes("500")));
 	assert.ok(logs.some((l) => l.includes("127.0.0.1:1")));
@@ -95,7 +95,7 @@ test("a 404 or 410 removes the subscription; other failures keep it and log", as
 test("send with no subscriptions does nothing", async () => {
 	const { push } = store();
 	seen.length = 0;
-	await push.send({ sessionId: "s", title: "t", kind: "needs_you" });
+	await push.send({ sessionId: "s", kind: "needs_you" });
 	assert.equal(seen.length, 0);
 });
 
@@ -129,10 +129,10 @@ test("isSubscription accepts browser subscriptions and nothing else", () => {
 
 test("send says whether any subscription answered 2xx", async () => {
 	const { push } = store();
-	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), false);
+	assert.equal(await push.send({ sessionId: "s", kind: "query" }), false);
 	push.subscribe(sub("/bad2"));
 	statuses.set("/bad2", 500);
-	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), false);
+	assert.equal(await push.send({ sessionId: "s", kind: "query" }), false);
 	push.subscribe(sub("/ok2"));
-	assert.equal(await push.send({ sessionId: "s", title: "t", kind: "query" }), true);
+	assert.equal(await push.send({ sessionId: "s", kind: "query" }), true);
 });

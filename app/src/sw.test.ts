@@ -22,10 +22,10 @@ async function dispatch(handler: (e: any) => void, event: Record<string, unknown
 	await done;
 }
 
-test("a push shows a notification named for the session", async () => {
+test("a push shows an untitled notification tagged with the session", async () => {
 	const { handlers, self } = loadWorker();
-	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "s-1", title: "fix the parser", kind: "needs_you" }) } });
-	expect(self.registration.showNotification).toHaveBeenCalledWith("fix the parser", {
+	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "s-1", title: "ignored", kind: "needs_you" }) } });
+	expect(self.registration.showNotification).toHaveBeenCalledWith("", {
 		body: "Needs you.",
 		tag: "s-1",
 		renotify: true,
@@ -37,9 +37,9 @@ test("a push shows a notification named for the session", async () => {
 test("each kind has its own text, and a bad payload still shows something", async () => {
 	const { handlers, self } = loadWorker();
 	const show = self.registration.showNotification;
-	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", title: "t", kind: "finished" }) } });
-	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", title: "t", kind: "error" }) } });
-	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", title: "t", kind: "toString" }) } });
+	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", kind: "finished" }) } });
+	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", kind: "error" }) } });
+	await dispatch(handlers.push, { data: { json: () => ({ sessionId: "a", kind: "toString" }) } });
 	await dispatch(handlers.push, {
 		data: {
 			json: () => {
@@ -49,7 +49,7 @@ test("each kind has its own text, and a bad payload still shows something", asyn
 	});
 	await dispatch(handlers.push, { data: null });
 	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Stopped with an error.", "Something happened.", "Something happened.", "Something happened."]);
-	expect(show.mock.calls.at(-1)?.[0]).toBe("pi");
+	expect(show.mock.calls.every((c) => c[0] === "")).toBe(true);
 	expect(show.mock.calls.at(-1)?.[1].tag).toBe("pi-web");
 });
 
@@ -76,12 +76,12 @@ test("sw falls back to PUSH_BODY without body, and shows body when it is a non-e
 	const { handlers, self } = loadWorker();
 	const show = self.registration.showNotification;
 	const push = (p: object) => dispatch(handlers.push, { data: { json: () => p } });
-	await push({ sessionId: "a", title: "t", kind: "finished" });
-	await push({ sessionId: "a", title: "t", kind: "finished", body: "" });
-	await push({ sessionId: "a", title: "t", kind: "finished", body: 5 });
-	await push({ sessionId: "a", title: "t", kind: "finished", body: "Fixed the parser." });
-	await push({ sessionId: "", title: "ring · follow-up", kind: "query" });
-	await push({ sessionId: "", title: "ring · follow-up", kind: "query", body: "Question waiting" });
+	await push({ sessionId: "a", kind: "finished" });
+	await push({ sessionId: "a", kind: "finished", body: "" });
+	await push({ sessionId: "a", kind: "finished", body: 5 });
+	await push({ sessionId: "a", kind: "finished", body: "Fixed the parser." });
+	await push({ sessionId: "", kind: "query" });
+	await push({ sessionId: "", kind: "query", body: "Question waiting" });
 	expect(show.mock.calls.map((c) => c[1].body)).toEqual(["Finished.", "Finished.", "Finished.", "Fixed the parser.", "Question waiting", "Question waiting"]);
 });
 
@@ -89,9 +89,9 @@ test("the notification tag is the payload's tag, else the session, else pi-web",
 	const { handlers, self } = loadWorker();
 	const show = self.registration.showNotification;
 	const push = (p: object) => dispatch(handlers.push, { data: { json: () => p } });
-	await push({ sessionId: "s-1", title: "t", kind: "needs_you", tag: "dialog:s-1:d1" });
-	await push({ sessionId: "s-1", title: "t", kind: "needs_you", tag: "" });
-	await push({ sessionId: "", title: "t", kind: "query", tag: "rp:1" });
-	await push({ sessionId: "", title: "t", kind: "query" });
+	await push({ sessionId: "s-1", kind: "needs_you", tag: "dialog:s-1:d1" });
+	await push({ sessionId: "s-1", kind: "needs_you", tag: "" });
+	await push({ sessionId: "", kind: "query", tag: "rp:1" });
+	await push({ sessionId: "", kind: "query" });
 	expect(show.mock.calls.map((c) => c[1].tag)).toEqual(["dialog:s-1:d1", "s-1", "rp:1", "pi-web"]);
 });
