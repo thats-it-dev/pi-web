@@ -1,6 +1,6 @@
 # File attachments in pi-web
 
-Date: 2026-11-13. Status: draft, for Michael's approval.
+Date: 2026-11-13. Status: approved by Michael in chat (2026-11-13); built on feat/file-attachments.
 
 ## Why
 
