@@ -3,6 +3,7 @@ import { sharedStyles, toast } from "@thatsit/kit";
 import type { DefaultsInfo, FileInput, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
 import { routeAttachments } from "../lib/files.ts";
+import { DropTarget } from "../lib/drop.ts";
 import { type Draft, getDraft, handOff, resetDraft, updateDraft } from "../lib/draft.ts";
 import { abbreviateCwd } from "../lib/format.ts";
 import { hrefFor } from "../lib/route.ts";
@@ -30,6 +31,7 @@ export class PiNewChat extends LitElement {
 		sheet: { state: true },
 		menuStep: { state: true },
 		busy: { state: true },
+		dragOver: { state: true },
 	};
 	declare api: HubApi;
 	declare home: string;
@@ -39,6 +41,7 @@ export class PiNewChat extends LitElement {
 	declare sheet: Sheet | null;
 	declare menuStep: MenuStep;
 	declare busy: boolean;
+	declare dragOver: boolean; // a file drag is over the view: show the drop overlay
 
 	private sent = false; // the draft became a session: nothing left to keep
 	private openSheetKey: string | null = null; // what the open sheet shows, for focus handling
@@ -49,7 +52,8 @@ export class PiNewChat extends LitElement {
 		sheetStyles,
 		chatMenuStyles,
 		css`
-			:host { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+			:host { display: flex; flex-direction: column; min-height: 0; height: 100%; position: relative; }
+			.drop { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; pointer-events: none; border: 2px dashed var(--primary); border-radius: var(--radius); background: color-mix(in srgb, var(--primary), transparent 88%); font-family: var(--font-display); letter-spacing: 0.06em; color: var(--primary); }
 			.empty { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; }
 			.empty p { font-family: var(--font-display); letter-spacing: 0.06em; font-size: 1.5rem; color: var(--text-secondary); margin: 0; text-align: center; }
 		`,
@@ -64,10 +68,12 @@ export class PiNewChat extends LitElement {
 		this.sheet = null;
 		this.menuStep = "root";
 		this.busy = false;
+		this.dragOver = false;
 	}
 
 	connectedCallback(): void {
 		super.connectedCallback();
+		this.listenForDrops();
 		this.api
 			.defaults()
 			.then((d) => (this.defaults = d))
@@ -84,8 +90,41 @@ export class PiNewChat extends LitElement {
 	disconnectedCallback(): void {
 		const c = this.composer;
 		if (!this.sent && c) updateDraft({ text: c.text, ...routeAttachments(c.attachments, c.canImages) }); // kept for when the user comes back
+		this.stopListeningForDrops();
 		super.disconnectedCallback();
 	}
+
+	// ---- dropping files ---------------------------------------------------------
+
+	private dropTarget = new DropTarget();
+	private onDragEnter = (e: DragEvent) => {
+		this.dropTarget.enter(e);
+		this.dragOver = this.dropTarget.over;
+	};
+	private onDragOver = (e: DragEvent) => e.preventDefault(); // or the browser opens the file
+	private onDragLeave = () => {
+		this.dropTarget.leave();
+		this.dragOver = this.dropTarget.over;
+	};
+	private onDrop = (e: DragEvent) => {
+		e.preventDefault();
+		const files = this.dropTarget.drop(e);
+		this.dragOver = false;
+		if (files.length) void this.composer?.addFiles(files);
+	};
+	private listenForDrops(): void {
+		this.addEventListener("dragenter", this.onDragEnter);
+		this.addEventListener("dragover", this.onDragOver);
+		this.addEventListener("dragleave", this.onDragLeave);
+		this.addEventListener("drop", this.onDrop);
+	}
+	private stopListeningForDrops(): void {
+		this.removeEventListener("dragenter", this.onDragEnter);
+		this.removeEventListener("dragover", this.onDragOver);
+		this.removeEventListener("dragleave", this.onDragLeave);
+		this.removeEventListener("drop", this.onDrop);
+	}
+
 
 	firstUpdated(): void {
 		const d = getDraft();
@@ -231,6 +270,7 @@ export class PiNewChat extends LitElement {
 		const d = getDraft();
 		const { model, thinking } = this.choice;
 		return html`
+			${this.dragOver ? html`<div class="drop" aria-hidden="true">drop to attach</div>` : nothing}
 			<pi-header .draft=${{ contextWindow: model?.contextWindow ?? 0 }}></pi-header>
 			<div class="empty"><p>what are we doing?</p></div>
 			<pi-composer

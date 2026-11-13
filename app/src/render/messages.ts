@@ -3,6 +3,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AgentMessage, ContentBlock, Conversation, ToolRun } from "../../../shared/src/protocol.ts";
 import { blocksText, formatTokens, parseArgsRaw, summarizeToolArgs, truncateOutput, wordCount } from "../lib/format.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
+import { parseAttachments } from "../../../shared/src/attachments.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import { renderMarkdown, renderMarkdownUncached } from "../lib/markdown.ts";
 
@@ -59,11 +60,18 @@ function renderMessage(m: AgentMessage, results: Results, tools: Record<string, 
 	}
 }
 
+// Lucide icon (ISC): paperclip.
+const CLIP = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
+
 function renderUser(m: AgentMessage, loader: ImageLoader | null) {
 	const images = imagesOf(m.content);
-	return html`<div class="user">${blocksText(m.content)}${
-		images.length ? html`<div class="imgs">${thumbs(images, loader, "attached image")}</div>` : nothing
-	}</div>`;
+	// A message that carried files: the hub's attachments block becomes chips, and its inlined contents stay out of the bubble.
+	const attached = parseAttachments(blocksText(m.content));
+	return html`<div class="user">${attached ? attached.text : blocksText(m.content)}${
+		attached?.files.length
+			? html`<div class="files">${attached.files.map((f) => html`<span class="chip file" title=${f.path}>${CLIP}<span class="name">${f.name}</span><span class="size">${f.sizeLabel}</span></span>`)}</div>`
+			: nothing
+	}${images.length ? html`<div class="imgs">${thumbs(images, loader, "attached image")}</div>` : nothing}</div>`;
 }
 
 function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null) {
@@ -176,6 +184,11 @@ export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
+	.files { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; font-family: var(--font); white-space: normal; }
+	.chip.file { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 8px; font-size: 0.78rem; max-width: 100%; }
+	.chip.file svg { width: 14px; height: 14px; flex: none; color: var(--text-secondary); }
+	.chip.file .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+	.chip.file .size { color: var(--text-muted); flex: none; }
 	.imgs.thumbs { justify-content: flex-start; padding: 0 9px 8px; }
 	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
 	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */

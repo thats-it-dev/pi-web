@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
+import { formatAttachments } from "../../../shared/src/attachments.ts";
 
 // Count every real markdown parse by wrapping marked's parser.
 const parses = vi.hoisted(() => ({ n: 0 }));
@@ -97,6 +98,23 @@ function convWith(calls: unknown[], result?: Record<string, unknown>, extra: Age
 	if (result) msgs.push({ role: "toolResult", toolCallId: "c1", timestamp: 2, ...result } as AgentMessage);
 	return createConversation(msgs);
 }
+
+describe("attachments in the conversation", () => {
+	const notes = { name: "notes.md", size: 3174, path: "/data/uploads/s1/notes.md", inline: "SECRET\n" };
+	it("a user message with an attachments block renders chips, hides the inlined contents and keeps the text", () => {
+		const out = flat(renderConversation(createConversation([{ role: "user", content: formatAttachments("look", [notes]), timestamp: 1 }])));
+		expect(out).toContain("look");
+		expect(out).toContain("notes.md");
+		expect(out).toContain("3.1 KB");
+		expect(out).not.toContain("SECRET");
+		expect(out).not.toContain("<pi-web");
+	});
+
+	it("a user message with an unterminated block renders as plain text", () => {
+		const out = flat(renderConversation(createConversation([{ role: "user", content: "typed by hand\n\n<pi-web-attachments>\n- x (1 B) → /x", timestamp: 1 }])));
+		expect(out).toContain("<pi-web-attachments>");
+	});
+});
 
 describe("images in the conversation", () => {
 	it("a show_image result renders as a figure, not a collapsed card", () => {

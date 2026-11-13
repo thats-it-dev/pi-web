@@ -6,6 +6,7 @@ import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
 import { takeHandoff } from "../lib/draft.ts";
+import { DropTarget } from "../lib/drop.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
 import type { ListStore } from "../lib/list-store.ts";
@@ -47,6 +48,7 @@ export class PiSession extends LitElement {
 		menuStep: { state: true },
 		forkPoints: { state: true },
 		tucked: { state: true },
+		dragOver: { state: true },
 	};
 	declare api: HubApi;
 	declare list: ListStore | null;
@@ -58,6 +60,7 @@ export class PiSession extends LitElement {
 	declare menuStep: MenuStep;
 	declare forkPoints: ForkPoint[];
 	declare tucked: boolean;
+	declare dragOver: boolean; // a file drag is over the view: show the drop overlay
 
 	store: SessionStore | null = null;
 	progress: ProgressStore | null = null;
@@ -81,7 +84,8 @@ export class PiSession extends LitElement {
 		chatMenuStyles,
 		markdownStyles,
 		css`
-			:host { display: flex; min-height: 0; height: 100%; }
+			:host { display: flex; min-height: 0; height: 100%; position: relative; }
+			.drop { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; pointer-events: none; border: 2px dashed var(--primary); border-radius: var(--radius); background: color-mix(in srgb, var(--primary), transparent 88%); font-family: var(--font-display); letter-spacing: 0.06em; color: var(--primary); }
 			.chat > [hidden] { display: none !important; }
 			.chat { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 			.plan-doc { font-size: 0.9rem; }
@@ -103,6 +107,7 @@ export class PiSession extends LitElement {
 		this.menuStep = "root";
 		this.forkPoints = [];
 		this.tucked = false;
+		this.dragOver = false;
 	}
 
 	connectedCallback(): void {
@@ -110,6 +115,7 @@ export class PiSession extends LitElement {
 		this.addEventListener("touchstart", this.onTouchStart, { passive: true });
 		this.addEventListener("touchend", this.onTouchEnd, { passive: true });
 		this.addEventListener("touchcancel", this.onTouchCancel, { passive: true });
+		this.listenForDrops();
 		this.syncTicker();
 	}
 
@@ -124,8 +130,41 @@ export class PiSession extends LitElement {
 		this.removeEventListener("touchstart", this.onTouchStart);
 		this.removeEventListener("touchend", this.onTouchEnd);
 		this.removeEventListener("touchcancel", this.onTouchCancel);
+		this.stopListeningForDrops();
 		super.disconnectedCallback();
 	}
+
+	// ---- dropping files ---------------------------------------------------------
+
+	private dropTarget = new DropTarget();
+	private onDragEnter = (e: DragEvent) => {
+		this.dropTarget.enter(e);
+		this.dragOver = this.dropTarget.over;
+	};
+	private onDragOver = (e: DragEvent) => e.preventDefault(); // or the browser opens the file
+	private onDragLeave = () => {
+		this.dropTarget.leave();
+		this.dragOver = this.dropTarget.over;
+	};
+	private onDrop = (e: DragEvent) => {
+		e.preventDefault();
+		const files = this.dropTarget.drop(e);
+		this.dragOver = false;
+		if (files.length) void this.composer?.addFiles(files);
+	};
+	private listenForDrops(): void {
+		this.addEventListener("dragenter", this.onDragEnter);
+		this.addEventListener("dragover", this.onDragOver);
+		this.addEventListener("dragleave", this.onDragLeave);
+		this.addEventListener("drop", this.onDrop);
+	}
+	private stopListeningForDrops(): void {
+		this.removeEventListener("dragenter", this.onDragEnter);
+		this.removeEventListener("dragover", this.onDragOver);
+		this.removeEventListener("dragleave", this.onDragLeave);
+		this.removeEventListener("drop", this.onDrop);
+	}
+
 
 	// ---- lifecycle ------------------------------------------------------------
 
@@ -138,6 +177,7 @@ export class PiSession extends LitElement {
 		this.sheet = null;
 		this.atBottom = true;
 		this.tucked = false;
+		this.dragOver = false;
 		const progress = new ProgressStore(this.api, store);
 		this.progress = progress;
 		progress.addEventListener("change", this.onStoreChange);
@@ -523,6 +563,7 @@ export class PiSession extends LitElement {
 		const statuses = [cwd ? abbreviateCwd(cwd, this.home) : null, ...Object.values(snap?.statuses ?? {})].filter((x): x is string => Boolean(x));
 		const dialog = s.dialogs[0];
 		return html`
+			${this.dragOver ? html`<div class="drop" aria-hidden="true">drop to attach</div>` : nothing}
 			<div class="chat">
 				<!-- The chat stays mounted under a thread (hidden, so out of the tab order): the draft and scroll position survive. -->
 				${this.childKey
