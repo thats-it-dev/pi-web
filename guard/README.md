@@ -117,6 +117,13 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
 - On that bash call the guard snapshots the tree; on its result it appends the picture itself as an image block,
   so the model sees the screen in the same turn, plus `[pi-guard] screen seen <dir> at <snapshot>`. A failed
   command, a `RESULT` without a file, or a picture over 2 MB leaves no mark.
+- Between the picture and the mark come the things to compare it with: `docs/spec.md` as written (not the
+  starter; cut at 8000 characters) and the last two pictures Michael sent on the branch, each with the words
+  they came with (a reference look, or the broken screen he saw), then the comparison the orchestrator owes:
+  what differs in elements, order and side, colours by role, labels and numbers. The pictures come from the
+  session branch, so they survive compaction. Why: on 2026-11-13 22:08 the orchestrator checked a screenshot
+  note by note, correctly, and passed a board with the nut on the wrong side and no degree numbers, because
+  "looks right" was judged against its own idea and not the spec or the reference Michael had sent.
 - The gate passes while no UI file differs between the last pictured snapshot and the working tree; briefs, docs
   and tests may change freely. A UI edit after the look needs a new picture.
 

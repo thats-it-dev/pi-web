@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenMark, screenResult, screenshotDir, uiFile, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -152,7 +152,23 @@ export const MAX_PICTURE_BYTES = 2_000_000;
 
 /** The content a finished `screenshot` command's result gets: the picture itself, so the model sees the screen in the
  *  same turn, and the mark that makes the gate pass. A missing or oversized file gets a note and no mark. */
-export function screenContent(file: string, dir: string, snap: string): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+export const MAX_SPEC_CHARS = 8000;
+
+/** The app's spec as written, for the screen comparison; undefined while it is missing or still the starter. */
+export function specText(dir: string): string | undefined {
+	let text: string;
+	try {
+		text = readFileSync(join(dir, "docs", "spec.md"), "utf8");
+	} catch {
+		return undefined;
+	}
+	if (!text.trim() || text.includes("starter spec:")) return undefined;
+	return text.length > MAX_SPEC_CHARS ? `${text.slice(0, MAX_SPEC_CHARS)}\n[cut here; read docs/spec.md for the rest]` : text;
+}
+
+/** The blocks appended to a screenshot command's result: the picture, the spec and Michael's pictures from the branch
+ *  to compare it with, the comparison owed, and the mark. */
+export function screenContent(file: string, dir: string, snap: string, branch: Iterable<unknown> = []): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
 	let bytes: Buffer;
 	try {
 		bytes = readFileSync(file);
@@ -160,8 +176,11 @@ export function screenContent(file: string, dir: string, snap: string): ({ type:
 		return [{ type: "text", text: `[pi-guard] the picture ${file} could not be read (${(err as Error).message.split("\n")[0]}); run the screenshot command again.` }];
 	}
 	if (bytes.length > MAX_PICTURE_BYTES) return [{ type: "text", text: `[pi-guard] the picture is ${(bytes.length / 1_000_000).toFixed(1)} MB, too large to show; picture one screen with --path.` }];
+	// A picture over the limit is left out rather than failing the look; base64 is 4/3 of the bytes.
+	const pictures = userPictures(branch).filter((p) => p.data.length <= (MAX_PICTURE_BYTES * 4) / 3);
 	return [
 		{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
+		...screenCompareContent(specText(dir), pictures),
 		{ type: "text", text: screenMark(dir, snap) },
 	];
 }
@@ -290,7 +309,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	});
 
 	// Mark a finished scoped review in its result, so the PR gate and the next review's base survive a restart.
-	pi.on("tool_result", (event) => {
+	pi.on("tool_result", (event, ctx) => {
 		if (event.toolName === "ask_user_question") {
 			const text = partialAnswers(event.input, event.details);
 			return text ? { content: [{ type: "text", text }], details: event.details } : undefined;
@@ -301,7 +320,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			if (event.isError) return undefined;
 			const file = screenResult((event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n"));
 			if (!file) return undefined;
-			return { content: [...(event.content ?? []), ...screenContent(file, screen.dir, screen.snap)], structuredContent: event.structuredContent };
+			// The branch, not the context: Michael's pictures stay on it after a compaction.
+			const branch = [...(ctx?.sessionManager?.getBranch() ?? [])];
+			return { content: [...(event.content ?? []), ...screenContent(file, screen.dir, screen.snap, branch)], structuredContent: event.structuredContent };
 		}
 		const scoped = reviews.get(event.toolCallId);
 		if (!scoped) return undefined;

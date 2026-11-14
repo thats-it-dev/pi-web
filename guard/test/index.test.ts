@@ -348,8 +348,12 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const png = join(dir, "test-results", "screens", "phone-dark.png");
 	mkdirSync(join(dir, "test-results", "screens"), { recursive: true });
 	writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+	mkdirSync(join(dir, "docs"), { recursive: true });
+	writeFileSync(join(dir, "docs", "spec.md"), "# Spec\n- Nut is drawn on the right edge.\n");
 	const h = load(() => false, { HOME: home });
-	const entries: unknown[] = [...verified(dir)];
+	// Michael's picture on the branch comes back beside the screen, with his words, so the two are compared.
+	const reference = { type: "image", data: Buffer.from("ref").toString("base64"), mimeType: "image/png" };
+	const entries: unknown[] = [msg("user", { content: [{ type: "text", text: "Make it look like this" }, reference] }), ...verified(dir)];
 	const ctx = { cwd: home, sessionManager: { getBranch: () => entries } };
 	const command = `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts screenshot ${dir}`;
 	assert.equal(h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command } }, ctx), undefined, "the command itself is never blocked");
@@ -357,9 +361,13 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const r = h.tool_call({ toolName: "bash", toolCallId: "pr", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.deepEqual(r, { block: true, reason: REASONS.screen }, "no picture yet");
 	const out = h.tool_result(result, ctx);
-	assert.equal(out.content.length, 3);
+	assert.equal(out.content.length, 7, "result, screen, spec, picture label, picture, comparison, mark");
 	assert.deepEqual(out.content[1], { type: "image", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"), mimeType: "image/png" });
-	assert.match(out.content[2].text, /^\[pi-guard\] screen seen /);
+	assert.match(out.content[2].text, /^docs\/spec\.md, what the screen must match:\n\n# Spec\n- Nut is drawn on the right edge\./);
+	assert.equal(out.content[3].text, 'Michael sent this picture with: "Make it look like this"');
+	assert.deepEqual(out.content[4], reference);
+	assert.match(out.content[5].text, /^Compare the screen with docs\/spec\.md, Michael's pictures above .* and write down what differs/);
+	assert.match(out.content[6].text, /^\[pi-guard\] screen seen /);
 	entries.push(msg("toolResult", { toolCallId: "s1", isError: false, content: out.content }));
 	assert.equal(screenUpToDate(dir, entries), true);
 	const r2 = h.tool_call({ toolName: "bash", toolCallId: "pr2", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);

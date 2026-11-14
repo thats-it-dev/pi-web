@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -609,6 +609,43 @@ test("verify and e2e wait while an async worker is still in the app's main check
 	assert.equal(bash(`${app}npm run verify`, busyEnv(revived, { [RUN_A]: "complete", [RUN_B]: "complete" })), undefined);
 	// Without the hook (an older index.ts) nothing changes.
 	assert.equal(bash(`${app}npm run verify`), undefined);
+});
+
+// --- the pictures Michael sent, for the screen comparison ---
+
+test("userPictures: the last two images from user messages on the branch, each with the words it came with", () => {
+	const img = (data: string) => ({ type: "image", data, mimeType: "image/png" });
+	const user = (content: unknown[]) => ({ type: "message", message: { role: "user", content } });
+	const branch = [
+		user([{ type: "text", text: "lets build a guitar app" }]),
+		user([{ type: "text", text: "Make it look more like\n this style" }, img("a")]),
+		{ type: "message", message: { role: "assistant", content: [img("x")] } },
+		{ type: "message", message: { role: "toolResult", content: [img("y")] } },
+		user([img("b"), { type: "text", text: "This is what I'm seeing." }]),
+		user([{ type: "text", text: "two at once" }, img("c"), img("d")]),
+	];
+	assert.deepEqual(userPictures(branch), [
+		{ text: "two at once", data: "c", mimeType: "image/png" },
+		{ text: "two at once", data: "d", mimeType: "image/png" },
+	]);
+	assert.deepEqual(userPictures(branch, 3)[0], { text: "This is what I'm seeing.", data: "b", mimeType: "image/png" });
+	assert.deepEqual(userPictures(branch, 4)[0], { text: "Make it look more like this style", data: "a", mimeType: "image/png" });
+	assert.deepEqual(userPictures([user([{ type: "text", text: "no picture" }])]), []);
+	assert.deepEqual(userPictures([user("a plain string" as unknown as unknown[])]), []);
+});
+
+test("screenCompareContent: spec and pictures when there are any, and always the comparison owed", () => {
+	const none = screenCompareContent(undefined, []);
+	assert.equal(none.length, 1);
+	assert.match((none[0] as { text: string }).text, /^Compare the screen with Michael's request and write down what differs/);
+	const both = screenCompareContent("# Spec\n- rule", [{ text: "like this", data: "a", mimeType: "image/png" }]);
+	assert.deepEqual(
+		both.map((b) => b.type),
+		["text", "text", "image", "text"],
+	);
+	assert.equal((both[0] as { text: string }).text, "docs/spec.md, what the screen must match:\n\n# Spec\n- rule");
+	assert.equal((both[1] as { text: string }).text, 'Michael sent this picture with: "like this"');
+	assert.match((both[3] as { text: string }).text, /docs\/spec\.md, Michael's pictures above \(what he asked for, or what he saw broken\), Michael's request/);
 });
 
 // --- a review without a verdict never counts (keeb run 2026-11-12 22:45: the reviewer's report stayed in its reasoning) ---

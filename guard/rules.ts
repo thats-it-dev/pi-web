@@ -17,7 +17,7 @@ export const REASONS = {
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
-	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light). The picture comes back in the result: compare it with Michael's request and any reference he gave. Missing colours, borders or fills, a shifted grid, overlapping labels or a control that is gone mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When it looks right, go on to the review (or to ship for a first version).`,
+	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light). The picture comes back in the result together with docs/spec.md and the pictures Michael sent: compare them and write down what differs. Missing colours, borders or fills, a shifted grid, overlapping labels, a control that is gone, a side or an order the spec states differently, mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When nothing differs, go on to the review (or to ship for a first version).`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 	worktreeInstall:
@@ -149,6 +149,40 @@ export const screenshotDir = (command: string, cwd: string, home: string): strin
 export const SCREEN_MARK = "[pi-guard] screen seen ";
 export const screenMark = (dir: string, snap: string) => `${SCREEN_MARK}${dir} at ${snap}`;
 const SEEN = /\[pi-guard\] screen seen (\S+) at ([0-9a-f]{7,64})/g;
+
+/** A picture Michael sent on this branch, with the words it came with: a reference the screen is compared against,
+ *  or the broken screen he saw. The branch keeps them through compaction, so the comparison outlives the context. */
+export type UserPicture = { text: string; data: string; mimeType: string };
+export const MAX_USER_PICTURES = 2;
+export function userPictures(branch: Iterable<unknown>, max = MAX_USER_PICTURES): UserPicture[] {
+	const out: UserPicture[] = [];
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "user" || !Array.isArray(e.message.content)) continue;
+		const parts = e.message.content as { type?: string; text?: string; data?: string; mimeType?: string }[];
+		const text = parts.filter((p) => p.type === "text").map((p) => p.text ?? "").join(" ").replace(/\s+/g, " ").trim();
+		for (const p of parts) if (p.type === "image" && p.data) out.push({ text, data: p.data, mimeType: p.mimeType ?? "image/png" });
+	}
+	return out.slice(-max);
+}
+
+/** The blocks that follow the picture in a screenshot result: the spec and Michael's pictures to compare it with, then
+ *  the comparison the orchestrator owes before going on. The fret run of 2026-11-13 22:08 passed a board with the nut on
+ *  the wrong side and no degree numbers because "looks right" was judged against nothing. */
+export function screenCompareContent(spec: string | undefined, pictures: UserPicture[]): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+	const out: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
+	if (spec) out.push({ type: "text", text: `docs/spec.md, what the screen must match:\n\n${spec}` });
+	for (const p of pictures) {
+		out.push({ type: "text", text: `Michael sent this picture with: "${p.text.slice(0, 300)}"` });
+		out.push({ type: "image", data: p.data, mimeType: p.mimeType });
+	}
+	const against = [spec ? "docs/spec.md" : "", pictures.length ? "Michael's pictures above (what he asked for, or what he saw broken)" : "", "Michael's request"].filter(Boolean).join(", ");
+	out.push({
+		type: "text",
+		text: `Compare the screen with ${against} and write down what differs before going on: elements missing or extra, order and side (left-handed layouts, nut, labels), colours by role, numbers and labels in each element. A difference goes back to the worker with the picture's path; the review waits. Only when nothing differs, go on.`,
+	});
+	return out;
+}
 
 /** The snapshot commit the last picture of `dir` showed, from the marks on the branch. */
 export function lastScreen(branch: Iterable<unknown>, dir: string): string | undefined {
