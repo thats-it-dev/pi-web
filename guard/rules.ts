@@ -250,7 +250,9 @@ const ASYNC_RUNS = join(process.env.PI_SUBAGENTS_TEMP_ROOT?.trim() || `/tmp/pi-s
  *  (keeb run 2026-11-12 22:45), and a review the orchestrator cannot act on must not open the PR gate. */
 export function reviewVerdict(text: string): boolean {
 	if (/\bNo issues found\b/.test(text)) return true;
-	return /^\s*#+\s*Review\b/m.test(text) && /^\s*-\s*(Finding|Merge verdict)\s*:/m.test(text);
+	// The label may be emphasised (`- **Merge verdict**: OK`) and a finding may lead with its level (`- **P2:** ...`):
+	// both read fine, and a review that counts for the reader must count for the gate.
+	return /^\s*#+\s*Review\b/m.test(text) && /^\s*-\s*(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*:/m.test(text);
 }
 
 /** Appended instead of the reviewed mark when a sync review returns without a verdict. */

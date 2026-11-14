@@ -618,6 +618,9 @@ test("reviewVerdict: the reviewer.md report shapes count, a mid-review line or n
 	assert.equal(reviewVerdict("## Review\n- Checked: every hunk\n- Merge verdict: OK"), true);
 	assert.equal(reviewVerdict("No issues found."), true);
 	assert.equal(reviewVerdict("Run fan-out: 1/64 used\n\nNo issues found.\nMission: cf39d943 (completed)"), true);
+	// fret run 2026-11-13 22:10: a complete review with emphasised labels was sent back and reviewed twice.
+	assert.equal(reviewVerdict("## Review\n\n- **P2: Empty CSS rule** — `src/ui/scale-view.ts:36`. Dead CSS.\n- **Checked**: grid alignment ✓\n- **Merge verdict**: OK with notes (P2 items are non-blocking cleanup)."), true);
+	assert.equal(reviewVerdict("## Review\n- __Finding__: P1, off by one, src/a.ts:3\n- __Merge verdict__: BLOCK"), true);
 	assert.equal(reviewVerdict("Now let me check one more thing — how `tk-stat` renders its `.value`:\nMission: cf39d943 (completed)"), false);
 	assert.equal(reviewVerdict(""), false);
 	assert.equal(reviewVerdict("## Review"), false, "a heading alone is not a verdict");
