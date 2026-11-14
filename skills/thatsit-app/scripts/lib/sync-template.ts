@@ -9,7 +9,7 @@ import { must, type Run } from "./run.ts";
 export const OWNED_FILES = ["AGENTS.md", "test/guardrails.test.ts", ".github/workflows/deploy.yml", "scripts/gateway-url.ts", "scripts/kit-types.ts"];
 // Copied only when the app has none: an app adds its own entry points to it.
 const SEEDED_FILES = ["knip.json", "docs/spec.md"];
-const OWNED_SCRIPTS = ["e2e:one", "lint", "guardrails", "verify"];
+const OWNED_SCRIPTS = ["e2e:one", "lint", "guardrails", "verify", "pretest"];
 const OWNED_DEV_DEPS = ["knip"];
 const WORKERS = /^([ \t]*)workers:[^\n]*,[ \t]*$/m;
 

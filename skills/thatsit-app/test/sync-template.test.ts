@@ -24,7 +24,7 @@ const TEMPLATE = {
 	"playwright.config.ts": 'export default {\n\tworkers: process.env.CI ? 2 : "50%",\n};\n',
 	"package.json": JSON.stringify({
 		name: "app-template",
-		scripts: { test: "vitest run", "e2e:one": "playwright test --project=desktop", lint: "knip --no-progress", guardrails: "vitest run test/guardrails.test.ts && npm run lint", verify: "npm run typecheck && npm test && npm run lint && npm run e2e" },
+		scripts: { test: "vitest run", pretest: "npm run kit-types", "e2e:one": "playwright test --project=desktop", lint: "knip --no-progress", guardrails: "npm run kit-types && vitest run test/guardrails.test.ts && npm run lint", verify: "npm run typecheck && npm test && npm run lint && npm run e2e" },
 		devDependencies: { knip: "5.88.1" },
 	}),
 };
@@ -63,7 +63,8 @@ test("copies the template's files, scripts and knip, renames the package, then r
 	const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
 	assert.equal(pkg.name, "keeb");
 	assert.equal(pkg.scripts.test, "vitest run --mine", "an app's own scripts are kept");
-	assert.equal(pkg.scripts.guardrails, "vitest run test/guardrails.test.ts && npm run lint");
+	assert.equal(pkg.scripts.guardrails, "npm run kit-types && vitest run test/guardrails.test.ts && npm run lint");
+	assert.equal(pkg.scripts.pretest, "npm run kit-types", "tests need .kit/kit.css");
 	assert.equal(pkg.devDependencies.knip, "5.88.1");
 	assert.match(readFileSync(join(dir, "package.json"), "utf8"), /^\{\n  "name"/, "indentation kept");
 	assert.equal(JSON.parse(readFileSync(join(dir, "package-lock.json"), "utf8")).packages[""].name, "keeb");
