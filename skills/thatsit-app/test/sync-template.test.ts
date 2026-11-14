@@ -18,6 +18,7 @@ const TEMPLATE = {
 	"test/guardrails.test.ts": "// guardrails\n",
 	".github/workflows/deploy.yml": "name: deploy\n",
 	"scripts/gateway-url.ts": "// gateway\n",
+	"scripts/kit-types.ts": "// kit types\n",
 	"knip.json": '{ "entry": [] }\n',
 	"docs/spec.md": "<!-- starter spec -->\n",
 	"playwright.config.ts": 'export default {\n\tworkers: process.env.CI ? 2 : "50%",\n};\n',
@@ -55,8 +56,8 @@ test("copies the template's files, scripts and knip, renames the package, then r
 	const dir = app();
 	const f = runs();
 	const r = await syncTemplate(dir, f.run);
-	assert.deepEqual(r.changed, [...Object.keys(TEMPLATE).slice(0, 6), "package.json", "playwright.config.ts", "package-lock.json"]);
-	for (const file of ["AGENTS.md", "test/guardrails.test.ts", ".github/workflows/deploy.yml", "scripts/gateway-url.ts", "knip.json", "docs/spec.md"]) {
+	assert.deepEqual(r.changed, [...Object.keys(TEMPLATE).slice(0, 7), "package.json", "playwright.config.ts", "package-lock.json"]);
+	for (const file of ["AGENTS.md", "test/guardrails.test.ts", ".github/workflows/deploy.yml", "scripts/gateway-url.ts", "scripts/kit-types.ts", "knip.json", "docs/spec.md"]) {
 		assert.equal(readFileSync(join(dir, file), "utf8"), TEMPLATE[file as keyof typeof TEMPLATE], file);
 	}
 	const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));

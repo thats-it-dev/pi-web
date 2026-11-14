@@ -689,3 +689,48 @@ test("nudges come back once the run's subagent-notify message arrived, and a rev
 	const sync = { role: "toolResult", toolName: "subagent", content: [{ type: "text", text: "Run fan-out: 1/64 used\n\nImplemented.\nMission: abc (completed)" }], details: { mode: "single", results: [] } };
 	assert.equal(shouldNudge([user, keeb, result, subLaunch("worker"), sync, say("")]), true);
 });
+
+// --- look at the screen before the review, the PR and the first ship ---
+
+import { lastScreen, screenMark, screenResult, screenshotDir, uiFile } from "../rules.ts";
+
+test("uiFile: what the app draws from; docs, tests, config and briefs are not", () => {
+	for (const f of ["index.html", "src/app-main.ts", "src/ui/scale-view.ts", "src/styles.css", "public/extra.css"]) assert.equal(uiFile(f), true, f);
+	for (const f of ["docs/spec.md", "test/a.test.ts", "e2e/a.spec.ts", ".superpowers/sdd/spec/task-1-brief.md", "package.json", "vite.config.ts", "public/icons/icon.svg", "README.md"]) assert.equal(uiFile(f), false, f);
+});
+
+test("screenshotDir names the app a screenshot command pictures", () => {
+	assert.equal(screenshotDir("node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts screenshot ~/workspace/apps/keeb --path /stats", home, home), "/home/m/workspace/apps/keeb");
+	assert.equal(screenshotDir("node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b", home, home), undefined);
+	assert.equal(screenshotDir("npm run screenshot", home, home), undefined);
+});
+
+test("lastScreen reads the latest mark for the app off tool results, never an error result", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string, isError = false) => ({ type: "message", message: { role: "toolResult", isError, content: [{ type: "text", text }] } });
+	assert.equal(lastScreen([], dir), undefined);
+	assert.equal(lastScreen([res(screenMark(dir, "a".repeat(40))), res(screenMark(dir, "b".repeat(40)))], dir), "b".repeat(40));
+	assert.equal(lastScreen([res(screenMark(dir, "a".repeat(40))), res(screenMark(dir, "b".repeat(40)), true)], dir), "a".repeat(40));
+	assert.equal(lastScreen([res(screenMark("/home/m/workspace/apps/tips", "a".repeat(40)))], dir), undefined);
+});
+
+test("screenResult reads the picture's path off the command's RESULT line", () => {
+	assert.equal(screenResult('some stderr\nRESULT {"ok":true,"file":"/x/test-results/screens/phone-dark.png","width":780,"height":2058,"issues":[]}\n'), "/x/test-results/screens/phone-dark.png");
+	assert.equal(screenResult('RESULT {"ok":false,"reason":"no vite"}'), undefined);
+	assert.equal(screenResult("Error: ENOENT"), undefined);
+	assert.equal(screenResult("RESULT {not json}"), undefined);
+});
+
+test("pr needs a look when UI files changed, ship always; the review gate comes after the look", () => {
+	const pr = "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b";
+	const ship = pr.replace(" pr ", " ship ");
+	const base = { cwd: "/home/m", home: "/home/m", hasScript: () => false, dirty: () => false, reviewed: () => false, codeChanged: () => true };
+	assert.deepEqual(checkShell(pr, { ...base, screenSeen: () => false, uiChanged: () => true }), { block: true, reason: REASONS.screen });
+	assert.deepEqual(checkShell(pr, { ...base, screenSeen: () => true, uiChanged: () => true }), { block: true, reason: REASONS.review }, "looked, not yet reviewed");
+	assert.deepEqual(checkShell(pr, { ...base, screenSeen: () => false, uiChanged: () => false }), { block: true, reason: REASONS.review }, "logic-only change needs no look");
+	assert.deepEqual(checkShell(ship, { ...base, screenSeen: () => false, uiChanged: () => false }), { block: true, reason: REASONS.screen }, "a first version always has a screen");
+	assert.equal(checkShell(ship, { ...base, screenSeen: () => true, uiChanged: () => false }), undefined);
+	assert.equal(checkShell(pr, { ...base, reviewed: () => true, screenSeen: () => true, uiChanged: () => true }), undefined);
+	assert.deepEqual(checkShell(pr, { ...base }), { block: true, reason: REASONS.review }, "without the check the old gate alone applies");
+	assert.match(REASONS.screen, /thatsit-app\.ts screenshot <dir>/);
+});

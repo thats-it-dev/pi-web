@@ -6,7 +6,7 @@ import { ORG } from "./names.ts";
 import { must, type Run } from "./run.ts";
 
 // Files the template owns. An app's copy is replaced whole, so the next sync is a clean diff.
-export const OWNED_FILES = ["AGENTS.md", "test/guardrails.test.ts", ".github/workflows/deploy.yml", "scripts/gateway-url.ts"];
+export const OWNED_FILES = ["AGENTS.md", "test/guardrails.test.ts", ".github/workflows/deploy.yml", "scripts/gateway-url.ts", "scripts/kit-types.ts"];
 // Copied only when the app has none: an app adds its own entry points to it.
 const SEEDED_FILES = ["knip.json", "docs/spec.md"];
 const OWNED_SCRIPTS = ["e2e:one", "lint", "guardrails", "verify"];

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenMark, screenResult, screenshotDir, uiFile, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -60,6 +60,16 @@ export function codeChanged(dir: string): boolean {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 });
 		const files = [...run(["diff", "--name-only", "main...HEAD"]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n")].filter(Boolean);
 		return files.length === 0 || files.some((f) => !reviewFree(f));
+	} catch {
+		return true;
+	}
+}
+
+// UI files the branch changes against main, committed, staged, unstaged or untracked. When git can't say, assume it does.
+export function uiChanged(dir: string): boolean {
+	try {
+		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
+		return [...run(["diff", "--name-only", "main...HEAD"]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
 	} catch {
 		return true;
 	}
@@ -125,6 +135,37 @@ export function upToDate(dir: string, branch: Iterable<unknown>): boolean {
 	}
 }
 
+/** True when the last picture of the app shows its UI files as they are now: a snapshot was pictured, and no UI file
+ *  differs between it and the working tree (briefs, docs and tests may). */
+export function screenUpToDate(dir: string, branch: Iterable<unknown>): boolean {
+	const last = lastScreen(branch, dir);
+	if (!last) return false;
+	try {
+		return exists(dir, last) && !git(dir, ["diff", "--name-only", last, snapshot(dir)]).split("\n").some(uiFile);
+	} catch {
+		return false;
+	}
+}
+
+/** Pictures larger than this stay on disk: the model would not get them anyway (pi-web's show_image has the same cap). */
+export const MAX_PICTURE_BYTES = 2_000_000;
+
+/** The content a finished `screenshot` command's result gets: the picture itself, so the model sees the screen in the
+ *  same turn, and the mark that makes the gate pass. A missing or oversized file gets a note and no mark. */
+export function screenContent(file: string, dir: string, snap: string): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+	let bytes: Buffer;
+	try {
+		bytes = readFileSync(file);
+	} catch (err) {
+		return [{ type: "text", text: `[pi-guard] the picture ${file} could not be read (${(err as Error).message.split("\n")[0]}); run the screenshot command again.` }];
+	}
+	if (bytes.length > MAX_PICTURE_BYTES) return [{ type: "text", text: `[pi-guard] the picture is ${(bytes.length / 1_000_000).toFixed(1)} MB, too large to show; picture one screen with --path.` }];
+	return [
+		{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
+		{ type: "text", text: screenMark(dir, snap) },
+	];
+}
+
 /** Scopes a direct reviewer call on an app: checks verify ran, writes the diff since the last review (or since main)
  *  and rewrites the call's input so the reviewer reads only that, in the app, within the tool budget. */
 /** Model ids llama-swap reports as loaded and ready; `[]` on any failure. A reviewer may name one of these. */
@@ -147,6 +188,8 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	const dir = reviewApp(task, cwd, home);
 	if (!dir) return undefined;
 	if (hasScript(dir, "verify") && !verifiedSinceEdit(branch, dir, cwd, home)) return { block: true, reason: REASONS.reviewUnverified };
+	// The orchestrator looks at a UI change before anyone reviews its code: a wrong picture goes back to the worker.
+	if (uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
 	const snap = snapshot(dir);
 	const prev = lastReview(branch, dir);
 	let base: string;
@@ -200,6 +243,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const rewrites = new Set<string>();
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
+	// Screenshot commands in flight: tool call id -> the app and the snapshot the picture will show.
+	const screens = new Map<string, { dir: string; snap: string }>();
 
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
@@ -217,8 +262,22 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			rewrites,
 			orchestrator,
 			busy: (dir) => busyWorker(branch(), dir, ctx.cwd, home),
+			screenSeen: (dir) => screenUpToDate(dir, branch()),
+			uiChanged,
 		});
-		if (block || event.toolName !== "subagent" || !event.input) return block;
+		if (block) return block;
+		if (event.toolName === "bash") {
+			const dir = screenshotDir(String(event.input?.command ?? ""), ctx.cwd, home);
+			if (dir) {
+				try {
+					screens.set(event.toolCallId, { dir, snap: snapshot(dir) });
+				} catch {
+					// No snapshot, no mark: the picture still comes back, the gate stays shut.
+				}
+			}
+			return undefined;
+		}
+		if (event.toolName !== "subagent" || !event.input) return undefined;
 		let scoped: ReturnType<typeof scopeReview>;
 		try {
 			scoped = scopeReview(event.input, branch(), ctx.cwd, home, resident);
@@ -235,6 +294,14 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		if (event.toolName === "ask_user_question") {
 			const text = partialAnswers(event.input, event.details);
 			return text ? { content: [{ type: "text", text }], details: event.details } : undefined;
+		}
+		const screen = screens.get(event.toolCallId);
+		if (screen) {
+			screens.delete(event.toolCallId);
+			if (event.isError) return undefined;
+			const file = screenResult((event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n"));
+			if (!file) return undefined;
+			return { content: [...(event.content ?? []), ...screenContent(file, screen.dir, screen.snap)], structuredContent: event.structuredContent };
 		}
 		const scoped = reviews.get(event.toolCallId);
 		if (!scoped) return undefined;

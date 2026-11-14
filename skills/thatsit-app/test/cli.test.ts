@@ -50,3 +50,11 @@ test("parseArgs pr-wait and gateway-pr-wait", () => {
 	assert.equal(parseArgs(["gateway-pr-wait"]), null);
 	assert.equal(parseArgs(["pr-wait", "/x/foo", "--title", "T"]), null);
 });
+
+test("parseArgs screenshot", () => {
+	assert.deepEqual(parseArgs(["screenshot", "/x/foo"]), { cmd: "screenshot", name: "/x/foo" });
+	assert.deepEqual(parseArgs(["screenshot", "/x/foo", "--path", "/settings", "--scheme", "light"]), { cmd: "screenshot", name: "/x/foo", path: "/settings", scheme: "light" });
+	assert.equal(parseArgs(["screenshot", "/x/foo", "--scheme", "sepia"]), null);
+	assert.equal(parseArgs(["screenshot", "/x/foo", "--path"]), null);
+	assert.equal(parseArgs(["screenshot"]), null);
+});

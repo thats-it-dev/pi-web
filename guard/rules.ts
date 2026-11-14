@@ -17,6 +17,7 @@ export const REASONS = {
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
+	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light). The picture comes back in the result: compare it with Michael's request and any reference he gave. Missing colours, borders or fills, a shifted grid, overlapping labels or a control that is gone mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When it looks right, go on to the review (or to ship for a first version).`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 	worktreeInstall:
@@ -129,7 +130,48 @@ export type Env = {
 	orchestrator?: boolean;
 	/** The run id of a worker still running in the app's main checkout, if any (busyWorker). Absent: not checked. */
 	busy?: (dir: string) => string | undefined;
+	/** The app's screen, as its UI files are now, came back as a picture in a tool result (screenUpToDate). Absent: not checked. */
+	screenSeen?: (dir: string) => boolean;
+	/** The branch changes UI files (uiFile) against main. Absent: assume it does. */
+	uiChanged?: (dir: string) => boolean;
 };
+
+/** A file whose change can change what the app draws. */
+export const uiFile = (path: string) => /^(?:index\.html|src\/.+\.(?:ts|js|css|html)|public\/.+\.css)$/.test(path);
+
+const SCREENSHOT = /thatsit-app\.ts\s+screenshot\b/;
+const SHIPS = /thatsit-app\.ts\s+ship\b/;
+
+/** The app a `screenshot` command pictures, or undefined for any other command. */
+export const screenshotDir = (command: string, cwd: string, home: string): string | undefined => (SCREENSHOT.test(command) ? appDir(command, cwd, home) : undefined);
+
+/** Appended by the guard to a screenshot command's result, beside the picture: the app state it shows. */
+export const SCREEN_MARK = "[pi-guard] screen seen ";
+export const screenMark = (dir: string, snap: string) => `${SCREEN_MARK}${dir} at ${snap}`;
+const SEEN = /\[pi-guard\] screen seen (\S+) at ([0-9a-f]{7,64})/g;
+
+/** The snapshot commit the last picture of `dir` showed, from the marks on the branch. */
+export function lastScreen(branch: Iterable<unknown>, dir: string): string | undefined {
+	let snap: string | undefined;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
+		for (const m of resultText(e.message).matchAll(SEEN)) if (m[1] === dir) snap = m[2];
+	}
+	return snap;
+}
+
+/** The picture file a finished `screenshot` command reports (its RESULT line), or undefined when it reported none. */
+export function screenResult(text: string): string | undefined {
+	const m = /^RESULT (\{.*\})\s*$/m.exec(text);
+	if (!m) return undefined;
+	try {
+		const r = JSON.parse(m[1]) as { ok?: unknown; file?: unknown };
+		return r.ok === true && typeof r.file === "string" ? r.file : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 // Commands that start the e2e server in an app: the verify gate, the e2e scripts, playwright itself.
 const RUNS_E2E = /\bnpm\s+run\s+(?:verify|e2e(?::[\w-]+)?)\b|\bplaywright\s+test\b/;
@@ -168,6 +210,8 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
+	// A first version always has a screen; a PR needs the look only when it changes UI files.
+	if (env.screenSeen && (SHIPS.test(command) || (OPENS_PR.test(command) && (env.uiChanged?.(dir) ?? true))) && !env.screenSeen(dir)) return { block: true, reason: REASONS.screen };
 	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && (env.codeChanged?.(dir) ?? true)) return { block: true, reason: REASONS.review };
 	return undefined;
 }

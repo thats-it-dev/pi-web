@@ -105,3 +105,18 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
 first, no test or config spelunking, and the same tool budget in its frontmatter.
 
+## Look at the screen
+
+Verify proves the code runs; nothing in it shows what the app draws. The fret app (2026-11-13) shipped a fretboard
+styled with invented `--tk-*` tokens: every colour and border resolved to nothing, verify stayed green and three
+reviews passed the diff. So a review, a `pr` that changes UI files (`index.html`, `src/**`, `public/**.css`) and
+every `ship` are blocked until the orchestrator has looked at the screen as the UI files are now:
+
+- The skill's `thatsit-app.ts screenshot <dir> [--path /route] [--scheme light]` serves the working tree with the
+  app's own Vite dev server and takes a phone-size picture with the app's own Playwright (about a second).
+- On that bash call the guard snapshots the tree; on its result it appends the picture itself as an image block,
+  so the model sees the screen in the same turn, plus `[pi-guard] screen seen <dir> at <snapshot>`. A failed
+  command, a `RESULT` without a file, or a picture over 2 MB leaves no mark.
+- The gate passes while no UI file differs between the last pictured snapshot and the working tree; briefs, docs
+  and tests may change freely. A UI edit after the look needs a new picture.
+

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, needsPr, scopeReview, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import piGuard, { codeChanged, needsPr, scopeReview, screenUpToDate, snapshot, uiChanged, upToDate } from "../index.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -146,6 +146,9 @@ const verified = (dir: string) => [
 	msg("assistant", { content: [{ type: "toolCall", id: "v", name: "bash", arguments: { command: `cd ${dir} && npm run verify` } }] }),
 	msg("toolResult", { toolCallId: "v", isError: false, content: [] }),
 ];
+// The orchestrator looked at the screen as the working tree is now (the mark a screenshot command's result gets).
+const looked = (dir: string) => [msg("toolResult", { toolCallId: "s", isError: false, content: [{ type: "text", text: screenMark(dir, snapshot(dir)) }] })];
+const ready = (dir: string) => [...verified(dir), ...looked(dir)];
 
 test("scopeReview: blocks before verify, then writes the diff since main and rewrites the call", () => {
 	const { home, dir } = appRepo();
@@ -155,7 +158,7 @@ test("scopeReview: blocks before verify, then writes the diff since main and rew
 	const edited = [msg("assistant", { content: [{ type: "toolCall", id: "e", name: "edit", arguments: { path: join(dir, "src", "a.ts") } }] })];
 	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb: daily goal", toolBudget: { hard: 500 }, context: "fork" };
 	assert.deepEqual(scopeReview({ ...input }, edited, home, home), { block: true, reason: REASONS.reviewUnverified });
-	const r = scopeReview(input, [...edited, ...verified(dir)], home, home) as { dir: string; snap: string };
+	const r = scopeReview(input, [...edited, ...ready(dir)], home, home) as { dir: string; snap: string };
 	assert.equal(r.dir, dir);
 	assert.match(r.snap, /^[0-9a-f]{40}$/);
 	assert.deepEqual(input.toolBudget, { soft: 12, hard: 20, block: "*" });
@@ -175,14 +178,14 @@ test("scopeReview: the next review covers only what changed since the last one; 
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
 	const first: Record<string, unknown> = { agent: "reviewer", task: "Review /tmp/keeb-review.diff" };
-	const { snap } = scopeReview(first, verified(dir), home, home) as { snap: string };
-	const after = [...verified(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snap) }] })];
+	const { snap } = scopeReview(first, ready(dir), home, home) as { snap: string };
+	const after = [...ready(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snap) }] })];
 	assert.equal(upToDate(dir, after), true);
 	assert.deepEqual(scopeReview({ agent: "reviewer", task: "Review /tmp/keeb-review.diff" }, after, home, home), { block: true, reason: REASONS.reviewNothing });
 	writeFileSync(join(dir, "src", "b.ts"), "export const b = 1;\n");
 	assert.equal(upToDate(dir, after), false);
 	const second: Record<string, unknown> = { agent: "reviewer", task: "Review /tmp/keeb-review.diff" };
-	scopeReview(second, after, home, home);
+	scopeReview(second, [...after, ...looked(dir)], home, home);
 	assert.match(String(second.task), /- src\/b\.ts/);
 	assert.doesNotMatch(String(second.task), /- src\/a\.ts/, "a.ts was already reviewed");
 	assert.match(String(second.task), /already reviewed/);
@@ -216,7 +219,7 @@ test("an async scoped review keeps async and gets a pending mark; a sync one get
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
 	const h = load(() => false, { HOME: home });
-	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => ready(dir) } };
 	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
 	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb", async: true };
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r1", input }, ctx), undefined);
@@ -234,7 +237,7 @@ test("an async scoped review keeps async and gets a pending mark; a sync one get
 test("scopeReview keeps a resident model and strips any other, and a failed lookup strips", () => {
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 4;\n");
-	const branch = verified(dir);
+	const branch = ready(dir);
 	const task = "Review keeb at ~/workspace/apps/keeb";
 	const resident = () => ["qwen3.8-27b-pi", "qwen3.6-35b-a3b-sglang"];
 	const keep: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-27b-pi" };
@@ -252,7 +255,7 @@ test("an async scoped review whose launch result has no run id gets a pending ma
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 5;\n");
 	const h = load(() => false, { HOME: home });
-	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => ready(dir) } };
 	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb", async: true };
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r9", input }, ctx), undefined);
 	const r = h.tool_result({ toolCallId: "r9", toolName: "subagent", content: [{ type: "text", text: "Launched in the background." }], isError: false }, ctx);
@@ -277,7 +280,7 @@ test("a sync scoped review that returns without a verdict gets a note instead of
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 6;\n");
 	const h = load(() => false, { HOME: home });
-	const ctx = { cwd: dir, sessionManager: { getBranch: () => verified(dir) } };
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => ready(dir) } };
 	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
 	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r3", input }, ctx), undefined);
@@ -288,7 +291,86 @@ test("a sync scoped review that returns without a verdict gets a note instead of
 	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }]), false);
 	// The same call again is not "nothing to review": the app is still unreviewed at this state.
 	const again: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
-	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r4", input: again }, { ...ctx, sessionManager: { getBranch: () => [...verified(dir), { type: "message", message: { role: "toolResult", toolCallId: "r3", content: r.content } }] } }), undefined);
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r4", input: again }, { ...ctx, sessionManager: { getBranch: () => [...ready(dir), { type: "message", message: { role: "toolResult", toolCallId: "r3", content: r.content } }] } }), undefined);
 	const ok = h.tool_result({ toolCallId: "r4", toolName: "subagent", content: [{ type: "text", text: "## Review\n- Checked: a.ts\n- Merge verdict: OK" }], isError: false }, ctx);
 	assert.match(text(ok), /\[pi-guard\] reviewed \S+ at [0-9a-f]{40}/);
+});
+
+// --- the screen gate, against a real git repo ---
+
+test("uiChanged: committed, staged, unstaged and untracked UI files count; docs, tests and briefs do not", () => {
+	const { dir, git } = appRepo();
+	assert.equal(uiChanged(dir), false, "nothing changed yet");
+	mkdirSync(join(dir, "docs"), { recursive: true });
+	writeFileSync(join(dir, "docs", "spec.md"), "spec");
+	mkdirSync(join(dir, ".superpowers", "sdd"), { recursive: true });
+	writeFileSync(join(dir, ".superpowers", "sdd", "brief.md"), "brief");
+	mkdirSync(join(dir, "test"), { recursive: true });
+	writeFileSync(join(dir, "test", "a.test.ts"), "test");
+	assert.equal(uiChanged(dir), false, "docs, briefs and tests");
+	writeFileSync(join(dir, "src", "new.ts"), "export const b = 1;\n");
+	assert.equal(uiChanged(dir), true, "an untracked UI file");
+	git("add", "-A");
+	git("commit", "-qm", "ui");
+	assert.equal(uiChanged(dir), true, "a committed UI file");
+});
+
+test("screenUpToDate: the last picture must show the UI files as they are; other edits don't age it", () => {
+	const { dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	assert.equal(screenUpToDate(dir, []), false, "never looked");
+	const branch = looked(dir);
+	assert.equal(screenUpToDate(dir, branch), true);
+	mkdirSync(join(dir, "docs"), { recursive: true });
+	writeFileSync(join(dir, "docs", "spec.md"), "spec");
+	assert.equal(screenUpToDate(dir, branch), true, "a docs edit after the look");
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	assert.equal(screenUpToDate(dir, branch), false, "a UI edit after the look");
+	assert.equal(screenUpToDate(dir, [...branch, ...looked(dir)]), true, "looked again");
+});
+
+test("scopeReview: a UI change that was not looked at is blocked before any diff is written", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const input: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.deepEqual(scopeReview({ ...input }, verified(dir), home, home), { block: true, reason: REASONS.screen });
+	assert.ok(!("block" in (scopeReview({ ...input }, ready(dir), home, home) ?? {})));
+	// A change outside the UI files needs no picture.
+	const { home: h2, dir: d2 } = appRepo();
+	mkdirSync(join(d2, "test"), { recursive: true });
+	writeFileSync(join(d2, "test", "a.test.ts"), "x");
+	assert.ok(!("block" in (scopeReview({ ...input }, verified(d2), h2, h2) ?? {})));
+});
+
+test("a screenshot command's result gets the picture and the mark, and the gate then opens", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const png = join(dir, "test-results", "screens", "phone-dark.png");
+	mkdirSync(join(dir, "test-results", "screens"), { recursive: true });
+	writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+	const h = load(() => false, { HOME: home });
+	const entries: unknown[] = [...verified(dir)];
+	const ctx = { cwd: home, sessionManager: { getBranch: () => entries } };
+	const command = `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts screenshot ${dir}`;
+	assert.equal(h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command } }, ctx), undefined, "the command itself is never blocked");
+	const result = { toolName: "bash", toolCallId: "s1", input: { command }, isError: false, content: [{ type: "text", text: `RESULT {"ok":true,"file":"${png}","width":780,"height":1688,"issues":[]}` }] };
+	const r = h.tool_call({ toolName: "bash", toolCallId: "pr", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
+	assert.deepEqual(r, { block: true, reason: REASONS.screen }, "no picture yet");
+	const out = h.tool_result(result, ctx);
+	assert.equal(out.content.length, 3);
+	assert.deepEqual(out.content[1], { type: "image", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"), mimeType: "image/png" });
+	assert.match(out.content[2].text, /^\[pi-guard\] screen seen /);
+	entries.push(msg("toolResult", { toolCallId: "s1", isError: false, content: out.content }));
+	assert.equal(screenUpToDate(dir, entries), true);
+	const r2 = h.tool_call({ toolName: "bash", toolCallId: "pr2", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
+	assert.deepEqual(r2, { block: true, reason: REASONS.review }, "looked; the review gate is next");
+	// A failed command or one that reported no picture leaves no mark.
+	h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command } }, ctx);
+	assert.equal(h.tool_result({ ...result, toolCallId: "s2", content: [{ type: "text", text: 'RESULT {"ok":false,"reason":"no vite"}' }] }, ctx), undefined);
+	h.tool_call({ toolName: "bash", toolCallId: "s3", input: { command } }, ctx);
+	assert.equal(h.tool_result({ ...result, toolCallId: "s3", isError: true }, ctx), undefined);
+	// A picture that is gone gets a note, not a mark.
+	h.tool_call({ toolName: "bash", toolCallId: "s4", input: { command } }, ctx);
+	const gone = h.tool_result({ ...result, toolCallId: "s4", content: [{ type: "text", text: `RESULT {"ok":true,"file":"${dir}/nope.png"}` }] }, ctx);
+	assert.match(gone.content[1].text, /could not be read/);
 });
