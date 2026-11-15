@@ -14,4 +14,5 @@ export { TkTimeseries, type TimeseriesSeries } from "./charts/tk-timeseries.ts";
 export { TkBars } from "./charts/tk-bars.ts";
 export { TkProgress } from "./charts/tk-progress.ts";
 export { progressFraction } from "./charts/progress.ts";
+export * from "./icons.ts";
 export { TkHeatmap } from "./charts/tk-heatmap.ts";

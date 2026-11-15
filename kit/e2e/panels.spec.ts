@@ -119,12 +119,15 @@ test("phone: focus moves into an opened drawer and back to its opener", async ({
 	await expect.poll(() => focusInside(page, "[slot=aside]")).toBe(true);
 	await page.keyboard.press("Escape");
 	await expect(page.locator(aside)).toBeHidden();
-	await expect(opener).toBeFocused();	// following a link in the nav drawer returns focus to the header's menu button
+	await expect(opener).toBeFocused();
+	// Following an in-page link in the nav drawer closes it, and the browser then puts focus at the link's target
+	// (the section), not back on the menu button: the shell must not take it from there.
 	await page.locator("tk-header .menu").click();
 	await expect.poll(() => focusInside(page, "[slot=nav]")).toBe(true);
-	await page.locator("tk-shell a[href='#b']").click();
+	await page.locator("tk-shell [slot=nav] a[href='#buttons']").click();
 	await expect(page.locator(nav)).toBeHidden();
-	await expect(page.locator("tk-header .menu")).toBeFocused();
+	await expect(page.locator("tk-header .menu")).not.toBeFocused();
+	expect(await focusInside(page, "[slot=nav], [slot=aside]")).toBe(false);
 });
 
 test("mid width with both panels: nav is a column, details a drawer", async ({ page }, info) => {
@@ -206,7 +209,7 @@ test("an app without a details panel looks as before", async ({ page }, info) =>
 	}
 	await page.locator("tk-header .menu").click();
 	await expect(page.locator(nav)).toBeInViewport({ ratio: 1 });
-	await page.locator("tk-shell a[href='#b']").click();
+	await page.locator("tk-shell [slot=nav] a[href='#buttons']").click();
 	await expect(page.locator(nav)).toBeHidden();
 });
 

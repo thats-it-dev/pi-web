@@ -3,35 +3,518 @@
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+	<meta name="theme-color" content="#171717" />
 	<title>That's it kit</title>
 	<link rel="stylesheet" href="./kit.css" />
 	<script src="./theme-init.js"></script>
 	<script type="module">import "./kit.js"</script>
 	<style>
-		nav { display: grid; gap: 10px; padding: 18px; }
+		nav { display: grid; gap: 10px; padding: 18px; align-content: start; }
 		section { padding: 18px; display: grid; gap: 14px; align-content: start; overflow-y: auto; }
-		.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+		section:not([slot]) { gap: 0; padding: 0 0 calc(40px + var(--safe-bottom)); scroll-behavior: smooth; grid-template-columns: minmax(0, 1fr); }
+		.hrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+		.row-end { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+		.wrap { max-width: 860px; min-width: 0; padding: 0 18px; }
+		.demo, figure.ex, pre, table, .swatches { min-width: 0; max-width: 100%; }
+		article { padding: 26px 0 10px; border-bottom: 1px solid var(--line); scroll-margin-top: 8px; }
+		article:last-of-type { border-bottom: 0; }
+		h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.04em; font-size: 1.5rem; margin: 0 0 6px; }
+		h3 { font-size: 1rem; font-weight: 600; margin: 22px 0 8px; }
+		p.lead { color: var(--text-secondary); margin: 0 0 12px; max-width: 64ch; }
+		p { max-width: 72ch; }
+		code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 5px; border-radius: var(--radius); }
+		pre { position: relative; margin: 10px 0 0; padding: 12px 44px 12px 14px; background: var(--code-bg); border-radius: var(--radius); overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
+		pre code { background: none; padding: 0; font-size: inherit; }
+		pre .copy { position: absolute; top: 4px; right: 4px; background: var(--code-bg); border-radius: var(--radius); }
+		figure.ex { margin: 12px 0 0; }
+		.demo { padding: 16px; border: 1px dashed var(--line); border-radius: var(--radius); display: grid; gap: 12px; }
+		.demo.phone { max-width: 390px; }
+		figcaption { margin-top: 6px; font-size: 0.85rem; color: var(--text-muted); }
+		ul.rules { padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+		table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+		th, td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+		th { color: var(--text-muted); font-weight: 500; }
+		.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+		.sw { display: flex; gap: 10px; align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: var(--radius); }
+		.sw .chip { width: 44px; height: 44px; flex: none; border-radius: var(--radius); border: 1px solid var(--line); }
+		.sw .meta { display: grid; gap: 2px; min-width: 0; font-size: 0.85rem; }
+		.sw .meta span { color: var(--text-secondary); }
+		.sw .meta small { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.72rem; }
+		.type-sample { display: grid; gap: 14px; }
+		.type-sample .display { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.04em; font-size: 1.5rem; }
+		.type-sample .mono { font-family: var(--font-mono); }
+		.type-sample .quote { font-family: var(--font-quote); font-style: italic; color: var(--text-secondary); }
+		.type-sample .cap { color: var(--text-muted); font-size: 0.85rem; }
+		.shape { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+		.shape .box { width: 90px; height: 60px; display: grid; place-items: center; font-size: 0.75rem; color: var(--text-muted); }
+		.shape .radius { background: var(--panel); border: 1px solid var(--border-color); border-radius: var(--radius); }
+		.shape .pill { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+		.shape .shadow { background: var(--bg); box-shadow: 0 12px 40px var(--shadow-color); border: 1px solid var(--border-color); border-radius: 6px; }
+		.shape .ring { background: var(--bg); border: 1px solid var(--border-color); border-radius: var(--radius); box-shadow: 0 0 0 4px var(--ring); }
+		.spacing { display: flex; gap: 10px; align-items: flex-end; }
+		.spacing i { display: block; background: var(--primary); width: 20px; }
+		.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+		.gallery button { display: grid; justify-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--line); border-radius: var(--radius); font-size: 0.7rem; color: var(--text-secondary); font-family: var(--font-mono); word-break: break-all; }
+		.gallery button:hover { background: var(--panel); color: var(--text-primary); }
+		.gallery svg { width: 22px; height: 22px; color: var(--text-primary); }
+		.ico svg { width: 1em; height: 1em; vertical-align: -0.15em; }
+		.btn svg { width: 16px; height: 16px; }
+		.status { display: inline-flex; align-items: center; gap: 8px; }
+		tk-stats, tk-timeseries, tk-bars, tk-heatmap, tk-progress, tk-sparkline { max-width: 420px; }
+		.aside-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 0.9rem; }
+		.aside-list code { font-size: 0.8em; }
+		.form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 16px; align-items: center; }
+.form label { color: var(--text-secondary); }
+.form .hint, .form .error { grid-column: 1 / -1; margin-top: -10px; font-size: 0.85rem; }
+.form .hint { color: var(--text-muted); }
+.form .error { color: var(--accent); }
+.form input[aria-invalid="true"], .form select[aria-invalid="true"] { border-color: var(--accent); }
+.form input:not([type="checkbox"]):not([type="radio"]), .form select { width: 220px; max-width: 100%; justify-self: end; }
+.form .switch { justify-self: end; }
+.form label:has(input) { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); }
+.form label:has(input[type="checkbox"]) { grid-column: 1 / -1; }
+.form textarea { width: 100%; grid-column: 1 / -1; }
+@media (max-width: 480px) { .form input:not([type="checkbox"]):not([type="radio"]), .form select { width: 160px; } }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); width: 18px; height: 18px; margin: 0; }
+		.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 8px; }
+.card h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+.card p { margin: 0; color: var(--text-secondary); }
+		.rows { display: grid; border-top: 1px solid var(--line); }
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.row .text { flex: 1; min-width: 0; display: grid; }
+.row .text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .text small { color: var(--text-muted); }
+.row .actions { display: flex; gap: 2px; margin-right: -8px; }
+		.empty { display: grid; justify-items: center; gap: 10px; padding: 28px 16px; text-align: center; color: var(--text-muted); border: 1px dashed var(--line); border-radius: var(--radius); }
+.empty strong { color: var(--text-secondary); font-weight: 600; }
+.empty svg { width: 28px; height: 28px; }
+		.notice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-left: 3px solid var(--primary); border-radius: var(--radius); }
+.notice.alert { border-left-color: var(--accent); }
+.notice svg { width: 18px; height: 18px; flex: none; margin-top: 2px; color: var(--text-muted); }
+.notice.alert svg { color: var(--accent); }
+.notice p { margin: 0; }
+		.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; margin: 0; }
+.kv dt { color: var(--text-muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
 	</style>
 </head>
 <body>
 	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-demo:panels">
-		<nav slot="nav">
-			<a class="u" href="#a">Page A</a>
-			<a class="u" href="#b">Page B</a>
-			<a class="u on" href="">This page</a>
-		</nav>
-		<tk-header menu-label="Open menu" aside-label="Details" aside-badge="3/7"><h1 slot="title">That's it kit</h1><button slot="actions" class="btn ghost" aria-label="New chat">+</button></tk-header>
+		<nav slot="nav"><a class="u on" href="">Design system</a><a class="u" href="#start">Start here</a><a class="u" href="#colour">Colour</a><a class="u" href="#type">Type</a><a class="u" href="#shape">Shape & motion</a><a class="u" href="#layout">Layout</a><a class="u" href="#buttons">Buttons</a><a class="u" href="#forms">Forms</a><a class="u" href="#feedback">Feedback</a><a class="u" href="#overlays">Overlays</a><a class="u" href="#lists">Lists & cards</a><a class="u" href="#data">Data</a><a class="u" href="#icons">Icons</a><a class="u" href="#a11y">Accessibility</a><a class="u" href="#rules">Rules</a><a class="u" href="./charts.html">Charts, in full</a></nav>
+		<tk-header menu-label="Open menu" aside-label="Details" aside-badge="3/7"><h1 slot="title">That's it kit</h1><button slot="actions" class="icon-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button></tk-header>
 		<section>
-			<div class="row"><button class="btn">Primary</button><button class="btn ghost">Ghost</button></div>
-			<div class="seg"><button class="on">One</button><button>Two</button></div>
-			<div class="row"><span class="label">label</span><a class="u" href="#a">link</a><span class="dot live"></span><span class="dot running"></span><span class="dot needs_you"></span><span class="dot error"></span></div>
-			<input placeholder="Text input" aria-label="Text input" />
-			<div class="row">
-				<button class="btn" id="open-sheet">Open sheet</button>
-				<button class="btn ghost" id="show-toast">Show toast</button>
+			<div class="wrap">
+
+			<article id="start">
+				<h2>Start here</h2>
+				<p class="lead">One stylesheet, one theme script, one module. Everything on this page is built from those three files and the tokens they define; an app adds its own components and nothing else.</p>
+				<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;link rel=&quot;stylesheet&quot; href=&quot;https://kit.thatsit.app/kit.css&quot;&gt;
+&lt;script src=&quot;https://kit.thatsit.app/theme-init.js&quot; data-key=&quot;my-app:theme&quot;&gt;&lt;/script&gt;
+&lt;script type=&quot;module&quot;&gt;
+  import &quot;https://kit.thatsit.app/kit.js&quot;;
+  import &quot;./src/app-main.ts&quot;;
+&lt;/script&gt;</code></pre>
+				<h3>A component</h3>
+				<p class="lead">Lit comes from <code>lit.js</code> and only from there, so the page holds one copy. <code>sharedStyles</code> goes first in every <code>static styles</code>; it carries the classes below into the shadow root.</p>
+				<pre data-lang="ts"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>import { LitElement, html, css } from &quot;https://kit.thatsit.app/lit.js&quot;;
+import { sharedStyles, toast, SETTINGS_ICON } from &quot;https://kit.thatsit.app/kit.js&quot;;
+
+export class AppMain extends LitElement {
+  static properties = { settingsOpen: { state: true } };
+  static styles = [sharedStyles, css`
+    :host { display: grid; gap: 14px; padding: 18px; }
+    /* only kit tokens here: var(--panel), var(--text-muted), var(--radius) ... */
+  `];
+  render() {
+    return html`
+      &lt;tk-header&gt;&lt;h1 slot=&quot;title&quot;&gt;My app&lt;/h1&gt;
+        &lt;button slot=&quot;actions&quot; class=&quot;icon-btn&quot; aria-label=&quot;Settings&quot; @click=${() =&gt; (this.settingsOpen = true)}&gt;${SETTINGS_ICON}&lt;/button&gt;
+      &lt;/tk-header&gt;
+      &lt;tk-sheet heading=&quot;Settings&quot; .open=${this.settingsOpen} @tk-close=${() =&gt; (this.settingsOpen = false)}&gt;...&lt;/tk-sheet&gt;
+      &lt;tk-toasts&gt;&lt;/tk-toasts&gt;`;
+  }
+}
+customElements.define(&quot;app-main&quot;, AppMain);</code></pre>
+				<h3>What the kit is</h3>
+				<ul class="rules">
+					<li><strong>Tokens</strong>: colours, type, shape and layout as CSS custom properties, in light and dark. Apps never write a colour, a font family or a radius of their own.</li>
+					<li><strong>Classes</strong> in <code>sharedStyles</code>: <code>.btn</code>, <code>.btn.ghost</code>, <code>.icon-btn</code>, <code>.switch</code>, <code>.seg</code>, <code>.u</code>, <code>.label</code>, <code>.badge</code>, <code>.dot</code>, <code>.sr-only</code>, and styled <code>input</code>, <code>select</code>, <code>textarea</code>.</li>
+					<li><strong>Elements</strong>: <code>tk-shell</code>, <code>tk-header</code>, <code>tk-sheet</code>, <code>tk-toasts</code>, and the charts <code>tk-stat</code>/<code>tk-stats</code>, <code>tk-sparkline</code>, <code>tk-timeseries</code>, <code>tk-bars</code>, <code>tk-heatmap</code>, <code>tk-progress</code>.</li>
+					<li><strong>Functions</strong>: <code>toast()</code>, <code>trackViewport()</code>, <code>progressFraction()</code>; <strong>icons</strong> as Lit templates.</li>
+					<li><strong>Patterns</strong> (forms, cards, rows, empty states, notices) are a few lines of CSS on the tokens, shown below with their code. Copy them into the component that needs them.</li>
+				</ul>
+				<p class="lead">Reference: <a class="u" href="./api.json">api.json</a> (the whole public surface), <a class="u" href="./kit.d.ts">kit.d.ts</a>, <a class="u" href="./charts.html">charts.html</a>. The API is additive-only: nothing here is renamed or removed.</p>
+			</article>
+
+			<article id="colour">
+				<h2>Colour</h2>
+				<p class="lead">Every colour has a role. Light and dark values come with the token, so a component never picks a colour per theme. Use the theme button in the header to see both.</p>
+				<div class="swatches"><div class="sw"><div class="chip" style="background: var(--bg)"></div><div class="meta"><code>--bg</code><span>The page, inputs, the sheet</span><small>#f1f1f1 · #171717</small></div></div><div class="sw"><div class="chip" style="background: var(--panel)"></div><div class="meta"><code>--panel</code><span>A raised surface: cards, notices, dialog rows, chart tiles</span><small>#e7e7e7 · #1f1f1f</small></div></div><div class="sw"><div class="chip" style="background: var(--surface)"></div><div class="meta"><code>--surface</code><span>A control&#x27;s track or an inactive fill (the switch off, a scrubber)</span><small>#aaaaaa · #555555</small></div></div><div class="sw"><div class="chip" style="background: var(--code-bg)"></div><div class="meta"><code>--code-bg</code><span>Code blocks and keys</span><small>#f1f5f9 · #1e293b</small></div></div><div class="sw"><div class="chip" style="background: var(--text-primary)"></div><div class="meta"><code>--text-primary</code><span>Body text, headings, active controls</span><small>#000000 · #ffffff</small></div></div><div class="sw"><div class="chip" style="background: var(--text-secondary)"></div><div class="meta"><code>--text-secondary</code><span>Supporting text: descriptions, form labels, card copy</span><small>#555555 · #a1a1aa</small></div></div><div class="sw"><div class="chip" style="background: var(--text-muted)"></div><div class="meta"><code>--text-muted</code><span>Captions, placeholders, icons at rest, empty states</span><small>#64748b · #94a3b8</small></div></div><div class="sw"><div class="chip" style="background: var(--border-color)"></div><div class="meta"><code>--border-color</code><span>Borders of inputs, buttons, the sheet; the panel edges</span><small>#555555 · #555555</small></div></div><div class="sw"><div class="chip" style="background: var(--line)"></div><div class="meta"><code>--line</code><span>Hairlines: dividers, card edges, badges</span><small>#cfcfcf · #333333</small></div></div><div class="sw"><div class="chip" style="background: var(--underline-color)"></div><div class="meta"><code>--underline-color</code><span>Underlines in running text</span><small>#646464 · #646464</small></div></div><div class="sw"><div class="chip" style="background: var(--primary)"></div><div class="meta"><code>--primary</code><span>Brand amber: the one thing to look at, primary buttons, focus, links, the switch on</span><small>#ffaa00 · #ffaa00</small></div></div><div class="sw"><div class="chip" style="background: var(--secondary)"></div><div class="meta"><code>--secondary</code><span>Brand blue; rare, for a second brand accent, never a status</span><small>#0032a0 · #0032a0</small></div></div><div class="sw"><div class="chip" style="background: var(--accent)"></div><div class="meta"><code>--accent</code><span>Status red: errors, needs attention, destructive. Always with words</span><small>#e4002b · #e4002b</small></div></div><div class="sw"><div class="chip" style="background: var(--success)"></div><div class="meta"><code>--success</code><span>Status green: done, goal reached. Always with words</span><small>#00843d · #00843d</small></div></div><div class="sw"><div class="chip" style="background: var(--overlay)"></div><div class="meta"><code>--overlay</code><span>The dim behind a sheet or drawer</span><small>rgba(0,0,0,.45) · rgba(0,0,0,.6)</small></div></div><div class="sw"><div class="chip" style="background: var(--shadow-color)"></div><div class="meta"><code>--shadow-color</code><span>The one shadow colour (sheet, raised drawer)</span><small>rgba(0,0,0,.1) · rgba(0,0,0,.3)</small></div></div><div class="sw"><div class="chip" style="background: var(--ring)"></div><div class="meta"><code>--ring</code><span>Soft focus halo where an outline cannot sit</span><small>rgba(255,170,0,.3) · rgba(255,170,0,.4)</small></div></div><div class="sw"><div class="chip" style="background: var(--chart-1)"></div><div class="meta"><code>--chart-1</code><span>First data series, always. Never a status</span><small>#e69500 · #ffaa00</small></div></div><div class="sw"><div class="chip" style="background: var(--chart-2)"></div><div class="meta"><code>--chart-2</code><span>Second series</span><small>#006eb8 · #5aa6e6</small></div></div><div class="sw"><div class="chip" style="background: var(--chart-3)"></div><div class="meta"><code>--chart-3</code><span>Third series</span><small>#00978d · #3cc9a8</small></div></div><div class="sw"><div class="chip" style="background: var(--chart-4)"></div><div class="meta"><code>--chart-4</code><span>Fourth series; charts stop here</span><small>#8a2f7a · #b85aa6</small></div></div></div>
+				<h3>How to choose</h3>
+				<ul class="rules">
+					<li>Surfaces stack <code>--bg</code> → <code>--panel</code> → <code>--surface</code>: page, raised card, control track. Nothing darker or lighter exists.</li>
+					<li>Text steps <code>--text-primary</code> → <code>--text-secondary</code> → <code>--text-muted</code> by importance, not by size.</li>
+					<li><code>--primary</code> marks the one thing to look at. Two amber things on a screen compete; pick one.</li>
+					<li><code>--accent</code> and <code>--success</code> say what state something is in, and the words beside them say the same. They are never series colours and never decoration.</li>
+					<li>Charts take <code>--chart-1</code>…<code>--chart-4</code> in that order and never cycle; the chart elements do this themselves.</li>
+					<li>Need a tint? <code>color-mix(in srgb, var(--primary), transparent 70%)</code> keeps the token; a hex value does not.</li>
+				</ul>
+			</article>
+
+			<article id="type">
+				<h2>Type</h2>
+				<p class="lead">One family, Nunito, in three roles, plus a system monospace. Body is 15px on a 1.55 line; the base is set by <code>kit.css</code>, components inherit it.</p>
+				<div class="demo type-sample">
+					<div><div class="display">Display: titles and section heads</div><div class="cap"><code>--font-display</code>, weight 400, letter-spacing 0.04em (tk-header, tk-sheet headings, h2 on this page)</div></div>
+					<div><div>Body: Nunito at 15px with a 1.55 line, the default everywhere. Keep paragraphs under about 72 characters and let the kit's size stand; tiny text is for captions only.</div><div class="cap"><code>--font-body</code></div></div>
+					<div><span class="label">label: small caps caption</span><div class="cap"><code>.label</code>: display family, 0.75rem, 0.12em tracking, lowercase, muted. Section captions and tile labels.</div></div>
+					<div><div class="mono">mono: 0x1F 18.4K 12:30 --primary</div><div class="cap"><code>--font-mono</code> for code, keys and anything aligned by character; numbers that change get <code>font-variant-numeric: tabular-nums</code></div></div>
+					<div><div class="quote">Quote: used for a line of someone else's words.</div><div class="cap"><code>--font-quote</code></div></div>
+				</div>
+				<h3>Scale</h3>
+				<table><tr><th>Use</th><th>Size</th><th>Where</th></tr>
+				<tr><td>App title</td><td>display, set by tk-header</td><td><code>&lt;h1 slot="title"&gt;</code></td></tr>
+				<tr><td>Section head</td><td>display 1.2–1.5rem</td><td>a sheet's heading; a page's h2</td></tr>
+				<tr><td>Card or row title</td><td>body 1rem, weight 600</td><td>.card h3, .row .text span</td></tr>
+				<tr><td>Body</td><td>15px</td><td>everything else</td></tr>
+				<tr><td>Caption, hint, change line</td><td>0.85rem, muted or secondary</td><td>.form .hint, figcaption, tk-stat change</td></tr>
+				<tr><td>Label, badge</td><td>0.72–0.75rem</td><td>.label, .badge</td></tr>
+				<tr><td>Big number</td><td>display or mono, 1.6–2.4rem, tabular</td><td>tk-stat value, a timer</td></tr></table>
+			</article>
+
+			<article id="shape">
+				<h2>Shape &amp; motion</h2>
+				<p class="lead">Corners are nearly square: <code>--radius</code> is 0.15rem. Pills (999px) belong to badges, dots and the switch, which the kit draws; the sheet has its own 6px. Nothing else rounds.</p>
+				<div class="demo shape">
+					<div class="box radius">--radius</div>
+					<div class="box pill">pill (kit only)</div>
+					<div class="box shadow">--shadow-color</div>
+					<div class="box ring">--ring</div>
+				</div>
+				<h3>Spacing</h3>
+				<p class="lead">The kit's own rhythm: 6, 10, 14, 18 and 26px. Gaps inside a control are 6, between controls 10, between fields 14, around a pane 18, between sections 26. Rows that are tapped are at least 44px tall.</p>
+				<div class="demo spacing"><i style="height:6px"></i><i style="height:10px"></i><i style="height:14px"></i><i style="height:18px"></i><i style="height:26px"></i><i style="height:44px"></i></div>
+				<h3>Motion</h3>
+				<ul class="rules">
+					<li>Transitions are 0.2s ease-out on colour, width and transform; the page background crossfades over 0.3s at a theme change.</li>
+					<li>The running dot pulses; nothing else loops.</li>
+					<li><code>sharedStyles</code> turns every animation and transition off under <code>prefers-reduced-motion</code>, in each shadow root. Do not add motion that would need its own switch.</li>
+				</ul>
+			</article>
+
+			<article id="layout">
+				<h2>Layout</h2>
+				<p class="lead">This page is a <code>tk-shell</code>: a nav panel on the left, a details panel on the right, a <code>tk-header</code> and one scrolling <code>section</code>. The document itself never scrolls (<code>&lt;html data-shell&gt;</code>), so iOS cannot drag the header away.</p>
+				<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-shell store-key=&quot;my-app:panels&quot; nav-label=&quot;Pages&quot; aside-label=&quot;Details&quot;&gt;
+  &lt;nav slot=&quot;nav&quot;&gt;...page links (class=&quot;u&quot;, class=&quot;u on&quot; for the current one)...&lt;/nav&gt;
+  &lt;section slot=&quot;aside&quot;&gt;...details for the current page...&lt;/section&gt;
+  &lt;tk-header aside-badge=&quot;3&quot;&gt;&lt;h1 slot=&quot;title&quot;&gt;Inbox&lt;/h1&gt;&lt;button slot=&quot;actions&quot; class=&quot;icon-btn&quot; aria-label=&quot;New&quot;&gt;+&lt;/button&gt;&lt;/tk-header&gt;
+  &lt;section&gt;...the page; this element scrolls, the document does not (&lt;html data-shell&gt;)...&lt;/section&gt;
+&lt;/tk-shell&gt;</code></pre>
+				<table><tr><th>Width</th><th>Nav</th><th>Details</th></tr>
+				<tr><td>up to 899px (phones)</td><td>drawer from the header's menu button</td><td>drawer from the header's details button</td></tr>
+				<tr><td>900–1199px</td><td>docked column, <code>--sidebar-w</code> 280px</td><td>drawer</td></tr>
+				<tr><td>1200px and up</td><td>docked</td><td>docked column, <code>--aside-w</code> 300px</td></tr></table>
+				<ul class="rules">
+					<li>An empty slot means no panel, no button. <code>store-key</code> remembers hidden panels; <code>nav-hidden</code>/<code>aside-hidden</code> set the default.</li>
+					<li>Never build a drawer, scrim or panel toggle: the shell traps focus, sets <code>inert</code>, closes on Escape and overlay, and moves focus back.</li>
+					<li><code>tk-header</code>'s <code>actions</code> slot is for one or two icon buttons; <code>aside-badge</code> shows a count on the details button.</li>
+					<li>A single-screen app without pages skips the shell and panes: <code>tk-header</code>, the content, <code>tk-toasts</code>.</li>
+					<li>Bottom padding ends with <code>var(--safe-bottom)</code> for the home indicator. <code>trackViewport()</code> keeps <code>--app-top</code>/<code>--app-h</code> right while the iOS keyboard is up.</li>
+					<li>Phone first: design at 390px wide, then let the columns appear. The design target for a details column is 300px; the charts fit it.</li>
+				</ul>
+			</article>
+
+			<article id="buttons">
+				<h2>Buttons</h2>
+				<p class="lead">One filled button per view, ghost for the rest, icon buttons for repeated actions in rows and headers. Every icon button has an <code>aria-label</code>.</p>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><button class="btn">Save</button><button class="btn ghost">Cancel</button><button class="btn" disabled>Saving…</button><button class="btn" id="btn-icon">New</button><button class="icon-btn" aria-label="Settings" data-icon="settings"></button></div>
+					<div class="hrow"><button class="btn ghost" id="pressed" aria-pressed="true">Left-handed</button><div class="seg" role="group" aria-label="Range"><button class="on">Day</button><button>Week</button><button>Month</button></div><a class="u" href="#buttons">A link</a><a class="u on" href="#buttons">Current</a></div></div>
+<figcaption>The toggle button keeps its ghost look and flips aria-pressed; the segmented group moves .on. Both read their state to assistive tech, so no colour is needed to tell it.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;button class=&quot;btn&quot;&gt;Save&lt;/button&gt;
+&lt;button class=&quot;btn ghost&quot;&gt;Cancel&lt;/button&gt;
+&lt;button class=&quot;btn&quot; disabled&gt;Saving…&lt;/button&gt;
+&lt;button class=&quot;btn&quot;&gt;${PLUS_ICON} New&lt;/button&gt;
+&lt;button class=&quot;icon-btn&quot; aria-label=&quot;Settings&quot;&gt;${SETTINGS_ICON}&lt;/button&gt;
+&lt;button class=&quot;btn ghost&quot; aria-pressed=&quot;true&quot;&gt;Left-handed&lt;/button&gt;
+&lt;div class=&quot;seg&quot; role=&quot;group&quot; aria-label=&quot;Range&quot;&gt;&lt;button class=&quot;on&quot;&gt;Day&lt;/button&gt;&lt;button&gt;Week&lt;/button&gt;&lt;button&gt;Month&lt;/button&gt;&lt;/div&gt;
+&lt;a class=&quot;u&quot; href=&quot;#&quot;&gt;A link&lt;/a&gt;</code></pre>
+</figure>
+				<ul class="rules">
+					<li><code>.btn</code> text is a verb: Save, Delete, Start. Not OK, Yes, Submit.</li>
+					<li>Disabled means “not possible now”, with the reason nearby; an action that takes time keeps its label and gets a toast when done.</li>
+					<li>Destructive actions use the same filled button and plain words (“Delete”), behind a confirm sheet when the loss is real. There is no red button.</li>
+					<li>Inline icons in a <code>.btn</code> are 16px and sit before the word; an <code>.icon-btn</code> is a 36px target with a 20px icon.</li>
+				</ul>
+			</article>
+
+			<article id="forms">
+				<h2>Forms</h2>
+				<p class="lead">A two-column grid: label left, control right, hints and errors under both. The kit styles the inputs (16px text so iOS does not zoom); the grid is a pattern, copied below.</p>
+				<figure class="ex">
+<div class="demo"><div class="form phone">
+						<label for="f-level">Level</label><select id="f-level"><option>Beginner (60 bpm)</option><option>Intermediate (90 bpm)</option><option>Advanced (120 bpm)</option></select>
+						<label for="f-goal">Daily goal (min)</label><input id="f-goal" type="number" inputmode="numeric" min="5" max="120" step="5" value="20">
+						<label id="f-lh">Left-handed</label><button class="switch" role="switch" aria-checked="false" aria-labelledby="f-lh"></button>
+						<label id="f-sound">Sound</label><button class="switch" role="switch" aria-checked="true" aria-labelledby="f-sound"></button>
+						<label id="f-off">Sync (not available offline)</label><button class="switch" role="switch" aria-checked="false" aria-labelledby="f-off" disabled></button>
+						<label for="f-name">Name</label><input id="f-name" aria-invalid="true" aria-describedby="f-name-err" value="">
+						<p class="error" id="f-name-err">A name is needed to save.</p>
+						<label for="f-search">Search</label><input id="f-search" type="search" placeholder="Scale or key">
+						<p class="hint">Hints sit under the field in muted text.</p>
+						<label><input type="checkbox" checked> Show note names</label>
+						<label><input type="radio" name="hand" checked> Right</label><label><input type="radio" name="hand"> Left</label>
+						<label for="f-notes">Notes</label><span></span>
+						<textarea id="f-notes" rows="2" placeholder="Anything to remember"></textarea>
+					</div></div>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;div class=&quot;form&quot;&gt;
+  &lt;label for=&quot;level&quot;&gt;Level&lt;/label&gt;
+  &lt;select id=&quot;level&quot;&gt;&lt;option&gt;Beginner&lt;/option&gt;&lt;option&gt;Intermediate&lt;/option&gt;&lt;/select&gt;
+
+  &lt;label for=&quot;goal&quot;&gt;Daily goal (min)&lt;/label&gt;
+  &lt;input id=&quot;goal&quot; type=&quot;number&quot; inputmode=&quot;numeric&quot; min=&quot;5&quot; max=&quot;120&quot; step=&quot;5&quot; value=&quot;20&quot;&gt;
+
+  &lt;label id=&quot;lh-label&quot;&gt;Left-handed&lt;/label&gt;
+  &lt;button class=&quot;switch&quot; role=&quot;switch&quot; aria-checked=&quot;false&quot; aria-labelledby=&quot;lh-label&quot; @click=${this.toggle}&gt;&lt;/button&gt;
+
+  &lt;label for=&quot;name&quot;&gt;Name&lt;/label&gt;
+  &lt;input id=&quot;name&quot; aria-invalid=&quot;true&quot; aria-describedby=&quot;name-err&quot;&gt;
+  &lt;p class=&quot;error&quot; id=&quot;name-err&quot;&gt;A name is needed to save.&lt;/p&gt;
+
+  &lt;label&gt;&lt;input type=&quot;checkbox&quot; checked&gt; Sound on&lt;/label&gt;
+&lt;/div&gt;</code></pre>
+</figure>
+				<h3>Pattern CSS</h3>
+				<pre data-lang="css"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>.form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 16px; align-items: center; }
+.form label { color: var(--text-secondary); }
+.form .hint, .form .error { grid-column: 1 / -1; margin-top: -10px; font-size: 0.85rem; }
+.form .hint { color: var(--text-muted); }
+.form .error { color: var(--accent); }
+.form input[aria-invalid=&quot;true&quot;], .form select[aria-invalid=&quot;true&quot;] { border-color: var(--accent); }
+.form input:not([type=&quot;checkbox&quot;]):not([type=&quot;radio&quot;]), .form select { width: 220px; max-width: 100%; justify-self: end; }
+.form .switch { justify-self: end; }
+.form label:has(input) { display: inline-flex; align-items: center; gap: 8px; color: var(--text-primary); }
+.form label:has(input[type=&quot;checkbox&quot;]) { grid-column: 1 / -1; }
+.form textarea { width: 100%; grid-column: 1 / -1; }
+@media (max-width: 480px) { .form input:not([type=&quot;checkbox&quot;]):not([type=&quot;radio&quot;]), .form select { width: 160px; } }
+input[type=&quot;checkbox&quot;], input[type=&quot;radio&quot;] { accent-color: var(--primary); width: 18px; height: 18px; margin: 0; }</code></pre>
+				<ul class="rules">
+					<li>Every control has a label: <code>for</code>/<code>id</code>, or <code>aria-labelledby</code> for the switch. Placeholders are examples, not labels.</li>
+					<li>The switch is <code>&lt;button class="switch" role="switch" aria-checked&gt;</code> for an immediate on/off; a checkbox is for a choice that is saved with the form. Never a checkbox styled as a switch.</li>
+					<li>Numbers: <code>type="number" inputmode="numeric"</code> with <code>min</code>, <code>max</code>, <code>step</code>; the keyboard is right on phones and the browser validates.</li>
+					<li>Errors: <code>aria-invalid="true"</code> on the field, the message in <code>--accent</code> text linked by <code>aria-describedby</code>, shown after the user leaves the field, not while typing.</li>
+					<li>Controls are at most 220px wide and right-aligned; a textarea takes the full row.</li>
+					<li>Settings that take effect at once live in a sheet (below) and save on change; there is no Save button for them.</li>
+				</ul>
+			</article>
+
+			<article id="feedback">
+				<h2>Feedback</h2>
+				<p class="lead">Quiet by default. A toast for something that happened, a dot or badge for state that persists, a notice for something the user should read before going on.</p>
+				<h3>Toasts</h3>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><button class="btn ghost" id="show-toast">Show toast</button><button class="btn ghost" id="toast-warn">Warning toast</button><button class="btn ghost" id="toast-err">Error toast</button></div></div>
+<figcaption>Toasts stack at the bottom and leave on their own. A toast never carries the only copy of information the user needs later.</figcaption>
+<pre data-lang="ts"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>import { toast } from &quot;https://kit.thatsit.app/kit.js&quot;;
+toast(&quot;Saved&quot;);                       // info
+toast(&quot;Offline; changes are kept&quot;, &quot;warning&quot;);
+toast(&quot;Could not sync&quot;, &quot;error&quot;);      // one &lt;tk-toasts&gt;&lt;/tk-toasts&gt; on the page shows them</code></pre>
+</figure>
+				<h3>Status</h3>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><span class="status"><span class="dot live"></span> live</span><span class="status"><span class="dot running"></span> running</span><span class="status"><span class="dot needs_you"></span> needs you</span><span class="status"><span class="dot error"></span> error</span></div>
+					<div class="hrow"><span class="badge">3 open</span><span class="badge">v1.73</span><span class="badge">12:30</span></div></div>
+<figcaption>A dot always has its word next to it; the four classes are the only states.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;span class=&quot;status&quot;&gt;&lt;span class=&quot;dot running&quot;&gt;&lt;/span&gt; running&lt;/span&gt;
+&lt;span class=&quot;badge&quot;&gt;3 open&lt;/span&gt;</code></pre>
+</figure>
+				<h3>Notices</h3>
+				<figure class="ex">
+<div class="demo"><div class="notice"><span data-icon="info"></span><p>Practice is saved on this device only. Nothing leaves it.</p></div>
+					<div class="notice alert"><span data-icon="triangle-alert"></span><p>Offline since 12:30. Changes are kept and sent when you are back.</p></div></div>
+<pre data-lang="css"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>.notice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: var(--panel); border-left: 3px solid var(--primary); border-radius: var(--radius); }
+.notice.alert { border-left-color: var(--accent); }
+.notice svg { width: 18px; height: 18px; flex: none; margin-top: 2px; color: var(--text-muted); }
+.notice.alert svg { color: var(--accent); }
+.notice p { margin: 0; }</code></pre>
+</figure>
+				<h3>Progress</h3>
+				<figure class="ex">
+<div class="demo"><tk-progress id="prog" label="today" unit="min"></tk-progress></div>
+<figcaption>tk-progress is the one progress bar; it reads out as a progressbar with its value and goal. For the whole picture, see Data.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-progress label=&quot;today&quot; unit=&quot;min&quot; .value=${12} .max=${30}&gt;&lt;/tk-progress&gt;</code></pre>
+</figure>
+				<h3>Empty and loading states</h3>
+				<figure class="ex">
+<div class="demo"><div class="empty"><span data-icon="folder"></span><strong>No boards yet</strong><span>Add one to start tracking your keymaps.</span><button class="btn">Add a board</button></div>
+					<div class="status" aria-live="polite"><span class="dot running"></span> Loading sessions…</div></div>
+<figcaption>An empty state says what would be here and offers the first step. Loading is the running dot and words in a polite live region; there is no spinner.</figcaption>
+<pre data-lang="css"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>.empty { display: grid; justify-items: center; gap: 10px; padding: 28px 16px; text-align: center; color: var(--text-muted); border: 1px dashed var(--line); border-radius: var(--radius); }
+.empty strong { color: var(--text-secondary); font-weight: 600; }
+.empty svg { width: 28px; height: 28px; }</code></pre>
+</figure>
+			</article>
+
+			<article id="overlays">
+				<h2>Overlays</h2>
+				<p class="lead"><code>tk-sheet</code> is the only overlay: a bottom sheet on phones, a centred panel on wide screens, with a heading, a close button, Escape and scrim handling. Content is slotted and styled by the component that owns it.</p>
+				<h3>Sheet</h3>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><button class="btn" id="open-sheet">Open sheet</button></div></div>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-sheet heading=&quot;Sheet&quot; .open=${this.open} @tk-close=${() =&gt; (this.open = false)}&gt;
+  &lt;p&gt;Slotted content.&lt;/p&gt;
+&lt;/tk-sheet&gt;</code></pre>
+</figure>
+				<h3>Settings dialog</h3>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><button class="btn ghost" id="open-settings" data-icon="settings">Settings</button></div></div>
+<figcaption>The form pattern inside a sheet. Each change applies at once and is saved; closing is the only exit. This is the settings dialog every app shares, so it is not rebuilt per app.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-sheet heading=&quot;Settings&quot; .open=${this.settingsOpen} @tk-close=${() =&gt; (this.settingsOpen = false)}&gt;
+  &lt;div class=&quot;form&quot;&gt;
+    &lt;label for=&quot;level&quot;&gt;Level&lt;/label&gt;&lt;select id=&quot;level&quot;&gt;…&lt;/select&gt;
+    &lt;label id=&quot;lh&quot;&gt;Left-handed&lt;/label&gt;&lt;button class=&quot;switch&quot; role=&quot;switch&quot; aria-checked=${this.leftHanded} aria-labelledby=&quot;lh&quot; @click=${this.toggleHand}&gt;&lt;/button&gt;
+    &lt;label for=&quot;goal&quot;&gt;Daily goal (min)&lt;/label&gt;&lt;input id=&quot;goal&quot; type=&quot;number&quot; inputmode=&quot;numeric&quot; .value=${this.goal}&gt;
+  &lt;/div&gt;
+&lt;/tk-sheet&gt;</code></pre>
+</figure>
+				<h3>Confirm</h3>
+				<figure class="ex">
+<div class="demo"><div class="hrow"><button class="btn ghost" id="open-confirm" data-icon="trash-2">Delete board</button></div></div>
+<figcaption>The heading is the question, the body says what is lost, the filled button is the action in plain words and the ghost one keeps things as they are.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-sheet heading=&quot;Delete this board?&quot; .open=${this.confirming} @tk-close=${this.cancel}&gt;
+  &lt;p&gt;“Work” and its 3 keymaps go away. This cannot be undone.&lt;/p&gt;
+  &lt;div class=&quot;row-end&quot;&gt;&lt;button class=&quot;btn ghost&quot; @click=${this.cancel}&gt;Keep it&lt;/button&gt;&lt;button class=&quot;btn&quot; @click=${this.remove}&gt;Delete&lt;/button&gt;&lt;/div&gt;
+&lt;/tk-sheet&gt;</code></pre>
+</figure>
+			</article>
+
+			<article id="lists">
+				<h2>Lists &amp; cards</h2>
+				<p class="lead">A card is a <code>--panel</code> surface for one thing; rows are for many things of one kind, each with its actions on the right. Section captions use <code>.label</code>.</p>
+				<figure class="ex">
+<div class="demo"><span class="label">boards</span>
+					<div class="rows">
+						<div class="row"><div class="text"><span>Work</span><small>3 keymaps · used today</small></div><div class="actions"><button class="icon-btn" aria-label="Rename Work" data-icon="pencil"></button><button class="icon-btn" aria-label="Delete Work" data-icon="trash-2"></button></div></div>
+						<div class="row"><div class="text"><span>Travel keyboard with a very long name that gets cut</span><small>1 keymap</small></div><div class="actions"><button class="icon-btn" aria-label="Rename Travel" data-icon="pencil"></button><button class="icon-btn" aria-label="Delete Travel" data-icon="trash-2"></button></div></div>
+						<div class="row"><div class="text"><span>Numpad</span><small>never used</small></div><span class="badge">new</span><button class="icon-btn" aria-label="More for Numpad" data-icon="ellipsis"></button></div>
+					</div></div>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;span class=&quot;label&quot;&gt;boards&lt;/span&gt;
+&lt;div class=&quot;rows&quot;&gt;
+  ${boards.map((b) =&gt; html`&lt;div class=&quot;row&quot;&gt;
+    &lt;div class=&quot;text&quot;&gt;&lt;span&gt;${b.name}&lt;/span&gt;&lt;small&gt;${b.keymaps} keymaps&lt;/small&gt;&lt;/div&gt;
+    &lt;div class=&quot;actions&quot;&gt;
+      &lt;button class=&quot;icon-btn&quot; aria-label=&quot;Rename ${b.name}&quot;&gt;${PENCIL_ICON}&lt;/button&gt;
+      &lt;button class=&quot;icon-btn&quot; aria-label=&quot;Delete ${b.name}&quot;&gt;${TRASH_ICON}&lt;/button&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;`)}
+&lt;/div&gt;</code></pre>
+</figure>
+				<pre data-lang="css"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>.rows { display: grid; border-top: 1px solid var(--line); }
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.row .text { flex: 1; min-width: 0; display: grid; }
+.row .text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .text small { color: var(--text-muted); }
+.row .actions { display: flex; gap: 2px; margin-right: -8px; }</code></pre>
+				<h3>Cards</h3>
+				<figure class="ex">
+<div class="demo"><div class="card"><h3>Streak</h3><p>Six days in a row. One more makes a week.</p><div class="row-end" style="margin:0"><button class="btn ghost">Details</button></div></div>
+					<div class="card"><span class="label">session</span><dl class="kv"><dt>Started</dt><dd>12:30</dd><dt>Length</dt><dd>18 min</dd><dt>Average</dt><dd>34 wpm</dd></dl></div></div>
+<figcaption>A card holds one subject. Lists of cards are rows in disguise; use rows.</figcaption>
+<pre data-lang="css"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 8px; }
+.card h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+.card p { margin: 0; color: var(--text-secondary); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; margin: 0; }
+.kv dt { color: var(--text-muted); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; }</code></pre>
+</figure>
+			</article>
+
+			<article id="data">
+				<h2>Data</h2>
+				<p class="lead">Numbers go in <code>tk-stat</code> tiles, histories in a sparkline or <code>tk-timeseries</code>, comparisons in <code>tk-bars</code>, habits in <code>tk-heatmap</code>, a goal in <code>tk-progress</code>. Rows go in <code>.data</code>; <code>x</code>, <code>y</code>, <code>label</code> and <code>value</code> name row fields. Nothing is drawn by hand and no colour is picked.</p>
+				<figure class="ex">
+<div class="demo"><tk-stats id="d-stats"><tk-stat wide label="average" value="34" unit="wpm" change="+5 vs previous 2 weeks" good="up"></tk-stat><tk-stat label="sessions" value="42"></tk-stat><tk-stat label="characters" value="18400"></tk-stat></tk-stats>
+					<tk-timeseries id="d-ts" y="wpm" goal="40" unit="wpm"></tk-timeseries>
+					<tk-bars id="d-bars" label="key" value="wpm" goal="40" unit="wpm"></tk-bars>
+					<tk-heatmap id="d-cal" end="2026-11-09" weeks="12" unit="min" legend></tk-heatmap></div>
+<figcaption>Every chart has a readout line, keyboard scrubbing, a hidden data table and a generated description. The full reference, with every attribute, is on charts.html and in the README.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;tk-stats&gt;
+  &lt;tk-stat wide label=&quot;average&quot; value=&quot;34&quot; unit=&quot;wpm&quot; change=&quot;+5 vs previous 2 weeks&quot; good=&quot;up&quot; .trend=${wpms}&gt;&lt;/tk-stat&gt;
+  &lt;tk-stat label=&quot;sessions&quot; value=&quot;42&quot;&gt;&lt;/tk-stat&gt;
+  &lt;tk-stat label=&quot;streak&quot; value=&quot;6&quot; unit=&quot;d&quot;&gt;&lt;/tk-stat&gt;
+&lt;/tk-stats&gt;
+&lt;tk-timeseries y=&quot;wpm&quot; goal=&quot;40&quot; unit=&quot;wpm&quot; .data=${days}&gt;&lt;/tk-timeseries&gt;
+&lt;tk-bars label=&quot;key&quot; value=&quot;wpm&quot; goal=&quot;40&quot; unit=&quot;wpm&quot; .data=${keys}&gt;&lt;/tk-bars&gt;
+&lt;tk-progress label=&quot;today&quot; unit=&quot;min&quot; .value=${12} .max=${30}&gt;&lt;/tk-progress&gt;
+&lt;tk-heatmap end=&quot;2026-11-09&quot; weeks=&quot;12&quot; unit=&quot;min&quot; legend .data=${cal}&gt;&lt;/tk-heatmap&gt;</code></pre>
+</figure>
+			</article>
+
+			<article id="icons">
+				<h2>Icons</h2>
+				<p class="lead">Lucide, inline, following <code>currentColor</code>. Import the ones you use by name; <code>ICONS</code> maps every Lucide name to its template. Tap an icon to copy its import name.</p>
+				<pre data-lang="ts"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>import { SETTINGS_ICON, TRASH_ICON, ICONS } from &quot;https://kit.thatsit.app/kit.js&quot;;
+html`&lt;button class=&quot;icon-btn&quot; aria-label=&quot;Settings&quot;&gt;${SETTINGS_ICON}&lt;/button&gt;`   // 20px, muted until hover
+html`&lt;button class=&quot;btn&quot;&gt;${TRASH_ICON} Delete&lt;/button&gt;`                            // 16px beside the text
+html`&lt;span class=&quot;hint&quot;&gt;${ICONS[&quot;circle-help&quot;]} How this works&lt;/span&gt;`              // set width and height yourself</code></pre>
+				<div class="gallery" id="gallery"></div>
+				<ul class="rules">
+					<li>An icon alone is a button with an <code>aria-label</code>; an icon beside words is decoration (the templates carry <code>aria-hidden</code>).</li>
+					<li>Sizes: 20px in <code>.icon-btn</code>, 16px in <code>.btn</code>, 18px in a notice, 28px in an empty state. Set width and height on <code>svg</code> anywhere else.</li>
+					<li>Need one that is not here? Ask for it to be added to the kit rather than pasting an SVG: pasted paths have been wrong before.</li>
+				</ul>
+			</article>
+
+			<article id="a11y">
+				<h2>Accessibility</h2>
+				<ul class="rules">
+					<li><strong>Focus</strong>: <code>sharedStyles</code> draws a 2px <code>--primary</code> outline on <code>:focus-visible</code>; never remove it. Order follows the DOM; drawers and sheets trap and return focus.</li>
+					<li><strong>Names</strong>: every control has a visible label or an <code>aria-label</code>; icon buttons always. Buttons say what they do.</li>
+					<li><strong>State</strong>: <code>aria-pressed</code> on toggle buttons, <code>aria-checked</code> on the switch, <code>aria-expanded</code> on panel buttons (the kit sets it), <code>aria-invalid</code> on bad fields. State is never colour alone: the dot has its word, the change line has its sign.</li>
+					<li><strong>Live regions</strong>: toasts are <code>role="status"</code>; charts announce their readout at most every 400ms. Never put <code>aria-live</code> on text that changes with every keystroke.</li>
+					<li><strong>Targets</strong>: 36px for icon buttons, 44px rows and primary actions on phones; inputs are 16px text so iOS does not zoom.</li>
+					<li><strong>Contrast</strong>: the token pairs pass AA on their own surfaces. Muted text is for what can be missed.</li>
+					<li><strong>Motion and forced colours</strong>: both handled by the kit; the charts keep system colours in forced-colors mode.</li>
+					<li><strong>Tests</strong>: e2e tests use roles and names (<code>getByRole("switch", { name: "Left-handed" })</code>), which only work when the markup above is followed.</li>
+				</ul>
+			</article>
+
+			<article id="rules">
+				<h2>Rules</h2>
+				<ul class="rules">
+					<li>Import Lit from <code>https://kit.thatsit.app/lit.js</code> and the kit from <code>https://kit.thatsit.app/kit.js</code>, never <code>from "lit"</code>.</li>
+					<li>Only the tokens on this page exist. There is no <code>--tk-*</code> colour; a made-up name renders as nothing, and the template's tests fail on it.</li>
+					<li>No hex colours, font families or radius values in app code; no colour per theme.</li>
+					<li>Use the kit's components and classes before writing CSS; copy a pattern from this page before inventing one; ask for the kit to grow before building a second copy.</li>
+					<li>Never hand-build panels, drawers, charts or progress bars. Never pick chart colours.</li>
+					<li>Phone first at 390px, dark and light, both checked in a screenshot before review.</li>
+				</ul>
+				<p class="lead">Source: <code>pi-web/kit</code>. Published by CI on every change, additive-only, checked against the live <a class="u" href="./api.json">api.json</a>.</p>
+			</article>
+
 			</div>
 		</section>
-		<section slot="aside"><span class="label">details</span><p>Slotted details.</p><button class="btn ghost" id="open-sheet-2">Open sheet</button></section>
+		<section slot="aside">
+			<span class="label">details</span>
+			<p style="margin:0">The right panel: context for the current page. Here, the quick reference.</p>
+			<span class="label">tokens</span>
+			<ul class="aside-list">
+				<li><code>--bg</code> <code>--panel</code> <code>--surface</code> <code>--code-bg</code></li>
+				<li><code>--text-primary</code> <code>--text-secondary</code> <code>--text-muted</code></li>
+				<li><code>--border-color</code> <code>--line</code> <code>--underline-color</code></li>
+				<li><code>--primary</code> <code>--secondary</code> <code>--accent</code> <code>--success</code></li>
+				<li><code>--overlay</code> <code>--shadow-color</code> <code>--ring</code></li>
+				<li><code>--chart-1</code> … <code>--chart-4</code></li>
+				<li><code>--radius</code> <code>--font-display</code> <code>--font-body</code> <code>--font-mono</code> <code>--font-quote</code></li>
+				<li><code>--sidebar-w</code> <code>--aside-w</code> <code>--safe-bottom</code> <code>--app-top</code> <code>--app-h</code></li>
+			</ul>
+			<span class="label">classes</span>
+			<ul class="aside-list"><li><code>.btn</code> <code>.btn.ghost</code> <code>.icon-btn</code> <code>.switch</code> <code>.seg</code> <code>.u</code> <code>.label</code> <code>.badge</code> <code>.dot</code> <code>.sr-only</code></li></ul>
+			<span class="label">files</span>
+			<ul class="aside-list"><li><a class="u" href="./kit.css">kit.css</a> · <a class="u" href="./kit.js">kit.js</a> · <a class="u" href="./lit.js">lit.js</a> · <a class="u" href="./theme-init.js">theme-init.js</a> · <a class="u" href="./api.json">api.json</a></li></ul>
+			<button class="btn ghost" id="open-sheet-2">Open sheet</button>
+		</section>
 	</tk-shell>
 	<script>
 		// Query switches for the tests; a classic script runs before the deferred kit module upgrades tk-shell.
@@ -44,15 +527,105 @@
 		})();
 	</script>
 	<tk-sheet id="sheet" heading="Sheet"><p>Slotted content.</p></tk-sheet>
+	<tk-sheet id="settings" heading="Settings">
+		<div class="form">
+			<label for="s-level">Level</label><select id="s-level"><option>Beginner (60 bpm)</option><option>Intermediate (90 bpm)</option><option>Advanced (120 bpm)</option></select>
+			<label id="s-lh">Left-handed</label><button class="switch" role="switch" aria-checked="false" aria-labelledby="s-lh"></button>
+			<label for="s-goal">Daily goal (min)</label><input id="s-goal" type="number" inputmode="numeric" min="5" max="120" step="5" value="20">
+			<label id="s-sound">Sound</label><button class="switch" role="switch" aria-checked="true" aria-labelledby="s-sound"></button>
+		</div>
+	</tk-sheet>
+	<tk-sheet id="confirm" heading="Delete this board?">
+		<p>“Work” and its 3 keymaps go away. This cannot be undone.</p>
+		<div class="row-end"><button class="btn ghost" data-close>Keep it</button><button class="btn" id="confirm-delete">Delete</button></div>
+	</tk-sheet>
 	<tk-toasts></tk-toasts>
 	<script type="module">
-		import { toast, sharedStyles } from "./kit.js";
-		// Light DOM doesn't get sharedStyles otherwise, so .btn/.seg would be unstyled.
+		import { render } from "./lit.js";
+		import { toast, sharedStyles, ICONS, SUN_ICON, MOON_ICON, PLUS_ICON, COPY_ICON } from "./kit.js";
+		// Light DOM doesn't get sharedStyles otherwise, so .btn/.seg/.switch would be unstyled.
 		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedStyles.styleSheet];
-		const sheet = document.getElementById("sheet");
-		for (const id of ["open-sheet", "open-sheet-2"]) document.getElementById(id)?.addEventListener("click", () => (sheet.open = true));
-		sheet.addEventListener("tk-close", () => (sheet.open = false));
+
+		// Icons by name, wherever the markup asks for one.
+		const iconInto = (el, icon) => {
+			const text = el.textContent.trim();
+			el.textContent = "";
+			render(icon, el);
+			if (text) el.append(` ${text}`);
+		};
+		for (const el of document.querySelectorAll("[data-icon]")) if (ICONS[el.dataset.icon]) iconInto(el, ICONS[el.dataset.icon]);
+		iconInto(document.getElementById("btn-icon"), PLUS_ICON);
+		for (const b of document.querySelectorAll("pre .copy")) render(COPY_ICON, b);
+
+		// Theme: the header action flips light/dark and stores it under theme-init's default key.
+		const theme = document.getElementById("theme");
+		const paintTheme = () => render(document.documentElement.dataset.theme === "dark" ? SUN_ICON : MOON_ICON, theme);
+		theme.addEventListener("click", () => {
+			const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+			document.documentElement.dataset.theme = next;
+			try { localStorage.setItem("thatsit:theme", next); } catch {}
+			paintTheme();
+		});
+		paintTheme();
+
+		// Sheets.
+		const sheet = (id) => document.getElementById(id);
+		const opens = { "open-sheet": "sheet", "open-sheet-2": "sheet", "open-settings": "settings", "open-confirm": "confirm" };
+		for (const [btn, id] of Object.entries(opens)) document.getElementById(btn)?.addEventListener("click", () => (sheet(id).open = true));
+		for (const s of document.querySelectorAll("tk-sheet")) s.addEventListener("tk-close", () => (s.open = false));
+		for (const b of document.querySelectorAll("[data-close]")) b.addEventListener("click", () => (b.closest("tk-sheet").open = false));
+		document.getElementById("confirm-delete").addEventListener("click", () => { sheet("confirm").open = false; toast("Board deleted"); });
+
+		// Toasts, switches, the pressed button.
 		document.getElementById("show-toast").addEventListener("click", () => toast("Saved"));
+		document.getElementById("toast-warn").addEventListener("click", () => toast("Offline; changes are kept", "warning"));
+		document.getElementById("toast-err").addEventListener("click", () => toast("Could not sync", "error"));
+		for (const s of document.querySelectorAll(".switch")) s.addEventListener("click", () => s.setAttribute("aria-checked", s.getAttribute("aria-checked") === "true" ? "false" : "true"));
+		const pressed = document.getElementById("pressed");
+		pressed.addEventListener("click", () => pressed.setAttribute("aria-pressed", pressed.getAttribute("aria-pressed") === "true" ? "false" : "true"));
+		for (const seg of document.querySelectorAll(".seg")) seg.addEventListener("click", (e) => {
+			const b = e.target.closest("button");
+			if (!b) return;
+			for (const o of seg.querySelectorAll("button")) o.classList.toggle("on", o === b);
+		});
+
+		// Copy buttons on snippets; icon tiles copy their import name.
+		const copy = async (text, what) => {
+			try { await navigator.clipboard.writeText(text); toast(`Copied ${what}`); } catch { toast("Copy failed; select the text instead", "warning"); }
+		};
+		for (const b of document.querySelectorAll("pre .copy")) b.addEventListener("click", () => copy(b.parentElement.querySelector("code").textContent, "the snippet"));
+		const gallery = document.getElementById("gallery");
+		const constName = (name) => ({"trash-2": "TRASH_ICON", "share-2": "SHARE_ICON", "triangle-alert": "WARNING_ICON", "circle-alert": "ALERT_ICON", "circle-check": "CHECK_CIRCLE_ICON", "circle-x": "X_CIRCLE_ICON", "circle-help": "HELP_ICON", "ellipsis": "MORE_ICON", "ellipsis-vertical": "MORE_VERTICAL_ICON", "rotate-cw": "REFRESH_ICON", "house": "HOME_ICON", "volume-2": "VOLUME_ICON", "volume-x": "MUTE_ICON", "grip-vertical": "GRIP_ICON", "maximize-2": "EXPAND_ICON", "minimize-2": "COLLAPSE_ICON", "log-out": "LOGOUT_ICON"})[name] ?? `${name.toUpperCase().replace(/-/g, "_")}_ICON`;
+		for (const name of Object.keys(ICONS)) {
+			const b = document.createElement("button");
+			b.type = "button";
+			b.title = constName(name);
+			b.setAttribute("aria-label", `Copy ${constName(name)}`);
+			const holder = document.createElement("span");
+			render(ICONS[name], holder);
+			b.append(holder, document.createTextNode(name));
+			b.addEventListener("click", () => copy(constName(name), constName(name)));
+			gallery.append(b);
+		}
+
+		// Chart data: deterministic (mulberry32), so screenshots are stable.
+		let a = 20261110;
+		const rnd = () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+		const key = (d) => d.toISOString().slice(0, 10);
+		const end = Date.UTC(2026, 10, 9);
+		const days = [];
+		for (let i = 27; i >= 0; i--) {
+			const day = key(new Date(end - i * 86400000));
+			days.push(rnd() < 1 / 9 ? { day, wpm: null } : { day, wpm: Math.round(28 + (27 - i) * 0.3 + rnd() * 10) });
+		}
+		const wpms = days.map((d) => d.wpm).filter((v) => v !== null);
+		document.querySelector("#d-stats tk-stat[wide]").trend = wpms;
+		document.getElementById("d-ts").data = days;
+		document.getElementById("d-bars").data = "etaon".split("").map((k, i) => ({ key: k, wpm: Math.round(48 - i * 3 - rnd() * 3) }));
+		const cal = [];
+		for (let i = 83; i >= 0; i--) cal.push({ day: key(new Date(end - i * 86400000)), value: rnd() < 0.35 ? 0 : Math.round(rnd() * 60) });
+		document.getElementById("d-cal").data = cal;
+		const prog = document.getElementById("prog"); prog.value = 12; prog.max = 30;
 	</script>
 </body>
 </html>

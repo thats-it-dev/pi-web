@@ -118,16 +118,15 @@ test("add one increases the count", async ({ page }) => {
 
 ## Style rules
 
-- Import Lit only from `https://kit.thatsit.app/lit.js` and the kit only from
-  `https://kit.thatsit.app/kit.js`. Never `from "lit"`. Reference: https://kit.thatsit.app/ (live
-  demo) and https://kit.thatsit.app/kit.d.ts.
-- Use only kit components: `tk-sheet` (`heading`, `.open`, `@tk-close`), `tk-toasts` (shows
-  `toast("msg")`), `tk-shell` + `tk-header` for nav apps (`nav` and `aside` slots are the side panels, never hand-built; kit README "Side panels"), and `tk-tailnet-only` for gateway apps. Numbers and charts: `tk-stats`/`tk-stat`, `tk-sparkline`, `tk-timeseries`, `tk-bars`, `tk-heatmap` (kit README "Charts"; rows go in `.data`, and `x`/`y`/`label`/`value` on charts name row fields, not text). Never hand-build chart SVG or canvas, never use d3, never pick chart colors.
-- Use only `sharedStyles` classes: `.btn`, `.btn.ghost`, `.seg` (button group, `.on` for the
-  selected one), `.u` (underlined link, `.on`), `.label`, `.dot`, `.icon-btn`, `.badge`, and plain `input`, `textarea`, `select`.
-- Colors and fonts come only from tokens such as `var(--bg)`, `var(--text-primary)`, `var(--text-muted)`,
-  `var(--primary)`, `var(--accent)`, `var(--border-color)`, `var(--radius)`. No hex colors,
-  `font-family` or `border-radius` values in app code.
+- Import Lit only from `https://kit.thatsit.app/lit.js` and the kit only from `https://kit.thatsit.app/kit.js`. Never `from "lit"`.
+  The design system is https://kit.thatsit.app/ : every token, class, element, pattern and icon with its code. Before building
+  any UI (a settings dialog, a form row, a switch, a list with actions, an empty state, a card, a notice), fetch that page and copy its pattern.
+- Use only kit components: `tk-sheet` (`heading`, `.open`, `@tk-close`; settings dialogs and confirms are a sheet with the page's `.form` pattern), `tk-toasts` (shows
+  `toast("msg")`), `tk-shell` + `tk-header` for nav apps (`nav` and `aside` slots are the side panels, never hand-built; kit README "Side panels"), `tk-progress` for a goal bar, and `tk-tailnet-only` for gateway apps. Numbers and charts: `tk-stats`/`tk-stat`, `tk-sparkline`, `tk-timeseries`, `tk-bars`, `tk-heatmap` (kit README "Charts"; rows go in `.data`, and `x`/`y`/`label`/`value` on charts name row fields, not text). Never hand-build chart SVG, canvas or progress bars, never use d3, never pick chart colors.
+- Use only `sharedStyles` classes: `.btn`, `.btn.ghost`, `.icon-btn` (36px, with `aria-label`), `.switch` (`<button class="switch" role="switch" aria-checked>`), `.seg` (button group, `.on` for the
+  selected one), `.u` (underlined link, `.on`), `.label`, `.dot`, `.badge`, `.sr-only`, and plain `input`, `textarea`, `select`. Icons come from the kit (`SETTINGS_ICON`, `TRASH_ICON`, `PENCIL_ICON`, `PLUS_ICON`, `X_ICON`, …, `ICONS[name]`), never pasted SVG.
+- Colors and fonts come only from kit tokens (the page lists all of them; there is no `--tk-*` colour): `var(--bg)`, `var(--panel)`, `var(--text-primary)`, `var(--text-muted)`,
+  `var(--primary)`, `var(--accent)`, `var(--border-color)`, `var(--line)`, `var(--radius)`. No hex colors, `font-family` or `border-radius` values in app code.
 
 ## When something fails
 

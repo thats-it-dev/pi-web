@@ -41,6 +41,11 @@ export const sharedStyles = css`
 	.seg { display: inline-flex; border: 1px solid var(--border-color); border-radius: var(--radius); overflow: hidden; width: max-content; }
 	.seg button { padding: 5px 14px; font-size: 0.9rem; }
 	.seg button.on { background: var(--text-primary); color: var(--bg); }
+	.switch { position: relative; width: 44px; height: 26px; flex: none; border-radius: 999px; background: var(--surface); transition: background-color 0.2s ease-out; }
+	.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--bg); transition: transform 0.2s ease-out; }
+	.switch[aria-checked="true"] { background: var(--primary); }
+	.switch[aria-checked="true"]::after { transform: translateX(18px); }
+	.switch:disabled { opacity: 0.45; cursor: default; }
 	.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 `;

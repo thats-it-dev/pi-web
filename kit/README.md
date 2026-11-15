@@ -263,6 +263,25 @@ Series use four tokens from `kit.css`, with light and dark values: `--chart-1` (
 
 All chart text is at least 12px.
 
+## Design system page
+
+https://kit.thatsit.app/ is the design system: every token with its role and both values, type, shape and motion, the shell's breakpoints, buttons, forms (with the switch), feedback, overlays (the shared settings dialog and confirm patterns on `tk-sheet`), lists and cards, the charts, the icons and the accessibility rules. Each example sits next to its code; the pattern CSS shown there (`.form`, `.card`, `.rows`, `.empty`, `.notice`, `.kv`) is what a component copies into its own `static styles`. The source is `demo/index.html`, written by hand; `demo/charts.html` is the full chart reference.
+
+`sharedStyles` carries `.switch`: `<button class="switch" role="switch" aria-checked="false" aria-labelledby="…">` is an on/off control that applies at once; the component flips `aria-checked`.
+
+## Icons
+
+Lucide icons (ISC, lucide-static 1.73.0) as Lit templates, inline so they follow `currentColor` and carry `aria-hidden`. Import them by name from `kit.js`:
+
+```ts
+import { SETTINGS_ICON, TRASH_ICON, PENCIL_ICON, ICONS } from "https://kit.thatsit.app/kit.js";
+html`<button class="icon-btn" aria-label="Settings">${SETTINGS_ICON}</button>`; // 20px
+html`<button class="btn">${TRASH_ICON} Delete</button>`; // 16px beside the text
+ICONS["circle-help"]; // every icon by its Lucide name
+```
+
+`.icon-btn svg` is 20px and `.btn svg` 16px; anywhere else set `width` and `height` on the `svg`. The gallery on the design system page lists all of them and copies the import name on tap. An icon that is missing is added here, not pasted into an app: pasted paths have been wrong.
+
 ## API policy
 
 The API is additive-only: exports, element tags (`tk-`), events, CSS custom properties and published files are never removed or renamed. `npm run check-api -w kit` fetches `https://kit.thatsit.app/api.json` and fails if the fresh build dropped anything the live kit has. CI runs it before every deploy.
