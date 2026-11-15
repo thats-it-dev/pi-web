@@ -15,6 +15,10 @@ ExecStart=%h/.local/bin/node src/main.ts
 Environment="PATH=%h/.local/bin:/usr/local/cuda/bin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
 Restart=always
 RestartSec=5
+# One child over the memory limit (vitest, Playwright, a worker's npm test) is killed on its own; the hub and the other
+# sessions stay up. Before this (2026-11-14 10:26) the default OOMPolicy=stop took the whole unit down with it and no
+# session heard that its worker had died.
+OOMPolicy=continue
 # The hub closes its headless pi children on SIGTERM; anything left is killed after the timeout.
 KillMode=mixed
 TimeoutStopSec=15

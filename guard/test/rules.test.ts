@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -773,4 +773,72 @@ test("pr needs a look when UI files changed, ship always; the review gate comes 
 	assert.equal(checkShell(pr, { ...base, reviewed: () => true, screenSeen: () => true, uiChanged: () => true }), undefined);
 	assert.deepEqual(checkShell(pr, { ...base }), { block: true, reason: REASONS.review }, "without the check the old gate alone applies");
 	assert.match(REASONS.screen, /thatsit-app\.ts screenshot <dir>/);
+});
+
+test("reviewVerdict: a verdict line without a list dash counts too (fret 2026-11-14 21:33)", () => {
+	assert.equal(reviewVerdict("## Review\n\n**Finding:** None.\n\n**Merge verdict: OK**"), true);
+	assert.equal(reviewVerdict("## Review\nChecked everything.\nMerge verdict: OK"), true);
+	assert.equal(reviewVerdict("## Review\nI am still reading the diff."), false);
+});
+
+// --- a follow-up a stop withdrew is named on the next resume of that worker (fret 2026-11-14 19:33 → 20:02) ---
+
+const call = (id: string, args: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "subagent", arguments: args }] } });
+const res = (id: string, text: string) => ({ type: "message", message: { role: "toolResult", toolCallId: id, isError: false, content: [{ type: "text", text }] } });
+const notified = (text: string) => ({ type: "custom_message", customType: "subagent-notify", content: text });
+const L = "4b06b6d8-bc17-4715-ac06-eae2787245ca";
+const X = "96ab932e-2cba-4b01-ac45-7d286b918a4b";
+const Y = "faff5de0-b639-498c-9c60-14897d9ffcf7";
+const launched = [call("c1", { agent: "worker", task: "Build it" }), res("c1", `Run fan-out: 1/64 used\nAsync: worker [${L}]\n`), notified(`Background task completed: **worker** ... ${L}`)];
+const revive = (c: string, from: string, msg: string, to: string) => [call(c, { action: "resume", id: from, message: msg }), res(c, `Revived async subagent from ${from}.\nRevived run: ${to}\nAgent: worker`)];
+
+test("withdrawnFollowUps: the message of a revived run that was stopped is withdrawn for the whole chain, once", () => {
+	const branch = [...launched, ...revive("c2", L, "Remove the dialog border and radius.", X), call("c3", { action: "stop", id: X }), res("c3", `Stop requested for async run ${X}.`), notified(`Background task stopped: **worker**  Subagent stopped by user. .../${X}`)];
+	assert.deepEqual(withdrawnFollowUps(branch, L), ["Remove the dialog border and radius."]);
+	assert.deepEqual(withdrawnFollowUps(branch, X), ["Remove the dialog border and radius."], "any id in the chain");
+	assert.deepEqual(withdrawnFollowUps(branch, "96ab932e"), ["Remove the dialog border and radius."], "a prefix too");
+	assert.deepEqual(withdrawnFollowUps(branch, "other-run"), []);
+	// The next resume on the chain carried the note: nothing is owed after it.
+	const noted = [...branch, ...revive("c4", L, "Fix the reviewer's findings.", Y)];
+	assert.deepEqual(withdrawnFollowUps(noted, Y), []);
+	assert.deepEqual(withdrawnFollowUps(noted, L), []);
+});
+
+test("withdrawnFollowUps: a stop after the run already finished withdraws nothing; a stop by prefix counts", () => {
+	const done = [...launched, ...revive("c2", L, "Add the icon.", X), notified(`Background task completed: **worker** ... ${X}`), call("c3", { action: "stop", id: X }), res("c3", "Stop requested.")];
+	assert.deepEqual(withdrawnFollowUps(done, L), []);
+	const prefix = [...launched, ...revive("c2", L, "Add the icon.", X), call("c3", { action: "stop", id: "96ab932e" }), res("c3", "Stop requested.")];
+	assert.deepEqual(withdrawnFollowUps(prefix, L), ["Add the icon."]);
+});
+
+test("noteWithdrawn prepends the note to a resume on a chain with a stopped follow-up and leaves other calls alone", () => {
+	const branch = [...launched, ...revive("c2", L, "Remove the dialog border.\nKeep the shadow.", X), call("c3", { action: "stop", id: X }), res("c3", "Stop requested.")];
+	const input: Record<string, unknown> = { action: "resume", id: L, message: "Replace the icon." };
+	assert.equal(noteWithdrawn(input, branch), true);
+	assert.equal(input.message, `${withdrawnNote(["Remove the dialog border.\nKeep the shadow."])}\n\nReplace the icon.`);
+	assert.match(String(input.message), /^\[pi-guard\] Michael stopped your previous run before it finished, which withdraws the follow-up it carried: "Remove the dialog border\. Keep the shadow\."\. Do not act on it/);
+	const fresh: Record<string, unknown> = { agent: "worker", task: "x" };
+	assert.equal(noteWithdrawn(fresh, branch), false);
+	assert.deepEqual(fresh, { agent: "worker", task: "x" });
+	const clean: Record<string, unknown> = { action: "resume", id: L, message: "m" };
+	assert.equal(noteWithdrawn(clean, launched), false);
+	assert.equal(clean.message, "m");
+});
+
+test("promptDigest hashes the system text and each message; the hashes move only where the request changed", () => {
+	const a = promptDigest({ model: "m", messages: [{ role: "system", content: "rules" }, { role: "user", content: "hi" }, { role: "assistant", content: "yo" }] })!;
+	assert.equal(a.model, "m");
+	assert.equal(a.msgs.length, 2);
+	assert.ok(a.chars > 50);
+	const b = promptDigest({ model: "m", messages: [{ role: "system", content: "rules" }, { role: "user", content: "hi" }, { role: "assistant", content: "yo" }, { role: "user", content: "next" }] })!;
+	assert.equal(b.sys, a.sys);
+	assert.deepEqual(b.msgs.slice(0, 2), a.msgs);
+	const c = promptDigest({ model: "m", messages: [{ role: "system", content: "rules v2" }, { role: "user", content: "hi" }] })!;
+	assert.notEqual(c.sys, a.sys);
+	assert.equal(c.msgs[0], a.msgs[0]);
+	// Anthropic-style payloads carry the system text beside the messages.
+	const d = promptDigest({ system: "rules", messages: [{ role: "user", content: "hi" }] })!;
+	assert.equal(d.msgs.length, 1);
+	assert.equal(promptDigest({ model: "m" }), undefined);
+	assert.equal(promptDigest("x"), undefined);
 });

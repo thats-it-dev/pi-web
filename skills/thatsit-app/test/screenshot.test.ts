@@ -9,6 +9,7 @@ test("screenFile names the picture by scheme and route, under the ignored test-r
 	assert.equal(screenFile("/a/keeb", "dark"), "/a/keeb/test-results/screens/phone-dark.png");
 	assert.equal(screenFile("/a/keeb", "light", "/"), "/a/keeb/test-results/screens/phone-light.png");
 	assert.equal(screenFile("/a/keeb", "dark", "/settings/sync"), "/a/keeb/test-results/screens/phone-dark-settings-sync.png");
+	assert.equal(screenFile("/a/keeb", "dark", "/", 'button[aria-label="Settings"]'), "/a/keeb/test-results/screens/phone-dark-click-button-aria-label-Settings.png");
 });
 
 test("routeOf accepts a route with or without the slash", () => {
@@ -24,6 +25,11 @@ function fakes(pageHeight: number, rendered = true) {
 	const page = {
 		on: () => undefined,
 		goto: async (url: string) => void calls.push(`goto ${url}`),
+		click: async (selector: string) => {
+			if (selector === "#missing") throw new Error("Timeout 10000ms exceeded.\nwaiting for locator('#missing')");
+			calls.push(`click ${selector}`);
+		},
+		waitForTimeout: async () => undefined,
 		waitForFunction: async () => {
 			if (!rendered) throw new Error("timeout");
 		},
@@ -63,4 +69,15 @@ test("screenshotApp cuts a very long page and reports a screen that never render
 	const blank = await screenshotApp(dir, {}, fakes(300, false).deps);
 	assert.equal(blank.height, VIEWPORT.height * SCALE, "never shorter than the viewport");
 	assert.match(blank.issues[0], /app-main rendered nothing/);
+});
+
+test("screenshotApp clicks the selector once the app rendered, and reports a click that found nothing", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "shot-"));
+	const { deps, calls } = fakes(900);
+	const r = await screenshotApp(dir, { click: 'button[aria-label="Settings"]' }, deps);
+	assert.equal(r.file, join(dir, "test-results", "screens", "phone-dark-click-button-aria-label-Settings.png"));
+	assert.deepEqual(r.issues, []);
+	assert.deepEqual(calls, ["listen", "goto http://127.0.0.1:5173/", 'click button[aria-label="Settings"]', "shot 900", "close browser", "close server"]);
+	const miss = await screenshotApp(dir, { click: "#missing" }, fakes(900).deps);
+	assert.match(miss.issues[0], /^--click #missing: Timeout 10000ms exceeded\.; the picture shows the screen without the click$/);
 });

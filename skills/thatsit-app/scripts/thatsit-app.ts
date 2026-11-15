@@ -16,7 +16,7 @@ export type Args =
 	| { cmd: "sync-template"; name: string }
 	| { cmd: "pr"; name: string; title: string; body: string; gatewayPr?: number }
 	| { cmd: "pr-wait"; name: string }
-	| { cmd: "screenshot"; name: string; path?: string; scheme?: Scheme }
+	| { cmd: "screenshot"; name: string; path?: string; scheme?: Scheme; click?: string }
 	| { cmd: "gateway-pr-wait"; name: string }
 	| { cmd: "gateway-checkout" }
 	| { cmd: "gateway-register"; name: string }
@@ -34,11 +34,11 @@ export function parseArgs(argv: string[]): Args | null {
 	if (cmd === "screenshot") {
 		const o: Record<string, string> = {};
 		for (let i = 0; i < rest.length; i += 2) {
-			if (!["--path", "--scheme"].includes(rest[i]) || rest[i + 1] === undefined || rest[i].slice(2) in o) return null;
+			if (!["--path", "--scheme", "--click"].includes(rest[i]) || rest[i + 1] === undefined || rest[i].slice(2) in o) return null;
 			o[rest[i].slice(2)] = rest[i + 1];
 		}
 		if (o.scheme !== undefined && o.scheme !== "dark" && o.scheme !== "light") return null;
-		return { cmd, name, ...(o.path !== undefined ? { path: o.path } : {}), ...(o.scheme !== undefined ? { scheme: o.scheme as Scheme } : {}) };
+		return { cmd, name, ...(o.path !== undefined ? { path: o.path } : {}), ...(o.scheme !== undefined ? { scheme: o.scheme as Scheme } : {}), ...(o.click !== undefined ? { click: o.click } : {}) };
 	}
 	if (cmd === "pr" || cmd === "gateway-pr") {
 		const flags = cmd === "pr" ? ["--title", "--body", "--gateway-pr"] : ["--title", "--body"];
@@ -79,7 +79,7 @@ const result = (v: unknown) => console.log(`RESULT ${JSON.stringify(v)}`);
 async function main(): Promise<number> {
 	const a = parseArgs(process.argv.slice(2));
 	if (!a) {
-		console.error('usage: thatsit-app check <name> | ship <dir> | sync-template <dir> | pr <dir> --title "..." --body "..." [--gateway-pr <N>] | pr-wait <dir> | screenshot <dir> [--path /route] [--scheme light] | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume] | gateway-checkout | gateway-register <app> | gateway-pr <dir> --title "..." --body "..." | gateway-pr-wait <dir>');
+		console.error('usage: thatsit-app check <name> | ship <dir> | sync-template <dir> | pr <dir> --title "..." --body "..." [--gateway-pr <N>] | pr-wait <dir> | screenshot <dir> [--path /route] [--scheme light] [--click "<selector>"] | new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume] | gateway-checkout | gateway-register <app> | gateway-pr <dir> --title "..." --body "..." | gateway-pr-wait <dir>');
 		return 2;
 	}
 	try {
@@ -114,7 +114,7 @@ async function main(): Promise<number> {
 			return 0;
 		}
 		if (a.cmd === "screenshot") {
-			const r = await screenshotApp(a.name, { path: a.path, scheme: a.scheme });
+			const r = await screenshotApp(a.name, { path: a.path, scheme: a.scheme, click: a.click });
 			for (const issue of r.issues) console.error(issue);
 			result({ ok: true, ...r });
 			return 0;

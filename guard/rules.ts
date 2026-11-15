@@ -1,4 +1,5 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
@@ -179,7 +180,7 @@ export function screenCompareContent(spec: string | undefined, pictures: UserPic
 	const against = [spec ? "docs/spec.md" : "", pictures.length ? "Michael's pictures above (what he asked for, or what he saw broken)" : "", "Michael's request"].filter(Boolean).join(", ");
 	out.push({
 		type: "text",
-		text: `Compare the screen with ${against} and write down what differs before going on: elements missing or extra, order and side (left-handed layouts, nut, labels), colours by role, numbers and labels in each element. A difference goes back to the worker with the picture's path; the review waits. Only when nothing differs, go on.`,
+		text: `Compare the screen with ${against} and write down what differs before going on: elements missing or extra, order and side (left-handed layouts, nut, labels), colours by role, numbers and labels in each element. A difference goes back to the worker with the picture's path; the review waits. Only when nothing differs, go on. If the change, or Michael's picture, is in a state this screen does not show (an open dialog or menu, another route), picture that state first: the screenshot command with --click '<css selector of the control that opens it>' or --path /route. "Not visible in this screenshot" is not a pass.`,
 	});
 	return out;
 }
@@ -284,9 +285,10 @@ const ASYNC_RUNS = join(process.env.PI_SUBAGENTS_TEMP_ROOT?.trim() || `/tmp/pi-s
  *  (keeb run 2026-11-12 22:45), and a review the orchestrator cannot act on must not open the PR gate. */
 export function reviewVerdict(text: string): boolean {
 	if (/\bNo issues found\b/.test(text)) return true;
-	// The label may be emphasised (`- **Merge verdict**: OK`) and a finding may lead with its level (`- **P2:** ...`):
-	// both read fine, and a review that counts for the reader must count for the gate.
-	return /^\s*#+\s*Review\b/m.test(text) && /^\s*-\s*(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*:/m.test(text);
+	// The label may be emphasised (`- **Merge verdict**: OK`), a finding may lead with its level (`- **P2:** ...`), and
+	// the line may carry no list dash at all (`**Finding:** None.`, fret 2026-11-14 21:33): all read fine, and a review
+	// that counts for the reader must count for the gate.
+	return /^\s*#+\s*Review\b/m.test(text) && /^\s*(?:-\s*)?(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*:/m.test(text);
 }
 
 /** Appended instead of the reviewed mark when a sync review returns without a verdict. */
@@ -777,4 +779,103 @@ export function partialAnswers(input: { questions?: { question?: string }[] } | 
 	const done = new Set(d.answers.map((a) => a.questionIndex));
 	const open = questions.map((q, i) => (done.has(i) ? null : `"${q.question ?? ""}"`)).filter(Boolean);
 	return `The user answered ${d.answers.length} of ${total} questions, then closed the questionnaire: ${given} Use these answers.${open.length ? ` Not answered: ${open.join(", ")}.` : ""} Closing it is not a preference about how you ask: keep the same format, and ask what is still open again if you need it.`;
+}
+
+// --- A follow-up a `stop` withdrew. A resume appends its message to the worker's session file and a stop ends the run,
+// but the message stays: the next resume on that worker reads it as open work (fret 2026-11-14: the orchestrator sent
+// "remove the dialog border" at 19:33:28, Michael's "the dialog border is ok" stopped the run 45 s later, and at 20:02
+// the next resume on the same worker removed the border anyway). The first resume after the stop says it was withdrawn. ---
+
+const ASYNC_LAUNCH = /Async: \S+ \[([0-9a-f-]{36})\]/;
+
+/** The resume messages on the worker session `resumedId` belongs to that a `stop` withdrew before the run finished and
+ *  that no later resume has withdrawn yet. Runs form a chain: a launch, then each resume revives the chain under a new id. */
+export function withdrawnFollowUps(branch: Iterable<unknown>, resumedId: string): string[] {
+	const chain = new Map<string, string>(); // run id -> the chain's first run id
+	const chainOf = (id: string) => {
+		const key = [...chain.keys()].find((k) => k === id || k.startsWith(id));
+		return key ? chain.get(key) : undefined;
+	};
+	const launches = new Set<string>(); // tool call ids
+	const resumes = new Map<string, { id: string; message: string }>(); // tool call id -> the resume
+	const revived = new Map<string, string>(); // revived run id -> the resume message that revived it
+	const finished = new Set<string>(); // run ids a subagent-notify reported done (not stopped)
+	const withdrawn = new Map<string, string[]>(); // chain -> withdrawn messages not yet noted
+	for (const raw of branch) {
+		const e = raw as Entry & { customType?: string; content?: unknown };
+		if (e.type === "custom_message" && e.customType === "subagent-notify") {
+			const text = typeof e.content === "string" ? e.content : Array.isArray(e.content) ? (e.content as { text?: string }[]).map((p) => p.text ?? "").join("\n") : "";
+			if (!/\bstopped\b/i.test(text)) for (const id of revived.keys()) if (text.includes(id)) finished.add(id);
+			continue;
+		}
+		if (e.type !== "message" || !e.message) continue;
+		const m = e.message;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const c of m.content as ToolCallPart[]) {
+				if (c.type !== "toolCall" || c.name !== "subagent" || !c.id) continue;
+				const a = c.arguments ?? {};
+				if (a.action === "resume" && typeof a.id === "string") {
+					resumes.set(c.id, { id: a.id, message: String(a.message ?? "") });
+					const ch = chainOf(a.id);
+					if (ch) withdrawn.delete(ch); // this resume carried the note (or came before the fix: nothing to add now)
+				} else if (a.action === "stop" && typeof a.id === "string") {
+					const id = [...revived.keys()].find((k) => k === a.id || k.startsWith(String(a.id)));
+					if (!id || finished.has(id)) continue;
+					const ch = chainOf(id) ?? id;
+					withdrawn.set(ch, [...(withdrawn.get(ch) ?? []), revived.get(id) ?? ""]);
+				} else if (a.action === undefined) {
+					launches.add(c.id);
+				}
+			}
+		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
+			const text = resultText(m);
+			if (launches.has(m.toolCallId)) {
+				const id = ASYNC_LAUNCH.exec(text)?.[1];
+				if (id) chain.set(id, id);
+			}
+			const res = resumes.get(m.toolCallId);
+			const id = res && REVIVED_RUN.exec(text)?.[1];
+			if (res && id) {
+				chain.set(id, chainOf(res.id) ?? id);
+				revived.set(id, res.message);
+			}
+		}
+	}
+	const ch = chainOf(resumedId);
+	return ch ? (withdrawn.get(ch) ?? []).filter(Boolean) : [];
+}
+
+const firstLine = (s: string, max: number) => {
+	const line = s.replace(/\s+/g, " ").trim();
+	return line.length > max ? `${line.slice(0, max)}…` : line;
+};
+
+export const withdrawnNote = (messages: string[]) => `[pi-guard] Michael stopped your previous run before it finished, which withdraws the follow-up it carried: ${messages.map((m) => `"${firstLine(m, 160)}"`).join("; ")}. Do not act on it and undo nothing for it; the message below is the whole of what is wanted now.`;
+
+/** Prepends the withdrawal note to a resume's message when its worker session holds a stopped follow-up; true when it did. */
+export function noteWithdrawn(input: Record<string, unknown>, branch: Iterable<unknown>): boolean {
+	if (input.action !== "resume" || typeof input.id !== "string") return false;
+	const messages = withdrawnFollowUps(branch, input.id);
+	if (!messages.length) return false;
+	input.message = `${withdrawnNote(messages)}\n\n${String(input.message ?? "")}`;
+	return true;
+}
+
+// --- The request each turn sends, digested. A prefix-cache miss on the 27b costs 2–3 min (fret 2026-11-14: 8 cold
+// prefills, 18 of 55 orchestrator minutes); the server log shows the miss, not its cause. Hashes of the system prompt
+// and of each message say whether the request changed before its last message, and where. ---
+
+export type PromptDigest = { model?: string; sys: string; msgs: string[]; chars: number };
+
+/** Hashes of a provider payload: the system text (any `system`/`instructions` field and system-role messages) and each
+ *  other message in order; undefined when the payload carries no message list. */
+export function promptDigest(payload: unknown): PromptDigest | undefined {
+	if (!payload || typeof payload !== "object") return undefined;
+	const p = payload as { model?: unknown; system?: unknown; instructions?: unknown; messages?: unknown; input?: unknown };
+	const list = Array.isArray(p.messages) ? p.messages : Array.isArray(p.input) ? p.input : undefined;
+	if (!list) return undefined;
+	const role = (m: unknown) => (m && typeof m === "object" ? (m as { role?: unknown }).role : undefined);
+	const h = (v: unknown) => createHash("sha256").update(JSON.stringify(v) ?? "").digest("hex").slice(0, 10);
+	const system = [p.system, p.instructions, ...list.filter((m) => role(m) === "system")].filter((v) => v !== undefined);
+	return { model: typeof p.model === "string" ? p.model : undefined, sys: h(system), msgs: list.filter((m) => role(m) !== "system").map(h), chars: JSON.stringify(payload).length };
 }

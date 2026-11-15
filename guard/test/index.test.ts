@@ -382,3 +382,36 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const gone = h.tool_result({ ...result, toolCallId: "s4", content: [{ type: "text", text: `RESULT {"ok":true,"file":"${dir}/nope.png"}` }] }, ctx);
 	assert.match(gone.content[1].text, /could not be read/);
 });
+
+test("a resume on a worker whose stopped run carried a follow-up gets the withdrawal note in its message", () => {
+	const h = load();
+	const L = "4b06b6d8-bc17-4715-ac06-eae2787245ca";
+	const X = "96ab932e-2cba-4b01-ac45-7d286b918a4b";
+	const entries = [
+		msg("assistant", { content: [{ type: "toolCall", id: "c1", name: "subagent", arguments: { agent: "worker", task: "Build it" } }] }),
+		msg("toolResult", { toolCallId: "c1", isError: false, content: [{ type: "text", text: `Async: worker [${L}]` }] }),
+		msg("assistant", { content: [{ type: "toolCall", id: "c2", name: "subagent", arguments: { action: "resume", id: L, message: "Remove the dialog border." } }] }),
+		msg("toolResult", { toolCallId: "c2", isError: false, content: [{ type: "text", text: `Revived async subagent from ${L}.\nRevived run: ${X}` }] }),
+		msg("assistant", { content: [{ type: "toolCall", id: "c3", name: "subagent", arguments: { action: "stop", id: X } }] }),
+		msg("toolResult", { toolCallId: "c3", isError: false, content: [{ type: "text", text: "Stop requested." }] }),
+	];
+	const input = { action: "resume", id: L, message: "Swap the icon for the lucide gear." };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "c4", input }, { cwd: homedir(), sessionManager: { getBranch: () => entries } }), undefined);
+	assert.match(input.message, /^\[pi-guard\] Michael stopped your previous run before it finished, which withdraws the follow-up it carried: "Remove the dialog border\."\. .*\n\nSwap the icon for the lucide gear\.$/s);
+});
+
+test("every provider request is digested into the prompt log with the system prompt's section sizes", () => {
+	const home = mkdtempSync(join(tmpdir(), "guard-home-"));
+	const h = load(() => false, { HOME: home });
+	h.before_agent_start({ systemPromptOptions: { sections: { "personal-wiki": "a".repeat(1137), persona: null, extra: ["x"] } } }, {});
+	assert.equal(h.before_provider_request({ payload: { model: "qwen", messages: [{ role: "system", content: "s" }, { role: "user", content: "u" }] } }, {}), undefined);
+	h.before_provider_request({ payload: { nothing: true } }, {});
+	const lines = readFileSync(join(home, ".pi", "agent", "tmp", "pi-guard-prompts.jsonl"), "utf8").trim().split("\n");
+	assert.equal(lines.length, 1, "a payload without messages is not logged");
+	const entry = JSON.parse(lines[0]);
+	assert.equal(entry.model, "qwen");
+	assert.equal(entry.msgs.length, 1);
+	assert.equal(entry.child, false);
+	assert.deepEqual(entry.sections, { "personal-wiki": 1137, persona: 0, extra: -1 });
+	assert.match(entry.t, /^\d{4}-\d{2}-\d{2}T/);
+});

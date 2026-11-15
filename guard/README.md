@@ -95,7 +95,7 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   `toolBudget` `{soft: 12, hard: 20, block: "*"}`; `context`, `model`, `thinking`, `tools`, `skill` overrides are dropped.
 - A reviewer inside a workflow, chain or task list on an app is blocked.
 - When the review returns without error and its reply holds a verdict (a `## Review` block with a finding or a merge
-  verdict line, or `No issues found.`), the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
+  verdict line, with or without a list dash and emphasis, or `No issues found.`), the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
   the PR gate and the next review's base read that mark from the session, so both survive a restart. A reply without
   a verdict (the reviewer stopped mid-review, or left its report in its reasoning, as the 35B did at thinking low on
   2026-11-12) gets a `review ended without a verdict` note instead and counts for nothing, so the PR stays blocked
@@ -112,8 +112,11 @@ styled with invented `--tk-*` tokens: every colour and border resolved to nothin
 reviews passed the diff. So a review, a `pr` that changes UI files (`index.html`, `src/**`, `public/**.css`) and
 every `ship` are blocked until the orchestrator has looked at the screen as the UI files are now:
 
-- The skill's `thatsit-app.ts screenshot <dir> [--path /route] [--scheme light]` serves the working tree with the
-  app's own Vite dev server and takes a phone-size picture with the app's own Playwright (about a second).
+- The skill's `thatsit-app.ts screenshot <dir> [--path /route] [--scheme light] [--click "<selector>"]` serves the
+  working tree with the app's own Vite dev server and takes a phone-size picture with the app's own Playwright
+  (about a second). `--click` presses the control that opens a dialog, menu or tab once the app has rendered, so a
+  change inside one is pictured; the comparison text says so, because on 2026-11-14 21:32 a toggle alignment fix in
+  the settings dialog passed the gate as "not visible in this screenshot".
 - On that bash call the guard snapshots the tree; on its result it appends the picture itself as an image block,
   so the model sees the screen in the same turn, plus `[pi-guard] screen seen <dir> at <snapshot>`. A failed
   command, a `RESULT` without a file, or a picture over 2 MB leaves no mark.
@@ -126,4 +129,20 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   "looks right" was judged against its own idea and not the spec or the reference Michael had sent.
 - The gate passes while no UI file differs between the last pictured snapshot and the working tree; briefs, docs
   and tests may change freely. A UI edit after the look needs a new picture.
+
+## Workers and the request itself
+
+- A `subagent` resume appends its message to the worker's session file, and a `stop` ends the run but leaves the
+  message there, so the next resume reads it as open work: on 2026-11-14 the orchestrator sent "remove the dialog
+  border", Michael's "the dialog border is ok" stopped that run within 45 s, and 29 minutes later the next resume
+  on the same worker removed the border anyway. Now the first resume after a stop on that worker gets a
+  `[pi-guard] Michael stopped your previous run ... which withdraws the follow-up it carried: "..."` line before its
+  message. The chain of runs (launch, each revive) is read from the branch; a run that had finished before the stop
+  withdraws nothing.
+- Every provider request is digested into `~/.pi/agent/tmp/pi-guard-prompts.jsonl`: time, pid, model, a hash of
+  the system text, a hash per message, the payload size, and the system prompt sections by length (from
+  `before_agent_start`). With the server's cached-token count per request this says whether a cold prefill came
+  from a changed system prompt or an earlier message, and which. Why: the fret session of 2026-11-14 paid for
+  eight full prefills on the 27b, about 18 of its 55 orchestrator minutes, and the server log shows the miss but
+  not its cause.
 

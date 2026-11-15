@@ -58,3 +58,10 @@ test("parseArgs screenshot", () => {
 	assert.equal(parseArgs(["screenshot", "/x/foo", "--path"]), null);
 	assert.equal(parseArgs(["screenshot"]), null);
 });
+
+test("parseArgs screenshot takes --path, --scheme and --click", () => {
+	assert.deepEqual(parseArgs(["screenshot", "fret"]), { cmd: "screenshot", name: "fret" });
+	assert.deepEqual(parseArgs(["screenshot", "fret", "--click", 'button[aria-label="Settings"]', "--scheme", "light"]), { cmd: "screenshot", name: "fret", scheme: "light", click: 'button[aria-label="Settings"]' });
+	assert.equal(parseArgs(["screenshot", "fret", "--click"]), null);
+	assert.equal(parseArgs(["screenshot", "fret", "--open", "x"]), null);
+});

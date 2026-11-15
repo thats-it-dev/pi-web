@@ -7,7 +7,9 @@ import { pathToFileURL } from "node:url";
 // Vite and Playwright. `npm run verify` proves the code runs; this is the only step that shows what it draws.
 
 export type Scheme = "dark" | "light";
-export type ScreenshotOpts = { path?: string; scheme?: Scheme };
+/** `click`: a CSS selector (open shadow roots are pierced) clicked once the app rendered, so a dialog, menu or tab the
+ *  change lives in is what the picture shows. */
+export type ScreenshotOpts = { path?: string; scheme?: Scheme; click?: string };
 export type Screenshot = { file: string; width: number; height: number; issues: string[] };
 
 export const VIEWPORT = { width: 390, height: 844 };
@@ -15,11 +17,16 @@ export const SCALE = 2;
 /** Taller pages are cut here: a longer picture costs the model more than it shows. */
 export const MAX_HEIGHT = 2400;
 export const RENDER_TIMEOUT_MS = 30_000;
+export const CLICK_TIMEOUT_MS = 10_000;
+/** After the click: what it opened has rendered (reduced motion, so no transition to wait out). */
+export const SETTLE_MS = 300;
 
 /** Where the picture goes: test-results is ignored by git, so it never lands in a commit or a review diff. */
-export function screenFile(dir: string, scheme: Scheme, path = "/"): string {
-	const route = path.replace(/^\/+|\/+$/g, "").replace(/[^A-Za-z0-9]+/g, "-");
-	return join(dir, "test-results", "screens", `phone-${scheme}${route ? `-${route}` : ""}.png`);
+export function screenFile(dir: string, scheme: Scheme, path = "/", click?: string): string {
+	const slug = (s: string) => s.replace(/^\/+|\/+$/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+	const route = slug(path);
+	const opened = click ? slug(click).slice(0, 40) : "";
+	return join(dir, "test-results", "screens", `phone-${scheme}${route ? `-${route}` : ""}${opened ? `-click-${opened}` : ""}.png`);
 }
 
 /** Normalises the --path value: a route starting with "/", or the root. */
@@ -44,6 +51,8 @@ type Deps = {
 type Page = {
 	on(event: string, cb: (arg: any) => void): void;
 	goto(url: string, o?: Record<string, unknown>): Promise<unknown>;
+	click(selector: string, o?: Record<string, unknown>): Promise<unknown>;
+	waitForTimeout(ms: number): Promise<void>;
 	waitForFunction(fn: string, arg?: unknown, o?: Record<string, unknown>): Promise<unknown>;
 	waitForLoadState(state: string, o?: Record<string, unknown>): Promise<void>;
 	evaluate<T>(fn: string): Promise<T>;
@@ -76,7 +85,7 @@ export async function screenshotApp(dir: string, opts: ScreenshotOpts = {}, deps
 	const d = deps ?? (await appDeps(dir));
 	const scheme: Scheme = opts.scheme ?? "dark";
 	const route = routeOf(opts.path);
-	const file = screenFile(dir, scheme, route);
+	const file = screenFile(dir, scheme, route, opts.click);
 	mkdirSync(join(dir, "test-results", "screens"), { recursive: true });
 	const issues: string[] = [];
 	// The dev server serves the working tree as it is, uncommitted edits included, with no build step.
@@ -99,6 +108,14 @@ export async function screenshotApp(dir: string, opts: ScreenshotOpts = {}, deps
 			await page.waitForFunction(RENDERED, undefined, { timeout: RENDER_TIMEOUT_MS });
 		} catch {
 			issues.push("app-main rendered nothing within 30 s; the picture shows the page as it was");
+		}
+		if (opts.click) {
+			try {
+				await page.click(opts.click, { timeout: CLICK_TIMEOUT_MS });
+				await page.waitForTimeout(SETTLE_MS);
+			} catch (err) {
+				issues.push(`--click ${opts.click}: ${(err as Error).message.split("\n")[0]}; the picture shows the screen without the click`);
+			}
 		}
 		await page.evaluate("document.fonts.ready");
 		await page.waitForLoadState("networkidle", { timeout: RENDER_TIMEOUT_MS }).catch(() => issues.push("the page kept loading; the picture was taken anyway"));

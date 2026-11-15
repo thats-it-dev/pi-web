@@ -2,10 +2,10 @@
 // working on thatsit.app apps, and restarts a coding run that stops without a reply. Rules: rules.ts.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -297,6 +297,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			return undefined;
 		}
 		if (event.toolName !== "subagent" || !event.input) return undefined;
+		// A resume after a stop tells the worker the stopped run's follow-up is withdrawn (its session file still holds it).
+		noteWithdrawn(event.input, branch());
 		let scoped: ReturnType<typeof scopeReview>;
 		try {
 			scoped = scopeReview(event.input, branch(), ctx.cwd, home, resident);
@@ -343,6 +345,27 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	pi.on("session_before_compact", (event) => {
 		dropReinjected(event.preparation?.messagesToSummarize);
 		dropReinjected(event.preparation?.turnPrefixMessages);
+		return undefined;
+	});
+
+	// Every request, digested, in ~/.pi/agent/tmp/pi-guard-prompts.jsonl: with the server's cached-token count it says
+	// whether a cold prefill came from a changed system prompt (its sections are listed by length) or an earlier message.
+	const promptLog = join(home, ".pi", "agent", "tmp", "pi-guard-prompts.jsonl");
+	let sections: Record<string, number> = {};
+	pi.on("before_agent_start", (event) => {
+		const s = (event.systemPromptOptions?.sections ?? {}) as Record<string, unknown>;
+		sections = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, typeof v === "string" ? v.length : v == null ? 0 : -1]));
+		return undefined;
+	});
+	pi.on("before_provider_request", (event) => {
+		const d = promptDigest(event.payload);
+		if (!d) return undefined;
+		try {
+			mkdirSync(join(home, ".pi", "agent", "tmp"), { recursive: true });
+			appendFileSync(promptLog, `${JSON.stringify({ t: new Date().toISOString(), pid: process.pid, child, ...d, sections })}\n`);
+		} catch {
+			// A log that cannot be written changes nothing about the request.
+		}
 		return undefined;
 	});
 
