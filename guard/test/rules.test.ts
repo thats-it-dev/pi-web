@@ -842,3 +842,25 @@ test("promptDigest hashes the system text and each message; the hashes move only
 	assert.equal(promptDigest({ model: "m" }), undefined);
 	assert.equal(promptDigest("x"), undefined);
 });
+
+test("merging or closing a PR is blocked with or without an app path; reading PRs and local merges are not", () => {
+	assert.equal(bash(`${app}gh pr merge 28 --repo thats-it-dev/keeb --squash --delete-branch 2>&1 | head -5`), REASONS.merge);
+	assert.equal(bash("gh pr merge 28 --repo thats-it-dev/keeb"), REASONS.merge, "no app path in the command");
+	assert.equal(bash("gh pr close 28 --repo thats-it-dev/keeb"), REASONS.merge);
+	assert.equal(bash("gh api -X PUT repos/thats-it-dev/keeb/pulls/28/merge"), REASONS.merge);
+	assert.equal(bash("gh api --method PUT /repos/thats-it-dev/keeb/pulls/28/merge -f merge_method=squash"), REASONS.merge);
+	assert.equal(bash("gh api repos/thats-it-dev/keeb/pulls/28/merge"), REASONS.merge, "GET on the merge endpoint is still the merge endpoint");
+	assert.equal(checkToolCall("bg_bash", { command: "gh pr merge 28" }, env())?.reason, REASONS.merge);
+	assert.equal(bash(`${app}gh pr view 28 --json state,mergedAt`), undefined);
+	assert.equal(bash(`${app}gh pr list --state merged --head feat/x --json number`), undefined);
+	assert.equal(bash(`${app}git fetch origin main && git merge --ff-only origin/main`), undefined);
+	assert.equal(bash(`${app}git commit -m "docs: say gh pr merge is Michael's"`), undefined, "quoted text is not a command");
+	assert.match(REASONS.merge, /Michael merges/);
+	assert.match(REASONS.merge, /end your turn/);
+});
+
+test("the orchestrator reason no longer calls merges the orchestrator's, and the PR nudge says Michael merges", () => {
+	assert.doesNotMatch(REASONS.orchestrator, /Merges/);
+	assert.match(REASONS.orchestrator, /Michael's to merge/);
+	assert.match(prNudge(["/home/m/workspace/apps/keeb"]), /Michael merges the PR; never merge or close it yourself/);
+});

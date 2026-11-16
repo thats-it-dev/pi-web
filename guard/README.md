@@ -12,6 +12,7 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 | Rule | Blocks | Use instead |
 | --- | --- | --- |
 | push | `git push` | the thatsit-app CLI's `pr` / `ship` |
+| merge | `gh pr merge`, `gh pr close`, `gh api` on a PR's merge endpoint, in any directory | nothing: green CI ends the work; Michael merges (keeb #28 was merged by the orchestrator on 2026-11-16, five seconds after `pr-wait` came back green) |
 | ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr-wait` / `gateway-pr-wait` / `ship` through `bg_bash` |
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
 | worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched without `worktree: true` is still running in the app (its launch named the app, or its status.json's cwd or tool calls show it there; a worker that has not shown where it works yet holds every app) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
@@ -38,7 +39,16 @@ list pi left stale after finishing the work, and nowhere else.
 When a run edited or wrote files in an app (`~/workspace/apps/<name>`) and ended with a reply that isn't a
 question, with no `pr`, `ship` or `gateway-pr` (through `bash` or `bg_bash`) after the last edit, and git says the app still has work to
 publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
-message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, and never hand Michael commands to run.
+message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, never hand Michael commands to run, and never merge: Michael merges. (The `bg` extension's `bg-bash-done` message for a green `pr-wait` says the same, so the rule is read at the moment it matters even when the skill was never loaded.)
+
+## Checkout left on a merged branch
+
+The first tool call of a session that works in an app (a shell command or edit path naming `~/workspace/apps/<name>`,
+or a worker brief naming it) checks the checkout once: on a branch other than `main`, with a clean tree, and `gh` saying
+that branch's PR is merged, the guard switches it to `main` (fast-forwarding when it can) before the call runs and adds a
+`[pi-guard] … switched it to main` line to the call's result. A dirty tree, an open PR, `gh` failing, or a child session leave it alone.
+Why: on 2026-11-16 keeb's checkout still sat on the merged accuracy-tracker branch; the worker's commit landed on it, and
+moving it to a fresh branch cost a conflicted cherry-pick that dropped two spec items before they were restored.
 
 None of these three nudges fires while a `bg_bash` job the run started has not sent its `bg-bash-done` message, or
 an async `subagent` run it launched or revived has not sent its `subagent-notify` message: ending the turn is the plan

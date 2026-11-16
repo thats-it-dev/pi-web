@@ -24,8 +24,18 @@ export const REASONS = {
 	worktreeInstall:
 		"Blocked: a pi-subagents worktree shares the main checkout's node_modules through a symlink, so `npm ci` or `npm install` here deletes the packages of the main checkout and of every other worktree. The packages are already installed: run typecheck and tests straight away. If a dependency really must change, say so in your result and let the orchestrator do it in the main checkout.",
 	orchestrator:
-		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Merges, commits and `npm run verify` in the main checkout are yours.",
+		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Commits and `npm run verify` in the main checkout are yours; the pull request is Michael's to merge.",
+	merge: "Blocked: never merge or close a pull request; Michael merges. Green CI means your work is done: reply with the PR link and the preview link, say CI is green, and end your turn. Don't suggest a merge command either.",
 };
+
+// Merging or closing a PR by the gh CLI or the REST API (a push to main in an app is the push rule's). Michael merges (SKILL.md step 7),
+// and on 2026-11-16 the orchestrator, having never read the skill, merged keeb #28 with `gh pr merge` the moment CI was green.
+const MERGES = /\bgh\s+pr\s+(?:merge|close)\b|\bgh\s+api\b[^;&|\n]*(?:\/merge\b|-X\s*PUT\b[^;&|\n]*\/pulls\/|--method[\s=]*PUT\b[^;&|\n]*\/pulls\/)/;
+
+/** A shell command that merges or closes a pull request. */
+export function merges(command: string): boolean {
+	return command.split(/;|&&|\|\||\n/).some((seg) => MERGES.test(seg.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""')));
+}
 
 /** A worker launched without `worktree: true` owns the app's main checkout until its run ends: a verify or e2e run
  *  beside it shares the e2e server port and test-results, and tests half-edited files. */
@@ -226,6 +236,8 @@ export function discards(command: string): boolean {
 }
 
 export function checkShell(command: string, env: Env): Block | undefined {
+	// Merging needs no app path in the command (`gh pr merge 28 --repo thats-it-dev/keeb` names only the repo).
+	if (merges(command)) return { block: true, reason: REASONS.merge };
 	const dir = appDir(command, env.cwd, env.home);
 	if (!dir) return undefined;
 	if (/\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/.test(command)) return { block: true, reason: REASONS.push };
@@ -746,7 +758,7 @@ export function prNudge(apps: string[]): string {
 	const name = (d: string) => d.split("/").pop();
 	const cmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/${name(d)} --title "<short title>" --body "<what and why>"`).join("\n");
 	const waitCmds = apps.map((d) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/${name(d)}`).join("\n");
-	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run pr:\n${cmds}\nThen wait for CI with the bg_bash tool (never bash), tell Michael the PR link and end your turn:\n${waitCmds}\nIf Michael said not to open a PR, say so in one line instead.`;
+	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run pr:\n${cmds}\nThen wait for CI with the bg_bash tool (never bash), tell Michael the PR link and end your turn:\n${waitCmds}\nMichael merges the PR; never merge or close it yourself, and don't suggest a merge command. If Michael said not to open a PR, say so in one line instead.`;
 }
 
 // Compaction. Some extensions inject their rules as a message at session start and again after every

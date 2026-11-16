@@ -112,3 +112,11 @@ test('doneText says "was killed (<signal>)" for a signal-killed job', () => {
 	const text = doneText({ ...base, exitCode: null, signal: "SIGKILL" }, "");
 	assert.match(text.split("\n")[0], /^bg_bash job bg-7 was killed \(SIGKILL\) after 1m 15s: ship/);
 });
+
+test("a green CI wait tells the model Michael merges; a failed wait or a ship does not", () => {
+	const prWait = { ...base, command: "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/keeb" };
+	assert.match(doneText(prWait, 'RESULT {"ok":true}\n'), /Michael merges the PR; never merge or close it yourself/);
+	assert.match(doneText({ ...prWait, command: prWait.command.replace("pr-wait", "gateway-pr-wait") }, "x\n"), /Michael merges/);
+	assert.doesNotMatch(doneText({ ...prWait, exitCode: 1 }, "x\n"), /Michael merges/);
+	assert.doesNotMatch(doneText(base, "x\n"), /Michael merges/, "ship deploys the first version; there is no PR");
+});

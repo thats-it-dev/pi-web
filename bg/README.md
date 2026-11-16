@@ -15,3 +15,5 @@ RESULT {...}            (the last RESULT line of the log, if not already in the 
 ```
 
 A cancelled job says `was cancelled` instead of `exited <code>`. On `session_shutdown` running jobs are killed and nothing is sent.
+
+When a `pr-wait` or `gateway-pr-wait` job exits 0, the message ends with one more line: CI is green, reply with the links and end the turn, and Michael merges the PR. It is the moment the orchestrator once merged keeb #28 itself (2026-11-16), and this message starts the next turn whether or not the thatsit-app skill was ever read.

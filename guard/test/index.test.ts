@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, needsPr, scopeReview, screenUpToDate, snapshot, uiChanged, upToDate } from "../index.ts";
+import piGuard, { codeChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
 import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -414,4 +414,78 @@ test("every provider request is digested into the prompt log with the system pro
 	assert.equal(entry.child, false);
 	assert.deepEqual(entry.sections, { "personal-wiki": 1137, persona: 0, extra: -1 });
 	assert.match(entry.t, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+const gitIn = (dir: string, ...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "pipe", encoding: "utf8" }).trim();
+
+// A clean checkout on branch `feat` with a remote whose main it tracks.
+function repoOnFeat(dir: string): void {
+	const remote = mkdtempSync(join(tmpdir(), "guard-remote-"));
+	execFileSync("git", ["init", "--bare", "-b", "main", remote], { stdio: "pipe" });
+	gitIn(dir, "init", "-b", "main");
+	writeFileSync(join(dir, "a.txt"), "a\n");
+	gitIn(dir, "add", "-A");
+	gitIn(dir, "commit", "-m", "one");
+	gitIn(dir, "remote", "add", "origin", remote);
+	gitIn(dir, "push", "-u", "origin", "main");
+	gitIn(dir, "switch", "-c", "feat");
+	writeFileSync(join(dir, "b.txt"), "b\n");
+	gitIn(dir, "add", "-A");
+	gitIn(dir, "commit", "-m", "two");
+}
+
+test("mergedBranch: a clean checkout on a branch GitHub says is merged; dirty trees, main and open PRs are left alone", () => {
+	const dir = mkdtempSync(join(tmpdir(), "guard-merged-"));
+	repoOnFeat(dir);
+	assert.equal(mergedBranch(dir, () => "MERGED"), "feat");
+	assert.equal(mergedBranch(dir, () => undefined), undefined, "PR still open");
+	assert.equal(mergedBranch(dir, () => { throw new Error("offline"); }), undefined);
+	writeFileSync(join(dir, "c.txt"), "c\n");
+	assert.equal(mergedBranch(dir, () => "MERGED"), undefined, "uncommitted work stays where it is");
+	execFileSync("rm", [join(dir, "c.txt")]);
+	gitIn(dir, "switch", "main");
+	assert.equal(mergedBranch(dir, () => "MERGED"), undefined, "already on main");
+});
+
+test("switchToMain moves the checkout to main and reports its head", () => {
+	const dir = mkdtempSync(join(tmpdir(), "guard-switch-"));
+	repoOnFeat(dir);
+	const head = switchToMain(dir);
+	assert.equal(gitIn(dir, "branch", "--show-current"), "main");
+	assert.equal(head, gitIn(dir, "rev-parse", "--short", "HEAD"));
+});
+
+test("the first call into an app whose checkout sits on a merged branch switches it to main and says so in the result, once", () => {
+	const home = mkdtempSync(join(tmpdir(), "guard-home-"));
+	const dir = join(home, "workspace", "apps", "keeb");
+	mkdirSync(dir, { recursive: true });
+	repoOnFeat(dir);
+	const handlers: Record<string, (event: any, ctx: any) => any> = {};
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, () => false, { HOME: home }, undefined, () => "MERGED");
+	const ctx = { cwd: "/", sessionManager: { getBranch: () => [] } };
+	assert.equal(handlers.tool_call({ toolName: "bash", toolCallId: "c1", input: { command: `cd ${dir} && git status --short` } }, ctx), undefined);
+	assert.equal(gitIn(dir, "branch", "--show-current"), "main");
+	const r = handlers.tool_result({ toolName: "bash", toolCallId: "c1", content: [{ type: "text", text: "" }] }, ctx);
+	assert.match(r.content.at(-1).text, /was still on branch feat, whose PR is merged; switched it to main/);
+	// The next call into the app is not checked again, and its result is untouched.
+	assert.equal(handlers.tool_call({ toolName: "bash", toolCallId: "c2", input: { command: `cd ${dir} && ls` } }, ctx), undefined);
+	assert.equal(handlers.tool_result({ toolName: "bash", toolCallId: "c2", content: [{ type: "text", text: "a.txt" }] }, ctx), undefined);
+});
+
+test("a worker brief naming an app triggers the merged-branch check; a child session never does", () => {
+	const home = mkdtempSync(join(tmpdir(), "guard-home-"));
+	const dir = join(home, "workspace", "apps", "keeb");
+	mkdirSync(dir, { recursive: true });
+	repoOnFeat(dir);
+	let asked = 0;
+	const handlers: Record<string, (event: any, ctx: any) => any> = {};
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, () => false, { HOME: home, PI_SUBAGENT_CHILD: "1" }, undefined, () => (asked++, "MERGED"));
+	handlers.tool_call({ toolName: "bash", toolCallId: "c1", input: { command: `cd ${dir} && ls` } }, { cwd: "/" });
+	assert.equal(asked, 0);
+	assert.equal(gitIn(dir, "branch", "--show-current"), "feat");
+	const parent: Record<string, (event: any, ctx: any) => any> = {};
+	piGuard({ on: (event, handler) => void (parent[event] = handler) }, () => false, { HOME: home }, undefined, () => (asked++, "MERGED"));
+	parent.tool_call({ toolName: "subagent", toolCallId: "s1", input: { agent: "worker", task: `Implement the thing in ${dir}. Run npm test.` } }, { cwd: "/", sessionManager: { getBranch: () => [] } });
+	assert.equal(asked, 1);
+	assert.equal(gitIn(dir, "branch", "--show-current"), "main");
 });

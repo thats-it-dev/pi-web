@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appsNeedingPr, asyncRunId, busyWorker, checkToolCall, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -52,6 +52,65 @@ export function needsPr(dir: string): boolean {
 	const ahead = Number(/^# branch\.ab \+(\d+)/m.exec(out)?.[1] ?? 0);
 	if (ahead > 0) return true;
 	return head !== "main" && !lines.some((l) => l.startsWith("# branch.upstream "));
+}
+
+export type PrState = (dir: string, branch: string) => "MERGED" | undefined;
+
+// Whether GitHub has a merged PR for the branch. Any failure (offline, no gh, no remote) reads as not merged.
+function ghPrState(dir: string, branch: string): "MERGED" | undefined {
+	try {
+		const n = execFileSync("gh", ["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", "length"], { cwd: dir, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+		return n !== "" && n !== "0" ? "MERGED" : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The branch the checkout was left on after Michael merged its PR, when the tree is clean; else undefined.
+ *  Why: on 2026-11-16 keeb's checkout still sat on the merged accuracy-tracker branch, the worker's commit landed on it,
+ *  and moving it to a fresh branch cost a conflicted cherry-pick that dropped two spec items. */
+export function mergedBranch(dir: string, prState: PrState = ghPrState): string | undefined {
+	try {
+		const branch = execFileSync("git", ["branch", "--show-current"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim();
+		if (!branch || branch === "main") return undefined;
+		if (execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim() !== "") return undefined;
+		return prState(dir, branch) === "MERGED" ? branch : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Switch a clean checkout to main and fast-forward it; the short head afterwards, or undefined when the switch failed. */
+export function switchToMain(dir: string): string | undefined {
+	try {
+		git(dir, ["switch", "main"]);
+	} catch {
+		return undefined;
+	}
+	try {
+		git(dir, ["pull", "--ff-only"]);
+	} catch {
+		// Offline or diverged: main as it is locally still beats the merged branch.
+	}
+	try {
+		return git(dir, ["rev-parse", "--short", "HEAD"]);
+	} catch {
+		return undefined;
+	}
+}
+
+export const switchedNote = (dir: string, branch: string, head: string) => `[pi-guard] ${dir} was still on branch ${branch}, whose PR is merged; switched it to main (${head}) before this call. New work starts on a new branch from main (git switch -c <short-name>).`;
+
+// The app a tool call works in, for the merged-branch check: a shell command's path, an edit's path, a worker's brief.
+function callApp(toolName: string, input: Record<string, unknown>, cwd: string, home: string): string | undefined {
+	if (toolName === "edit" || toolName === "write") return typeof input.path === "string" ? appDir(input.path, "", home) : undefined;
+	if (toolName === "subagent") return appDir(String(input.task ?? input.message ?? ""), "", home);
+	const { shell } = codeOf(toolName, input);
+	for (const command of shell) {
+		const dir = appDir(command, cwd, home);
+		if (dir) return dir;
+	}
+	return undefined;
 }
 
 // Files the branch changes against main, committed or not. When git can't say, assume code changed.
@@ -252,7 +311,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	return { dir, snap, async: !!input.async };
 }
 
-export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env, resident: Resident = defaultResident): void {
+export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean = needsPr, env: Record<string, string | undefined> = process.env, resident: Resident = defaultResident, prState: PrState = ghPrState): void {
 	const home = env.HOME ?? homedir();
 	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
 	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
@@ -264,9 +323,21 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
 	// Screenshot commands in flight: tool call id -> the app and the snapshot the picture will show.
 	const screens = new Map<string, { dir: string; snap: string }>();
+	// Apps checked once for a checkout left on a merged branch, and the note owed to the call that triggered the switch.
+	const freshened = new Set<string>();
+	const switched = new Map<string, string>();
 
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
+		// The first call into an app this session: a clean checkout on a merged branch goes back to main before the
+		// call runs, so neither the worker's edits nor the orchestrator's commit land on top of the merge.
+		const app = child ? undefined : callApp(event.toolName, event.input ?? {}, ctx.cwd, home);
+		if (app && !freshened.has(app)) {
+			freshened.add(app);
+			const stale = mergedBranch(app, prState);
+			const head = stale ? switchToMain(app) : undefined;
+			if (stale && head) switched.set(event.toolCallId, switchedNote(app, stale, head));
+		}
 		const block = checkToolCall(event.toolName, event.input ?? {}, {
 			cwd: ctx.cwd,
 			home,
@@ -316,29 +387,35 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			const text = partialAnswers(event.input, event.details);
 			return text ? { content: [{ type: "text", text }], details: event.details } : undefined;
 		}
+		// The note for a call that found its app on a merged branch rides on whatever else this result gets.
+		const note = switched.get(event.toolCallId);
+		switched.delete(event.toolCallId);
+		const extra: { type: "text"; text: string }[] = note ? [{ type: "text", text: note }] : [];
+		const withExtra = (content: unknown[]) => ({ content: [...(event.content ?? []), ...content, ...extra], structuredContent: event.structuredContent });
+		const plain = () => (extra.length ? withExtra([]) : undefined);
 		const screen = screens.get(event.toolCallId);
 		if (screen) {
 			screens.delete(event.toolCallId);
-			if (event.isError) return undefined;
+			if (event.isError) return plain();
 			const file = screenResult((event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n"));
-			if (!file) return undefined;
+			if (!file) return plain();
 			// The branch, not the context: Michael's pictures stay on it after a compaction.
 			const branch = [...(ctx?.sessionManager?.getBranch() ?? [])];
-			return { content: [...(event.content ?? []), ...screenContent(file, screen.dir, screen.snap, branch)], structuredContent: event.structuredContent };
+			return withExtra(screenContent(file, screen.dir, screen.snap, branch));
 		}
 		const scoped = reviews.get(event.toolCallId);
-		if (!scoped) return undefined;
+		if (!scoped) return plain();
 		reviews.delete(event.toolCallId);
-		if (event.isError) return undefined;
+		if (event.isError) return plain();
 		const text = (event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
 		// An async launch result holds no review: it is marked pending by run id, and when the id can't be read the
 		// mark names an unknown run, which never counts (fail closed), rather than passing for a finished review.
 		const runId = asyncRunId(text) ?? (scoped.async ? UNKNOWN_RUN : undefined);
 		// A sync result is the review itself: without a verdict it gets a note, never the mark, so the PR gate stays shut and
 		// the next review starts from the same base. (An async run's reply is checked when its pending mark is resolved.)
-		if (!runId && !reviewVerdict(text)) return { content: [...(event.content ?? []), { type: "text", text: REVIEW_NO_VERDICT }], structuredContent: event.structuredContent };
+		if (!runId && !reviewVerdict(text)) return withExtra([{ type: "text", text: REVIEW_NO_VERDICT }]);
 		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewMark(scoped.dir, scoped.snap);
-		return { content: [...(event.content ?? []), { type: "text", text: mark }], structuredContent: event.structuredContent };
+		return withExtra([{ type: "text", text: mark }]);
 	});
 
 	// Filter in place and return nothing: pi's default summarizer then runs on the same preparation object.

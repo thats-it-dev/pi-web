@@ -136,5 +136,11 @@ export function doneText(job: Job, log: string, tailLines = 60): string {
 	const parts = [head];
 	if (result && !tailSet.has(result)) parts.push(result);
 	if (tail) parts.push(tail);
+	if (job.exitCode === 0 && CI_WAIT.test(job.command)) parts.push(CI_GREEN);
 	return parts.join("\n");
 }
+
+// A green CI wait is where the orchestrator once decided to merge the PR itself (keeb #28, 2026-11-16). The line
+// lands in the message that starts the next turn, so it is read even when the skill never was.
+const CI_WAIT = /thatsit-app\.ts\s+(?:pr-wait|gateway-pr-wait)\b/;
+export const CI_GREEN = "CI is green: reply with the pr and preview links from RESULT and end your turn. Michael merges the PR; never merge or close it yourself, and don't suggest a merge command.";
