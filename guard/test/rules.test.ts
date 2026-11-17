@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, lastRequest, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -335,6 +335,22 @@ test("reviewHeader names the scope, the verify result and the budget", () => {
 	assert.match(h, /already reviewed/);
 	assert.match(h, /npm run verify/);
 	assert.match(h, new RegExp(`${REVIEW_BUDGET.hard} tool calls`));
+	assert.doesNotMatch(h, /Michael's request/);
+	const withReq = reviewHeader({ dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main", diffPath: "/tmp/keeb-review.diff", files: [], request: "space and enter switch layers instead of typing" });
+	assert.match(withReq, /\[Michael's request, verbatim[^\]]*\]\nspace and enter switch layers instead of typing\n/);
+	assert.match(withReq, /A named behavior with no such test is a P1 finding and the merge verdict is BLOCK/);
+	assert.ok(withReq.indexOf("Michael's request") < withReq.indexOf("[The parent's request]"), "Michael's words come before the parent's summary");
+});
+
+test("lastRequest: Michael's last message on the branch, verbatim, text parts only, cut when long", () => {
+	const user = (content: unknown) => ({ type: "message", message: { role: "user", content } });
+	const tool = { type: "message", message: { role: "toolResult", content: [{ type: "text", text: "x" }] } };
+	assert.equal(lastRequest([]), undefined);
+	assert.equal(lastRequest([user("first"), tool, user("  second\nline  "), tool]), "second\nline");
+	assert.equal(lastRequest([user([{ type: "text", text: "look" }, { type: "image", data: "AAA", mimeType: "image/png" }])]), "look");
+	assert.equal(lastRequest([user("real"), user("   ")]), "real", "an empty message does not replace the last real one");
+	const long = lastRequest([user("a".repeat(50))], 10);
+	assert.equal(long, `${"a".repeat(10)}\n[cut at 10 characters]`);
 });
 
 test("pr and gateway-pr are blocked until a reviewer ran, unless only docs, Markdown or CI changed", () => {

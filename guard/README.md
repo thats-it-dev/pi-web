@@ -100,8 +100,12 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 - The guard snapshots the working tree (uncommitted and untracked files included, in a throwaway index) and writes
   `/tmp/<name>-review.diff` itself: from the last review's snapshot, or from where the branch left main. Lockfiles,
   `dist` and source maps are left out. With nothing new since the last review the call is blocked.
-- The task gets a header with the changed files, the base, "verify passed, don't check tests or config", and the
-  budget. The call is forced to `async: false`, `cwd` = the app (so its AGENTS.md is project context) and
+- The task gets a header with the changed files, the base, "verify passed, don't check tests or config", the
+  budget, and Michael's last message on the branch word for word, with the rule that every behavior he names must
+  have a test in the diff that drives that input, or the verdict is BLOCK (a test asserting the behavior he called
+  wrong is a BLOCK too). Why: on 2026-11-17 the keeb orchestrator's brief and reviewer task both dropped "space and
+  enter switch layers instead of typing"; the worker wrote a test asserting space is the layer-1 switch, 432 tests
+  passed, the review passed, PR #30 opened with the bug intact. The call is forced to `async: false`, `cwd` = the app (so its AGENTS.md is project context) and
   `toolBudget` `{soft: 12, hard: 20, block: "*"}`; `context`, `model`, `thinking`, `tools`, `skill` overrides are dropped.
 - The app is the one named in the task (an apps path or `/tmp/<name>-review.diff`), else the call's own `cwd`, else the
   session cwd. A reviewer call the guard can't tie to an app gets `[pi-guard] this review is not scoped to an app …` on

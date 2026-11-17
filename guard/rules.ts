@@ -568,6 +568,8 @@ export const REVIEW_BUDGET = { soft: 12, hard: 20, block: "*" } as const;
 
 export type ReviewScope = {
 	dir: string;
+	/** Michael's last message on the branch, verbatim (lastRequest): what the review must check the diff against. */
+	request?: string;
 	/** Where the diff starts: the last review's snapshot, or the branch point from main. */
 	base: string;
 	baseFrom: "review" | "main";
@@ -589,9 +591,33 @@ export function reviewHeader(s: ReviewScope): string {
 		`Changed files:\n${files}`,
 		"`npm run verify` (typecheck, lint, guardrail tests, unit tests and e2e tests) passed after the last code edit. Don't check whether tests pass or run, and don't read config, CI, lock, test-result, coverage or git files.",
 		`Read the diff first. Open a file outside the list only to check a caller, a definition or a contract the diff depends on. Put independent reads in one turn. You have ${REVIEW_BUDGET.hard} tool calls; at ${REVIEW_BUDGET.soft} write your review.`,
+		...(s.request
+			? [
+					"",
+					"[Michael's request, verbatim. The parent's summary below may have lost part of it.]",
+					s.request,
+					"",
+					"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives.",
+				]
+			: []),
 		"",
 		"[The parent's request]",
 	].join("\n");
+}
+
+/** The text of Michael's last message on the branch, verbatim, cut at `max` characters; undefined when there is none. */
+export function lastRequest(branch: Iterable<unknown>, max = 2000): string | undefined {
+	let text: string | undefined;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "user") continue;
+		const c = e.message.content;
+		const t = typeof c === "string" ? c : Array.isArray(c) ? (c as { type?: string; text?: string }[]).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n") : "";
+		const trimmed = t.trim();
+		if (trimmed) text = trimmed;
+	}
+	if (text === undefined) return undefined;
+	return text.length > max ? `${text.slice(0, max)}\n[cut at ${max} characters]` : text;
 }
 
 // The shell commands and Python code a tool call would run, for bash and context-mode's ctx_* tools.

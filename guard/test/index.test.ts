@@ -204,10 +204,11 @@ test("a reviewer call is scoped by its own cwd when the task names no app, and a
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
 	// keeb 2026-11-16 00:51: cwd=<app>, task with `.superpowers/sdd/.../review-x..y.diff`, session cwd = home.
 	const input: Record<string, unknown> = { agent: "reviewer", async: true, cwd: dir, task: "PR-gate review.\n**Diff file:** .superpowers/sdd/2026-11-16-keeb-layers/review-0aa56db..9cca2a7.diff" };
-	const r = scopeReview(input, ready(dir), home, home) as { dir: string; snap: string };
+	const r = scopeReview(input, [msg("user", { content: "make it so" }), ...ready(dir)], home, home) as { dir: string; snap: string };
 	assert.equal(r.dir, dir);
 	assert.equal(input.cwd, dir);
 	assert.match(String(input.task), /^\[pi-guard\]|review/i);
+	assert.match(String(input.task), /\[Michael's request, verbatim[^\]]*\]\nmake it so\n/, "the reviewer gets Michael's last message word for word");
 	const tilde: Record<string, unknown> = { agent: "reviewer", cwd: "~/workspace/apps/keeb", task: "Review the branch" };
 	assert.equal((scopeReview(tilde, ready(dir), home, home) as { dir: string }).dir, dir, "a ~ cwd expands");
 	assert.equal(scopeReview({ agent: "reviewer", cwd: home, task: "Review the plan" }, ready(dir), home, home), undefined, "a cwd outside apps scopes nothing");
