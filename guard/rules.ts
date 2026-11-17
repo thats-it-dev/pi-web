@@ -133,6 +133,8 @@ export type Env = {
 	reviewed?: (dir: string) => boolean;
 	/** The branch changes more than docs, Markdown and CI files. */
 	codeChanged?: (dir: string) => boolean;
+	/** Why the review gate is shut for the app, when `reviewed` is false (reviewGap). Absent: the plain reason. */
+	reviewGap?: (dir: string) => string | undefined;
 	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
 	lines?: (path: string) => number | undefined;
 	/** Paths whose overwrite was already blocked once; the second try goes through. */
@@ -259,7 +261,10 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
 	// A first version always has a screen; a PR needs the look only when it changes UI files.
 	if (env.screenSeen && (SHIPS.test(command) || (OPENS_PR.test(command) && (env.uiChanged?.(dir) ?? true))) && !env.screenSeen(dir)) return { block: true, reason: REASONS.screen };
-	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && (env.codeChanged?.(dir) ?? true)) return { block: true, reason: REASONS.review };
+	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && (env.codeChanged?.(dir) ?? true)) {
+		const gap = env.reviewGap?.(dir);
+		return { block: true, reason: gap ? `${REASONS.review}\n${gap}` : REASONS.review };
+	}
 	return undefined;
 }
 
@@ -296,11 +301,12 @@ const ASYNC_RUNS = join(process.env.PI_SUBAGENTS_TEMP_ROOT?.trim() || `/tmp/pi-s
  *  `No issues found.` line. A reviewer that stops mid-review, or writes its report inside its reasoning, returns neither
  *  (keeb run 2026-11-12 22:45), and a review the orchestrator cannot act on must not open the PR gate. */
 export function reviewVerdict(text: string): boolean {
-	if (/\bNo issues found\b/.test(text)) return true;
-	// The label may be emphasised (`- **Merge verdict**: OK`), a finding may lead with its level (`- **P2:** ...`), and
-	// the line may carry no list dash at all (`**Finding:** None.`, fret 2026-11-14 21:33): all read fine, and a review
-	// that counts for the reader must count for the gate.
-	return /^\s*#+\s*Review\b/m.test(text) && /^\s*(?:-\s*)?(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*:/m.test(text);
+	if (/\bNo (?:issues|defects|problems) found\b/.test(text)) return true;
+	// The label may be emphasised (`- **Merge verdict**: OK`), a finding may lead with its level (`- **P2:** ...`), the
+	// line may carry no list dash at all (`**Finding:** None.`, fret 2026-11-14 21:33), or be a heading (`## Merge
+	// verdict: OK`, `#### P1 — ...`: every one of the 35B's five scoped reviews on keeb 2026-11-16, all discarded, and
+	// the PR never opened): all read fine, and a review that counts for the reader must count for the gate.
+	return /^\s*#+\s*Review\b/m.test(text) && /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*(?::|—|–|-\s)/m.test(text);
 }
 
 /** Appended instead of the reviewed mark when a sync review returns without a verdict. */
@@ -377,6 +383,57 @@ export function lastReview(branch: Iterable<unknown>, dir: string, runState: Run
 		for (const r of completedReviews(resultText(e.message), runState, runText)) if (r.dir === dir) snap = r.snap;
 	}
 	return snap;
+}
+
+/** Appended to a reviewer launch the guard did not scope: it will never count for the PR gate, and the model
+ *  should know that now, not after ten blocked `pr` calls (keeb 2026-11-16: 11 unscoped reviews in a row). */
+export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to an app (the task names no ~/workspace/apps/<name> path and the call's cwd is not in one), so it does not count for the PR gate. For an app review, call the reviewer again with `cwd` set to the app or the app's path in the task.";
+
+const REVIEW_BLOCK_HEAD = "Blocked: run the reviewer before opening the PR";
+
+/** Why the review gate is shut for `dir` after Michael's last message: no scoped review, one still running, one that
+ *  ended without a verdict, or one that failed. Prefixed by a stop order once `pr` was blocked three times with no new
+ *  review in between: the orchestrator is looping (keeb 2026-11-16: 16 blocked `pr` calls over 2 h 48 min). */
+export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
+	let last: { kind: "pending"; runId: string } | { kind: "finished" } | undefined;
+	let blocks = 0;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "user") {
+			last = undefined;
+			blocks = 0;
+			continue;
+		}
+		if (m.role !== "toolResult") continue;
+		const text = resultText(m);
+		if (m.isError) {
+			if (text.startsWith(REVIEW_BLOCK_HEAD)) blocks++;
+			continue;
+		}
+		for (const f of text.matchAll(FINISHED)) if (f[1] === dir) {
+			last = { kind: "finished" };
+			blocks = 0;
+		}
+		for (const p of text.matchAll(PENDING)) if (p[1] === dir) {
+			last = { kind: "pending", runId: p[3] };
+			blocks = 0;
+		}
+	}
+	let why: string;
+	if (!last) why = "No reviewer call since Michael's last message was scoped to this app: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or whose task names its ~/workspace/apps/<name> path, and only those count.";
+	else if (last.kind === "finished") return undefined;
+	else if (last.runId === UNKNOWN_RUN) why = "The last scoped review's launch result carried no run id, so it can never count: call the reviewer again.";
+	else {
+		const state = runState(last.runId);
+		if (state === "running") why = `The last scoped review (run ${last.runId.slice(0, 8)}) is still running: wait for its subagent-notify message, then run this command again.`;
+		else if (state === "complete") why = reviewVerdict(runText(last.runId) ?? "") ? "" : `The last scoped review (run ${last.runId.slice(0, 8)}) ended without a verdict the guard accepts: a \`## Review\` block with a Finding, Merge verdict or P0-P2 line, or \`No issues found.\`. Call the reviewer again and ask for that shape.`;
+		else why = `The last scoped review (run ${last.runId.slice(0, 8)}) ${state === "missing" ? "has no run directory any more" : "failed"}: call the reviewer again.`;
+	}
+	if (!why) return undefined;
+	const stop = blocks >= 3 ? `This is the ${blocks + 1}th time this command is blocked with no new review in between: stop retrying. Tell Michael the PR is blocked, quote the line below, and end your turn.\n` : "";
+	return `${stop}${why}`;
 }
 
 /** The app a reviewer call is about: an apps path in the task, then a /tmp/<name>-review.diff, then the cwd. */

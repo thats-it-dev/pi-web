@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -263,7 +263,10 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	if (indirectReviewer(input) && reviewApp(JSON.stringify(input), cwd, home)) return { block: true, reason: REASONS.reviewWorkflow };
 	if (input.agent !== "reviewer") return undefined;
 	const task = String(input.task ?? "");
-	const dir = reviewApp(task, cwd, home);
+	// The call's own cwd names the app as well as the task does: on keeb 2026-11-16 the orchestrator passed
+	// cwd=<app> on every reviewer call and, from the 11th on, a diff path relative to it, and none was scoped.
+	const callCwd = typeof input.cwd === "string" && input.cwd ? input.cwd.replace(/^~(?=\/)/, home) : cwd;
+	const dir = reviewApp(task, callCwd, home);
 	if (!dir) return undefined;
 	if (hasScript(dir, "verify") && !verifiedSinceEdit(branch, dir, cwd, home)) return { block: true, reason: REASONS.reviewUnverified };
 	// The orchestrator looks at a UI change before anyone reviews its code: a wrong picture goes back to the worker.
@@ -326,6 +329,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// Apps checked once for a checkout left on a merged branch, and the note owed to the call that triggered the switch.
 	const freshened = new Set<string>();
 	const switched = new Map<string, string>();
+	// Reviewer launches the guard could not tie to an app: their result says so, since they never count.
+	const unscoped = new Set<string>();
 
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
@@ -348,6 +353,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 				return reviewedSinceUser(b) || upToDate(dir, b);
 			},
 			codeChanged,
+			reviewGap: (dir) => reviewGap(branch(), dir),
 			lines,
 			rewrites,
 			orchestrator,
@@ -378,6 +384,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		}
 		if (scoped && "block" in scoped) return scoped;
 		if (scoped) reviews.set(event.toolCallId, scoped);
+		else if (event.input.agent === "reviewer") unscoped.add(event.toolCallId);
 		return undefined;
 	});
 
@@ -403,6 +410,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			const branch = [...(ctx?.sessionManager?.getBranch() ?? [])];
 			return withExtra(screenContent(file, screen.dir, screen.snap, branch));
 		}
+		if (unscoped.delete(event.toolCallId)) return event.isError ? plain() : withExtra([{ type: "text", text: REVIEW_UNSCOPED }]);
 		const scoped = reviews.get(event.toolCallId);
 		if (!scoped) return plain();
 		reviews.delete(event.toolCallId);

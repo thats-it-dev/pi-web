@@ -103,14 +103,25 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 - The task gets a header with the changed files, the base, "verify passed, don't check tests or config", and the
   budget. The call is forced to `async: false`, `cwd` = the app (so its AGENTS.md is project context) and
   `toolBudget` `{soft: 12, hard: 20, block: "*"}`; `context`, `model`, `thinking`, `tools`, `skill` overrides are dropped.
+- The app is the one named in the task (an apps path or `/tmp/<name>-review.diff`), else the call's own `cwd`, else the
+  session cwd. A reviewer call the guard can't tie to an app gets `[pi-guard] this review is not scoped to an app …` on
+  its launch result, because it will never count. Why: on 2026-11-16 the keeb orchestrator passed `cwd` = the app on
+  every reviewer call and, from 00:51, a diff path relative to it; the guard read only the task and the session cwd, so
+  eleven reviews in a row (ten of them "No issues found.") were never scoped, and `pr` stayed blocked for 2 h 48 min.
 - A reviewer inside a workflow, chain or task list on an app is blocked.
 - When the review returns without error and its reply holds a verdict (a `## Review` block with a finding or a merge
-  verdict line, with or without a list dash and emphasis, or `No issues found.`), the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
+  verdict line, with or without a list dash and emphasis, or as a heading such as `## Merge verdict: OK` or
+  `#### P1 — …`, or `No issues found.`), the guard appends `[pi-guard] reviewed <dir> at <snapshot>` to its result:
   the PR gate and the next review's base read that mark from the session, so both survive a restart. A reply without
   a verdict (the reviewer stopped mid-review, or left its report in its reasoning, as the 35B did at thinking low on
   2026-11-12) gets a `review ended without a verdict` note instead and counts for nothing, so the PR stays blocked
   and the next review covers the same changes. An async review's reply is read from its run's session file when its
   pending mark is resolved; an unreadable transcript never counts.
+- When `pr` is blocked on the review gate, the reason ends with why: no scoped review since Michael's last message,
+  the last one still running (wait for its message), ended without an accepted verdict, or failed. After three blocks
+  with no new review in between, the reason opens with a stop order: tell Michael the PR is blocked and end the turn.
+  Why: the same keeb session blocked `pr` 16 times while the orchestrator re-ran verify and the reviewer each time and
+  finally reported that "the guard's LLM is looping".
 
 The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
 first, no test or config spelunking, and the same tool budget in its frontmatter.

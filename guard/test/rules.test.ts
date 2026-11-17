@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -661,6 +661,12 @@ test("reviewVerdict: the reviewer.md report shapes count, a mid-review line or n
 	assert.equal(reviewVerdict("Now let me check one more thing — how `tk-stat` renders its `.value`:\nMission: cf39d943 (completed)"), false);
 	assert.equal(reviewVerdict(""), false);
 	assert.equal(reviewVerdict("## Review"), false, "a heading alone is not a verdict");
+	// keeb 2026-11-16: the 35B's heading shapes, five scoped reviews discarded and the PR never opened.
+	assert.equal(reviewVerdict("## Review\n- P2 ...\n\n## Checked\n- a.ts\n\n## Merge verdict: OK\nNo code defects in the diff."), true, "verdict as a heading");
+	assert.equal(reviewVerdict("## Review\n\n### New Issues\n\n#### P1 — `labelToBrowserKey` won't match layer keys\nbody\n\n### Assessment"), true, "finding level as a heading with an em-dash");
+	assert.equal(reviewVerdict("## Review\n## Checked\n## Merge verdict: OK with notes\nplease confirm"), true);
+	assert.equal(reviewVerdict("## Review\nNo defects found."), true);
+	assert.equal(reviewVerdict("## Review\n### Issues\n#### Critical (Must Fix)\n- thing"), false, "severity words without a level or verdict are not the contract");
 	assert.equal(reviewVerdict('{"reviewFindings": ["No blockers."]}'), false, "the JSON report is not the contract");
 });
 
@@ -863,4 +869,33 @@ test("the orchestrator reason no longer calls merges the orchestrator's, and the
 	assert.doesNotMatch(REASONS.orchestrator, /Merges/);
 	assert.match(REASONS.orchestrator, /Michael's to merge/);
 	assert.match(prNudge(["/home/m/workspace/apps/keeb"]), /Michael merges the PR; never merge or close it yourself/);
+});
+
+test("reviewGap says why the review gate is shut, and orders a stop after three blocks with no new review", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const user = { type: "message", message: { role: "user", content: "go" } };
+	const res = (text: string, isError = false) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }], isError } });
+	const blocked = res("Blocked: run the reviewer before opening the PR. Run `npm run verify`...", true);
+	assert.match(reviewGap([user], dir) ?? "", /^No reviewer call since Michael's last message was scoped to this app/);
+	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "running"), "The last scoped review (run run-a) is still running: wait for its subagent-notify message, then run this command again.");
+	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "Let me look at one more file") ?? "", /ended without a verdict the guard accepts/);
+	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "## Review\n- Merge verdict: OK"), undefined, "a counted review has no gap");
+	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "failed") ?? "", /failed: call the reviewer again/);
+	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "missing") ?? "", /has no run directory any more/);
+	// Three blocks with no new review in between: the fourth reason opens with the stop order.
+	const two = reviewGap([user, blocked, blocked], dir) ?? "";
+	assert.doesNotMatch(two, /stop retrying/);
+	const four = reviewGap([user, blocked, blocked, blocked], dir) ?? "";
+	assert.match(four, /^This is the 4th time this command is blocked with no new review in between: stop retrying\. Tell Michael/);
+	// A new scoped review resets the count, and Michael's next message resets everything.
+	assert.doesNotMatch(reviewGap([user, blocked, blocked, blocked, res(reviewPendingMark(dir, "bbbbbbb", "run-b"))], dir, () => "running") ?? "", /stop retrying/);
+	assert.doesNotMatch(reviewGap([user, blocked, blocked, blocked, user], dir) ?? "", /stop retrying/);
+	assert.equal(REVIEW_PENDING_MARK, "[pi-guard] review pending ");
+});
+
+test("the pr block carries the gap text when the env has one", () => {
+	const pr = "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b";
+	const base = { cwd: "/home/m", home: "/home/m", hasScript: () => false, dirty: () => false, reviewed: () => false, codeChanged: () => true };
+	assert.equal(checkShell(pr, { ...base, reviewGap: () => "why" })?.reason, `${REASONS.review}\nwhy`);
+	assert.equal(checkShell(pr, { ...base, reviewGap: () => undefined })?.reason, REASONS.review);
 });

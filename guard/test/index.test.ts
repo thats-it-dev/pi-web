@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -199,6 +199,34 @@ test("scopeReview: a reviewer inside a workflow on an app is blocked; non-app re
 	assert.equal(plan.task, "Review this plan");
 });
 
+test("a reviewer call is scoped by its own cwd when the task names no app, and a relative diff path resolves against it", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	// keeb 2026-11-16 00:51: cwd=<app>, task with `.superpowers/sdd/.../review-x..y.diff`, session cwd = home.
+	const input: Record<string, unknown> = { agent: "reviewer", async: true, cwd: dir, task: "PR-gate review.\n**Diff file:** .superpowers/sdd/2026-11-16-keeb-layers/review-0aa56db..9cca2a7.diff" };
+	const r = scopeReview(input, ready(dir), home, home) as { dir: string; snap: string };
+	assert.equal(r.dir, dir);
+	assert.equal(input.cwd, dir);
+	assert.match(String(input.task), /^\[pi-guard\]|review/i);
+	const tilde: Record<string, unknown> = { agent: "reviewer", cwd: "~/workspace/apps/keeb", task: "Review the branch" };
+	assert.equal((scopeReview(tilde, ready(dir), home, home) as { dir: string }).dir, dir, "a ~ cwd expands");
+	assert.equal(scopeReview({ agent: "reviewer", cwd: home, task: "Review the plan" }, ready(dir), home, home), undefined, "a cwd outside apps scopes nothing");
+});
+
+test("a reviewer launch the guard could not scope gets a note saying it will not count", () => {
+	const { home } = appRepo();
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: home, sessionManager: { getBranch: () => [] } };
+	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "u1", input: { agent: "reviewer", task: "Review the plan in docs/" } }, ctx), undefined);
+	const r = h.tool_result({ toolCallId: "u1", toolName: "subagent", content: [{ type: "text", text: "Async: reviewer [0bdd2a04-7e76-4cca-8c02-1ad3fb71d86b]" }], isError: false }, ctx);
+	assert.match(text(r), /Async: reviewer/);
+	assert.ok(text(r).endsWith(REVIEW_UNSCOPED));
+	assert.equal(h.tool_result({ toolCallId: "u1", toolName: "subagent", content: [{ type: "text", text: "again" }], isError: false }, ctx), undefined, "the note goes on once");
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "w1", input: { agent: "worker", task: "build it" } }, ctx), undefined);
+	assert.equal(h.tool_result({ toolCallId: "w1", toolName: "subagent", content: [{ type: "text", text: "ok" }], isError: false }, ctx), undefined, "workers get no note");
+});
+
 test("tool_result marks a scoped review so the PR gate sees it", () => {
 	const h = load();
 	const r = h.tool_result({ toolCallId: "unknown", content: [{ type: "text", text: "x" }], isError: false }, { cwd: "/" });
@@ -371,7 +399,8 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	entries.push(msg("toolResult", { toolCallId: "s1", isError: false, content: out.content }));
 	assert.equal(screenUpToDate(dir, entries), true);
 	const r2 = h.tool_call({ toolName: "bash", toolCallId: "pr2", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
-	assert.deepEqual(r2, { block: true, reason: REASONS.review }, "looked; the review gate is next");
+	assert.equal(r2?.block, true, "looked; the review gate is next");
+	assert.match(String(r2?.reason), /^Blocked: run the reviewer before opening the PR[\s\S]*\nNo reviewer call since Michael's last message was scoped to this app/);
 	// A failed command or one that reported no picture leaves no mark.
 	h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command } }, ctx);
 	assert.equal(h.tool_result({ ...result, toolCallId: "s2", content: [{ type: "text", text: 'RESULT {"ok":false,"reason":"no vite"}' }] }, ctx), undefined);
