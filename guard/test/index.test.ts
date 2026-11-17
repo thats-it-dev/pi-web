@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
+import piGuard, { codeChanged, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
 import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -544,4 +544,32 @@ test("tool_result marks a sync BLOCK as blocked, not reviewed", () => {
 	const text = r.content.map((c: any) => c.text ?? "").join("\n");
 	assert.match(text, /\[pi-guard\] review blocked \S+ at [0-9a-f]{40}/);
 	assert.doesNotMatch(text, /\[pi-guard\] reviewed /);
+});
+
+test("docsChanged: a spec or plan on the branch, committed or not; plain Markdown is not one", () => {
+	const { dir, git } = appRepo();
+	assert.equal(docsChanged(dir), false);
+	writeFileSync(join(dir, "README.md"), "hi");
+	assert.equal(docsChanged(dir), false, "README");
+	mkdirSync(join(dir, "docs", "superpowers", "plans"), { recursive: true });
+	writeFileSync(join(dir, "docs", "superpowers", "plans", "2026-11-17-x.md"), "# plan");
+	assert.equal(docsChanged(dir), true, "untracked plan");
+	git("add", "-A");
+	git("commit", "-qm", "plan");
+	assert.equal(docsChanged(dir), true, "committed plan");
+});
+
+test("scopeReview: a docs-only change is reviewed without verify or a screen, with the doc brief", () => {
+	const { home, dir } = appRepo();
+	mkdirSync(join(dir, "docs", "superpowers", "plans"), { recursive: true });
+	writeFileSync(join(dir, "docs", "superpowers", "plans", "2026-11-17-x.md"), "# plan\n");
+	const input: Record<string, unknown> = { agent: "reviewer", cwd: dir, task: "Review the plan for holes" };
+	const r = scopeReview(input, [msg("user", { content: "spin up a reviewer" })], home, home);
+	assert.ok(r && !("block" in r), `scoped: ${JSON.stringify(r)}`);
+	assert.match(String(input.task), /review of an implementation plan, not of code/);
+	assert.match(String(input.task), /- docs\/superpowers\/plans\/2026-11-17-x\.md/);
+	assert.doesNotMatch(String(input.task), /verify/);
+	// Code on top of it brings the verify gate back.
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	assert.deepEqual(scopeReview({ agent: "reviewer", cwd: dir, task: "Review" }, [], home, home), { block: true, reason: REASONS.reviewUnverified });
 });

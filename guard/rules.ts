@@ -14,7 +14,7 @@ export const REASONS = {
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
-	review: `Blocked: run the reviewer before opening the PR. Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	review: `Blocked: run the reviewer before opening the PR. A design doc or plan under docs/superpowers gets a review too (the guard briefs the reviewer for it; no verify needed for a docs-only change). Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
@@ -135,6 +135,8 @@ export type Env = {
 	reviewed?: (dir: string) => boolean;
 	/** The branch changes more than docs, Markdown and CI files. */
 	codeChanged?: (dir: string) => boolean;
+	/** The branch adds or changes a design doc or plan under docs/superpowers (a PR of one needs a doc review). */
+	docsChanged?: (dir: string) => boolean;
 	/** Why the review gate is shut for the app, when `reviewed` is false (reviewGap). Absent: the plain reason. */
 	reviewGap?: (dir: string) => string | undefined;
 	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
@@ -263,7 +265,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
 	// A first version always has a screen; a PR needs the look only when it changes UI files.
 	if (env.screenSeen && (SHIPS.test(command) || (OPENS_PR.test(command) && (env.uiChanged?.(dir) ?? true))) && !env.screenSeen(dir)) return { block: true, reason: REASONS.screen };
-	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && (env.codeChanged?.(dir) ?? true)) {
+	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && ((env.codeChanged?.(dir) ?? true) || (env.docsChanged?.(dir) ?? false))) {
 		const gap = env.reviewGap?.(dir);
 		return { block: true, reason: gap ? `${REASONS.review}\n${gap}` : REASONS.review };
 	}
@@ -272,9 +274,14 @@ export function checkShell(command: string, env: Env): Block | undefined {
 
 const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 
-/** Files a PR can change without a review: docs, Markdown and CI config. */
+/** Files a PR can change without a code review: docs, Markdown and CI config. */
 export function reviewFree(path: string): boolean {
 	return /^(?:docs|\.github)\//.test(path) || /\.md$/i.test(path);
+}
+
+/** A design doc or implementation plan: it gets a doc review (claims against the code, plan against the spec). */
+export function designDoc(path: string): boolean {
+	return /^docs\/superpowers\/(?:specs|plans)\/[^/]+\.md$/i.test(path);
 }
 
 // --- review before PR ---
@@ -620,6 +627,8 @@ export const REVIEW_BUDGET = { soft: 12, hard: 20, block: "*" } as const;
 
 export type ReviewScope = {
 	dir: string;
+	/** "docs" when the diff holds no code: a design doc or plan review, briefed differently (no tests to cite). */
+	kind?: "code" | "docs";
 	/** Michael's last message on the branch, verbatim (lastRequest): what the review must check the diff against. */
 	request?: string;
 	/** Where the diff starts: the last review's snapshot, or the branch point from main. */
@@ -636,6 +645,7 @@ export function reviewHeader(s: ReviewScope): string {
 		s.baseFrom === "review"
 			? `the state the last review covered (${s.base.slice(0, 8)}); everything before it was already reviewed, so don't review it again`
 			: `where the branch left main (${s.base.slice(0, 8)})`;
+	if (s.kind === "docs") return docReviewHeader(s, files, from);
 	return [
 		"[Review scope, set by pi-guard. Follow it exactly.]",
 		`App: ${s.dir} (your working directory). Its AGENTS.md, if it has one, is already in your context.`,
@@ -652,6 +662,35 @@ export function reviewHeader(s: ReviewScope): string {
 					"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives.",
 				]
 			: []),
+		"",
+		"[The parent's request]",
+	].join("\n");
+}
+
+/** The brief for a design doc or plan review. On keeb 2026-11-17 (flash, PR #31) the plan review went out with the
+ *  code brief: "verify passed", "cite the test per named behavior" on a diff with no code in it, after a needless
+ *  `npm run verify` to open the gate. A doc is checked against the code it describes and the spec it implements. */
+function docReviewHeader(s: ReviewScope, files: string, from: string): string {
+	const docs = s.files.filter((f) => designDoc(f.path)).map((f) => f.path);
+	const specs = docs.filter((p) => /\/specs\//.test(p));
+	const plans = docs.filter((p) => /\/plans\//.test(p));
+	const what = plans.length && specs.length ? "a design doc and its implementation plan" : plans.length ? "an implementation plan" : specs.length ? "a design doc" : "documentation";
+	return [
+		"[Review scope, set by pi-guard. Follow it exactly.]",
+		`This is a review of ${what}, not of code: the diff changes no source file. App: ${s.dir} (your working directory). Its AGENTS.md, if it has one, is already in your context.`,
+		`Diff: ${s.diffPath}, every change from ${from} to the current working tree.`,
+		`Changed files:\n${files}`,
+		"Read the diff first, then open the source files the document names and check what it says about them. Don't run anything; don't read config, CI, lock, test-result, coverage or git files.",
+		"Report, each with path:line evidence:",
+		"- A claim about the code that is false: a file, function, type, field or behaviour the document names that is not there or does not work as described, and a section of docs/spec.md it renumbers or contradicts.",
+		...(plans.length
+			? [
+					"- A hole between plan and spec: a goal, behaviour or decision in the spec that no task implements or tests; a task whose interfaces, files or test names don't match the spec or each other; an ordering that makes a task's tests impossible when it runs.",
+					"- A step a worker cannot follow as written: an ambiguous file choice, a garbled rule, a regex or formula that can't do what the step claims.",
+				]
+			: ["- A decision the doc leaves open that the plan or the code will have to make, and a non-goal that contradicts a goal."]),
+		`Put independent reads in one turn. You have ${REVIEW_BUDGET.hard} tool calls; at ${REVIEW_BUDGET.soft} write your review.`,
+		...(s.request ? ["", "[Michael's request, verbatim. The parent's summary below may have lost part of it.]", s.request, "", "Check that the document answers what Michael asked for, point by point; a point it drops or contradicts is a P1 finding and the merge verdict is BLOCK."] : []),
 		"",
 		"[The parent's request]",
 	].join("\n");

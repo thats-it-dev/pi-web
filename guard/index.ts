@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -113,14 +113,24 @@ function callApp(toolName: string, input: Record<string, unknown>, cwd: string, 
 	return undefined;
 }
 
-// Files the branch changes against main, committed or not. When git can't say, assume code changed.
+// Files the branch changes against main, committed, staged, unstaged or untracked. When git can't say, assume code changed.
 export function codeChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 });
-		const files = [...run(["diff", "--name-only", "main...HEAD"]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n")].filter(Boolean);
+		const files = [...run(["diff", "--name-only", "main...HEAD"]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n"), ...run(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(Boolean);
 		return files.length === 0 || files.some((f) => !reviewFree(f));
 	} catch {
 		return true;
+	}
+}
+
+// A design doc or plan the branch adds or changes against main, committed or not. When git can't say, assume none.
+export function docsChanged(dir: string): boolean {
+	try {
+		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
+		return [...run(["diff", "--name-only", "main...HEAD"]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(designDoc);
+	} catch {
+		return false;
 	}
 }
 
@@ -268,9 +278,12 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	const callCwd = typeof input.cwd === "string" && input.cwd ? input.cwd.replace(/^~(?=\/)/, home) : cwd;
 	const dir = reviewApp(task, callCwd, home);
 	if (!dir) return undefined;
-	if (hasScript(dir, "verify") && !verifiedSinceEdit(branch, dir, cwd, home)) return { block: true, reason: REASONS.reviewUnverified };
+	// A docs-only change (a design doc, a plan) needs no verify and no screen: keeb 2026-11-17, flash ran the full
+	// verify to get a plan review past this gate.
+	const docsOnly = !codeChanged(dir);
+	if (!docsOnly && hasScript(dir, "verify") && !verifiedSinceEdit(branch, dir, cwd, home)) return { block: true, reason: REASONS.reviewUnverified };
 	// The orchestrator looks at a UI change before anyone reviews its code: a wrong picture goes back to the worker.
-	if (uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
+	if (!docsOnly && uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
 	const snap = snapshot(dir);
 	// A review that ended BLOCK is not re-run on the same tree: keeb 2026-11-17 18:27, the orchestrator asked the
 	// reviewer to "re-verify" its P0 with its own counter-evidence, and the gate let the unchanged code through.
@@ -303,7 +316,8 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// Michael's words go to the reviewer unsummarised: on keeb 2026-11-17 the parent's brief and the reviewer's task both
 	// dropped "space and enter switch layers instead of typing", the worker enshrined that behavior in a test, and the
 	// review passed it.
-	input.task = `${reviewHeader({ dir, base, baseFrom, diffPath, files, request: lastRequest(branch) })}\n${task}`;
+	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
+	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request: lastRequest(branch) })}\n${task}`;
 	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
 	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
@@ -360,6 +374,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 				return reviewedSinceUser(b) || upToDate(dir, b);
 			},
 			codeChanged,
+			docsChanged,
 			reviewGap: (dir) => reviewGap(branch(), dir),
 			lines,
 			rewrites,

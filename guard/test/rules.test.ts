@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -959,4 +959,43 @@ test("reviewGap after a BLOCK sends the findings to the worker or to Michael, ne
 	assert.match(gap, /tell Michael which finding and why, and end your turn/);
 	assert.match(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb"))], dir) ?? "", /^The last scoped review ended with the merge verdict BLOCK/);
 	assert.equal(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb")), res(reviewMark(dir, "ccccccc"))], dir), undefined, "the fix was reviewed");
+});
+
+test("designDoc: specs and plans under docs/superpowers, nothing else", () => {
+	assert.equal(designDoc("docs/superpowers/specs/2026-11-17-layered-keymap-design.md"), true);
+	assert.equal(designDoc("docs/superpowers/plans/2026-11-17-layered-keymaps.md"), true);
+	assert.equal(designDoc("docs/spec.md"), false);
+	assert.equal(designDoc("README.md"), false);
+	assert.equal(designDoc(".superpowers/sdd/x/task-1-brief.md"), false);
+});
+
+test("a spec or plan PR needs a review even with no code change", () => {
+	const pr = "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b";
+	const base = { cwd: "/home/m", home: "/home/m", hasScript: () => false, dirty: () => false, reviewed: () => false, codeChanged: () => false };
+	assert.equal(checkShell(pr, { ...base, docsChanged: () => true })?.block, true, "a plan on the branch");
+	assert.equal(checkShell(pr, { ...base, docsChanged: () => false }), undefined, "README only");
+	assert.match(checkShell(pr, { ...base, docsChanged: () => true })?.reason ?? "", /design doc or plan/);
+});
+
+test("reviewHeader: a docs-only diff gets the doc brief, not the code one", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "abcdef0123", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff", files: [{ path: "docs/superpowers/specs/2026-11-17-x-design.md", added: "80", removed: "0" }, { path: "docs/superpowers/plans/2026-11-17-x.md", added: "200", removed: "0" }], request: "review the plan" };
+	const docs = reviewHeader({ ...scope, kind: "docs" });
+	assert.match(docs, /review of a design doc and its implementation plan, not of code/);
+	assert.match(docs, /hole between plan and spec/);
+	assert.match(docs, /a worker cannot follow/);
+	assert.match(docs, /renumbers or contradicts/);
+	assert.match(docs, /\[Michael's request, verbatim/);
+	assert.match(docs, /point it drops or contradicts is a P1/);
+	assert.doesNotMatch(docs, /verify/);
+	assert.doesNotMatch(docs, /cite the test in the diff/);
+	const plan = reviewHeader({ ...scope, kind: "docs", files: [scope.files[1]] });
+	assert.match(plan, /review of an implementation plan/);
+	assert.doesNotMatch(plan, /decision the doc leaves open/);
+	const spec = reviewHeader({ ...scope, kind: "docs", files: [scope.files[0]] });
+	assert.match(spec, /review of a design doc,/);
+	assert.match(spec, /decision the doc leaves open/);
+	assert.doesNotMatch(spec, /hole between plan and spec/);
+	const code = reviewHeader({ ...scope, kind: "code" });
+	assert.match(code, /npm run verify/);
+	assert.doesNotMatch(reviewHeader(scope), /not of code/, "kind defaults to code");
 });

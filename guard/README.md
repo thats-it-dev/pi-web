@@ -129,6 +129,13 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator decided in its reasoning that the P0 was
   hypothetical, asked the reviewer to "re-verify" with its own counter-evidence, got "nothing changed since the last
   review, go on to pr" from the guard, and pushed.
+- A design doc or plan (`docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`) is reviewed too. A `pr` that
+  adds or changes one is blocked until a scoped review ran, like a code PR. A reviewer call on a docs-only diff skips
+  the verify and screen gates and gets a doc brief instead of the code one: check every claim about the code against
+  the source it names, a plan against the spec it implements (goals without a task or test, interfaces that don't
+  match, steps a worker can't follow as written), spec.md sections it renumbers, and Michael's request point by point.
+  Why: on 2026-11-17 Michael asked flash to review the plan for PR #31; the guard demanded `npm run verify` for a
+  Markdown diff, then briefed the reviewer to cite a test per named behavior in a diff with no code.
 - When `pr` is blocked on the review gate, the reason ends with why: no scoped review since Michael's last message,
   the last one still running (wait for its message), ended BLOCK, ended without an accepted verdict, or failed. After three blocks
   with no new review in between, the reason opens with a stop order: tell Michael the PR is blocked and end the turn.
