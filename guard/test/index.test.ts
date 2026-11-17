@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -518,4 +518,30 @@ test("a worker brief naming an app triggers the merged-branch check; a child ses
 	parent.tool_call({ toolName: "subagent", toolCallId: "s1", input: { agent: "worker", task: `Implement the thing in ${dir}. Run npm test.` } }, { cwd: "/", sessionManager: { getBranch: () => [] } });
 	assert.equal(asked, 1);
 	assert.equal(gitIn(dir, "branch", "--show-current"), "main");
+});
+
+test("scopeReview: a tree whose last review ended BLOCK is not reviewed again; the fix is", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const { snap } = scopeReview({ agent: "reviewer", task: "Review /tmp/keeb-review.diff" }, ready(dir), home, home) as { snap: string };
+	const after = [...ready(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewBlockedMark(dir, snap) }] })];
+	assert.equal(upToDate(dir, after), false, "a BLOCK never opens the gate");
+	assert.deepEqual(scopeReview({ agent: "reviewer", cwd: dir, task: "Re-verify your P0" }, after, home, home), { block: true, reason: REASONS.reviewBlockedSame });
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	const second: Record<string, unknown> = { agent: "reviewer", task: "Review /tmp/keeb-review.diff" };
+	assert.ok(!("block" in (scopeReview(second, [...after, ...looked(dir)], home, home) ?? {})), "the fixed tree gets its review");
+	assert.match(String(second.task), /- src\/a\.ts/, "the diff still holds the blocked change, from main");
+});
+
+test("tool_result marks a sync BLOCK as blocked, not reviewed", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => ready(dir) } };
+	const sync: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "b1", input: sync }, ctx), undefined);
+	const r = h.tool_result({ toolCallId: "b1", toolName: "subagent", content: [{ type: "text", text: "## Review\n- Finding: P0 - broken\n- Merge verdict: BLOCK" }], isError: false }, ctx);
+	const text = r.content.map((c: any) => c.text ?? "").join("\n");
+	assert.match(text, /\[pi-guard\] review blocked \S+ at [0-9a-f]{40}/);
+	assert.doesNotMatch(text, /\[pi-guard\] reviewed /);
 });

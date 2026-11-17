@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -272,6 +272,10 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// The orchestrator looks at a UI change before anyone reviews its code: a wrong picture goes back to the worker.
 	if (uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
 	const snap = snapshot(dir);
+	// A review that ended BLOCK is not re-run on the same tree: keeb 2026-11-17 18:27, the orchestrator asked the
+	// reviewer to "re-verify" its P0 with its own counter-evidence, and the gate let the unchanged code through.
+	const blockedAt = lastBlockedReview(branch, dir);
+	if (blockedAt && exists(dir, blockedAt) && sameTree(dir, blockedAt, snap)) return { block: true, reason: REASONS.reviewBlockedSame };
 	const prev = lastReview(branch, dir);
 	let base: string;
 	let baseFrom: ReviewScope["baseFrom"];
@@ -425,7 +429,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		// A sync result is the review itself: without a verdict it gets a note, never the mark, so the PR gate stays shut and
 		// the next review starts from the same base. (An async run's reply is checked when its pending mark is resolved.)
 		if (!runId && !reviewVerdict(text)) return withExtra([{ type: "text", text: REVIEW_NO_VERDICT }]);
-		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewMark(scoped.dir, scoped.snap);
+		// A sync BLOCK gets the blocked mark: it refuses a second review of the same tree and never opens the gate.
+		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewBlocked(text) ? reviewBlockedMark(scoped.dir, scoped.snap) : reviewMark(scoped.dir, scoped.snap);
 		return withExtra([{ type: "text", text: mark }]);
 	});
 

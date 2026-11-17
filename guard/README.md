@@ -121,8 +121,16 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   2026-11-12) gets a `review ended without a verdict` note instead and counts for nothing, so the PR stays blocked
   and the next review covers the same changes. An async review's reply is read from its run's session file when its
   pending mark is resolved; an unreadable transcript never counts.
+- A review whose reply says `Merge verdict: BLOCK` (or, with no verdict line, holds a P0 or P1 finding) counts for
+  nothing: it never opens the gate and never becomes the next review's base, so the fix is reviewed together with the
+  change it fixes. A sync BLOCK gets `[pi-guard] review blocked <dir> at <snapshot>` instead of the reviewed mark; an
+  async one is read from its transcript. A second reviewer call on the same tree is blocked with the P0/P1 findings
+  sent to the worker, or, if the orchestrator is sure a finding is wrong, to Michael. Why: on 2026-11-17 18:27 the keeb
+  reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator decided in its reasoning that the P0 was
+  hypothetical, asked the reviewer to "re-verify" with its own counter-evidence, got "nothing changed since the last
+  review, go on to pr" from the guard, and pushed.
 - When `pr` is blocked on the review gate, the reason ends with why: no scoped review since Michael's last message,
-  the last one still running (wait for its message), ended without an accepted verdict, or failed. After three blocks
+  the last one still running (wait for its message), ended BLOCK, ended without an accepted verdict, or failed. After three blocks
   with no new review in between, the reason opens with a stop order: tell Michael the PR is blocked and end the turn.
   Why: the same keeb session blocked `pr` 16 times while the orchestrator re-ran verify and the reviewer each time and
   finally reported that "the guard's LLM is looping".

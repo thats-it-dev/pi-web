@@ -18,6 +18,8 @@ export const REASONS = {
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
+	reviewBlockedSame:
+		"Blocked: the last review of this exact tree ended with the merge verdict BLOCK, and a second opinion on the same code is not a review. Send its P0 and P1 findings to the worker, run `npm run verify`, commit, then call the reviewer again: the next review covers the change and the fix together. If you are sure a finding is wrong, don't argue it with the reviewer: tell Michael which finding and why, and end your turn. The PR gate stays shut until he says.",
 	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light). The picture comes back in the result together with docs/spec.md and the pictures Michael sent: compare them and write down what differs. Missing colours, borders or fills, a shifted grid, overlapping labels, a control that is gone, a side or an order the spec states differently, mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When nothing differs, go on to the review (or to ship for a first version).`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
@@ -309,6 +311,21 @@ export function reviewVerdict(text: string): boolean {
 	return /^\s*#+\s*Review\b/m.test(text) && /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*(?::|—|–|-\s)/m.test(text);
 }
 
+/** A review whose verdict shuts the PR gate: a `Merge verdict` line that says BLOCK, or, without a verdict line, a P0
+ *  or P1 finding. Keeb 2026-11-17 18:27: the reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator
+ *  argued it away in its own reasoning, the guard's "nothing changed since the last review" answer sent it on to `pr`,
+ *  and the gate, which counted any verdict, let the PR through. */
+export function reviewBlocked(text: string): boolean {
+	if (!reviewVerdict(text)) return false;
+	const verdict = /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*Merge verdict\s*(?:\*\*|__)?\s*(?::|—|–|-\s)(?:\s*(?:\*\*|__))*\s*([A-Za-z]+)/m.exec(text);
+	if (verdict) return verdict[1].toUpperCase() === "BLOCK";
+	return /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding\s*(?:\*\*|__)?\s*(?::|—|–|-\s)\s*(?:\*\*|__)?\s*)?P[01]\b/m.test(text);
+}
+
+/** A scoped sync review that ended BLOCK: the mark records the snapshot so a second call on the same tree is refused,
+ *  and it never counts for the PR gate or as the next review's base. */
+export const reviewBlockedMark = (dir: string, snap: string) => `[pi-guard] review blocked ${dir} at ${snap}`;
+
 /** Appended instead of the reviewed mark when a sync review returns without a verdict. */
 export const REVIEW_NO_VERDICT = "[pi-guard] review ended without a verdict: the reply has no `## Review` block with findings or a merge verdict, and no `No issues found.` line (the reviewer stopped mid-review or left its report in its reasoning). This review does not count: call the reviewer again, same task, and read its reply before going on.";
 
@@ -351,14 +368,42 @@ export const asyncRunId = (resultText: string): string | undefined => /Async: re
 
 const PENDING = /\[pi-guard\] review pending (\S+) at ([0-9a-f]{7,64}) run (\S+)/g;
 const FINISHED = /\[pi-guard\] reviewed (\S+) at ([0-9a-f]{7,64})/g;
+const BLOCKED = /\[pi-guard\] review blocked (\S+) at ([0-9a-f]{7,64})/g;
 
-/** The reviews a tool result records, in order: finished ones (the guard wrote that mark only after seeing a verdict),
- *  and pending ones whose run is complete and whose reply holds a verdict. */
-function completedReviews(text: string, runState: RunState, runText: RunText): { dir: string; snap: string; at: number }[] {
-	const out: { dir: string; snap: string; at: number }[] = [];
+type ReviewRecord = { dir: string; snap: string; at: number };
+
+/** The reviews a tool result records, in order: finished ones (the guard wrote that mark only after seeing a verdict
+ *  that was not BLOCK), and pending ones whose run is complete and whose reply holds a verdict other than BLOCK. */
+function completedReviews(text: string, runState: RunState, runText: RunText): ReviewRecord[] {
+	const out: ReviewRecord[] = [];
 	for (const m of text.matchAll(FINISHED)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
-	for (const m of text.matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && runState(m[3]) === "complete" && reviewVerdict(runText(m[3]) ?? "")) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	for (const m of text.matchAll(PENDING)) {
+		if (m[3] === UNKNOWN_RUN || runState(m[3]) !== "complete") continue;
+		const reply = runText(m[3]) ?? "";
+		if (reviewVerdict(reply) && !reviewBlocked(reply)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	}
 	return out.sort((a, b) => a.at - b.at);
+}
+
+/** The reviews a tool result records that ended BLOCK: a blocked mark, or a pending one whose finished reply says so. */
+function blockedReviews(text: string, runState: RunState, runText: RunText): ReviewRecord[] {
+	const out: ReviewRecord[] = [];
+	for (const m of text.matchAll(BLOCKED)) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	for (const m of text.matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && runState(m[3]) === "complete" && reviewBlocked(runText(m[3]) ?? "")) out.push({ dir: m[1], snap: m[2], at: m.index ?? 0 });
+	return out.sort((a, b) => a.at - b.at);
+}
+
+/** The snapshot of the last scoped review of `dir` that ended BLOCK, unless a review that counted came after it. */
+export function lastBlockedReview(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
+	let snap: string | undefined;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
+		const text = resultText(e.message);
+		const all = [...completedReviews(text, runState, runText).map((r) => ({ ...r, blocked: false })), ...blockedReviews(text, runState, runText).map((r) => ({ ...r, blocked: true }))].sort((a, b) => a.at - b.at);
+		for (const r of all) if (r.dir === dir) snap = r.blocked ? r.snap : undefined;
+	}
+	return snap;
 }
 
 /** True when a review the guard scoped completed without error after Michael's last message on the branch. */
@@ -389,13 +434,17 @@ export function lastReview(branch: Iterable<unknown>, dir: string, runState: Run
  *  should know that now, not after ten blocked `pr` calls (keeb 2026-11-16: 11 unscoped reviews in a row). */
 export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to an app (the task names no ~/workspace/apps/<name> path and the call's cwd is not in one), so it does not count for the PR gate. For an app review, call the reviewer again with `cwd` set to the app or the app's path in the task.";
 
+/** The gap line for a review that ended BLOCK: the orchestrator's own reading of the findings does not reopen the gate. */
+const REVIEW_BLOCKED_GAP = (who: string) =>
+	`${who} ended with the merge verdict BLOCK, and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. The gate stays shut until he says.`;
+
 const REVIEW_BLOCK_HEAD = "Blocked: run the reviewer before opening the PR";
 
 /** Why the review gate is shut for `dir` after Michael's last message: no scoped review, one still running, one that
  *  ended without a verdict, or one that failed. Prefixed by a stop order once `pr` was blocked three times with no new
  *  review in between: the orchestrator is looping (keeb 2026-11-16: 16 blocked `pr` calls over 2 h 48 min). */
 export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
-	let last: { kind: "pending"; runId: string } | { kind: "finished" } | undefined;
+	let last: { kind: "pending"; runId: string } | { kind: "finished" } | { kind: "blocked" } | undefined;
 	let blocks = 0;
 	for (const raw of branch) {
 		const e = raw as Entry;
@@ -412,23 +461,26 @@ export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunS
 			if (text.startsWith(REVIEW_BLOCK_HEAD)) blocks++;
 			continue;
 		}
-		for (const f of text.matchAll(FINISHED)) if (f[1] === dir) {
-			last = { kind: "finished" };
-			blocks = 0;
-		}
-		for (const p of text.matchAll(PENDING)) if (p[1] === dir) {
-			last = { kind: "pending", runId: p[3] };
+		const marks: { at: number; last: NonNullable<typeof last> }[] = [];
+		for (const f of text.matchAll(FINISHED)) if (f[1] === dir) marks.push({ at: f.index ?? 0, last: { kind: "finished" } });
+		for (const b of text.matchAll(BLOCKED)) if (b[1] === dir) marks.push({ at: b.index ?? 0, last: { kind: "blocked" } });
+		for (const p of text.matchAll(PENDING)) if (p[1] === dir) marks.push({ at: p.index ?? 0, last: { kind: "pending", runId: p[3] } });
+		for (const m of marks.sort((a, b) => a.at - b.at)) {
+			last = m.last;
 			blocks = 0;
 		}
 	}
 	let why: string;
 	if (!last) why = "No reviewer call since Michael's last message was scoped to this app: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or whose task names its ~/workspace/apps/<name> path, and only those count.";
 	else if (last.kind === "finished") return undefined;
+	else if (last.kind === "blocked") why = REVIEW_BLOCKED_GAP("The last scoped review");
 	else if (last.runId === UNKNOWN_RUN) why = "The last scoped review's launch result carried no run id, so it can never count: call the reviewer again.";
 	else {
 		const state = runState(last.runId);
+		const reply = state === "complete" ? runText(last.runId) ?? "" : "";
 		if (state === "running") why = `The last scoped review (run ${last.runId.slice(0, 8)}) is still running: wait for its subagent-notify message, then run this command again.`;
-		else if (state === "complete") why = reviewVerdict(runText(last.runId) ?? "") ? "" : `The last scoped review (run ${last.runId.slice(0, 8)}) ended without a verdict the guard accepts: a \`## Review\` block with a Finding, Merge verdict or P0-P2 line, or \`No issues found.\`. Call the reviewer again and ask for that shape.`;
+		else if (state === "complete" && reviewBlocked(reply)) why = REVIEW_BLOCKED_GAP(`The last scoped review (run ${last.runId.slice(0, 8)})`);
+		else if (state === "complete") why = reviewVerdict(reply) ? "" : `The last scoped review (run ${last.runId.slice(0, 8)}) ended without a verdict the guard accepts: a \`## Review\` block with a Finding, Merge verdict or P0-P2 line, or \`No issues found.\`. Call the reviewer again and ask for that shape.`;
 		else why = `The last scoped review (run ${last.runId.slice(0, 8)}) ${state === "missing" ? "has no run directory any more" : "failed"}: call the reviewer again.`;
 	}
 	if (!why) return undefined;

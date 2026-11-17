@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, lastRequest, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -914,4 +914,49 @@ test("the pr block carries the gap text when the env has one", () => {
 	const base = { cwd: "/home/m", home: "/home/m", hasScript: () => false, dirty: () => false, reviewed: () => false, codeChanged: () => true };
 	assert.equal(checkShell(pr, { ...base, reviewGap: () => "why" })?.reason, `${REASONS.review}\nwhy`);
 	assert.equal(checkShell(pr, { ...base, reviewGap: () => undefined })?.reason, REASONS.review);
+});
+
+test("reviewBlocked: a BLOCK merge verdict, or a P0/P1 finding without a verdict line, shuts the gate", () => {
+	assert.equal(reviewBlocked("## Review\n- Finding: P0 - space switches layers\n\n**Merge verdict: BLOCK**\n\nThe diff..."), true, "keeb 2026-11-17 shape");
+	assert.equal(reviewBlocked("## Review\n### Merge verdict: BLOCK"), true);
+	assert.equal(reviewBlocked("## Review\n- **Merge verdict:** **Block**"), true);
+	assert.equal(reviewBlocked("## Review\n- Finding: P2 - nit\n- Merge verdict: OK with notes"), false);
+	assert.equal(reviewBlocked("## Review\n- Finding: P1 - no test drives the space key\n- Merge verdict: OK"), false, "the verdict line wins");
+	assert.equal(reviewBlocked("## Review\n- Finding: P1 - no test drives the space key"), true, "no verdict line: P1 blocks");
+	assert.equal(reviewBlocked("## Review\n#### P0 — wrong key"), true);
+	assert.equal(reviewBlocked("## Review\n- **P2:** a note"), false);
+	assert.equal(reviewBlocked("No issues found."), false);
+	assert.equal(reviewBlocked("Let me look at one more file"), false, "no verdict at all");
+});
+
+test("a review that ended BLOCK never counts for the gate or as the next base, and lastBlockedReview names its tree", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const user = { type: "message", message: { role: "user", content: "go" } };
+	const complete: RunState = () => "complete";
+	const block = () => "## Review\n- Finding: P0 - space switches layers\n\n**Merge verdict: BLOCK**";
+	const async = [user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))];
+	assert.equal(reviewedSinceUser(async, complete, block), false, "async BLOCK");
+	assert.equal(lastReview(async, dir, complete, block), undefined);
+	assert.equal(lastBlockedReview(async, dir, complete, block), "aaaaaaa");
+	const sync = [user, res(reviewBlockedMark(dir, "bbbbbbb"))];
+	assert.equal(reviewedSinceUser(sync, () => "missing", () => undefined), false, "sync BLOCK");
+	assert.equal(lastReview(sync, dir, () => "missing", () => undefined), undefined);
+	assert.equal(lastBlockedReview(sync, dir, () => "missing", () => undefined), "bbbbbbb");
+	const fixed = [...sync, res(reviewMark(dir, "ccccccc"))];
+	assert.equal(lastBlockedReview(fixed, dir), undefined, "a later counted review clears it");
+	assert.equal(lastReview(fixed, dir), "ccccccc");
+	assert.equal(lastBlockedReview(sync, "/home/m/workspace/apps/fret"), undefined, "another app");
+});
+
+test("reviewGap after a BLOCK sends the findings to the worker or to Michael, never back to the reviewer", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const user = { type: "message", message: { role: "user", content: "go" } };
+	const block = () => "## Review\n**Merge verdict: BLOCK**";
+	const gap = reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", block) ?? "";
+	assert.match(gap, /^The last scoped review \(run run-a\) ended with the merge verdict BLOCK/);
+	assert.match(gap, /tell Michael which finding and why, and end your turn/);
+	assert.match(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb"))], dir) ?? "", /^The last scoped review ended with the merge verdict BLOCK/);
+	assert.equal(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb")), res(reviewMark(dir, "ccccccc"))], dir), undefined, "the fix was reviewed");
 });
