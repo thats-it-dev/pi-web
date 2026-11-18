@@ -136,6 +136,15 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   match, steps a worker can't follow as written), spec.md sections it renumbers, and Michael's request point by point.
   Why: on 2026-11-17 Michael asked flash to review the plan for PR #31; the guard demanded `npm run verify` for a
   Markdown diff, then briefed the reviewer to cite a test per named behavior in a diff with no code.
+- When Michael's request names a file by path that exists (`~/workspace/keymaps/go60-36.json`), the brief makes
+  that file the oracle, above `docs/spec.md` and above the tests: the reviewer opens it, picks ten entries the change
+  reads, writes down what each means in its own format and checks that against the value the tests expect (or the
+  fixture copied from the file). An expected value that repeats the code's output is a P1 and BLOCK; where the spec
+  and the file disagree, the file wins. The doc brief checks every rule the document states about reading such a
+  file against the file's entries. Why: keeb PR #31 (2026-11-17, flash): every test the reviewer cited passed, and
+  their expected values were the code's own output (`7 · Sym` for a key that types `&`, all shifted symbols folded
+  to the key underneath); the design doc stated the same rule and three reviews passed it. Running the file through
+  the code was the only thing that showed it.
 - When `pr` is blocked on the review gate, the reason ends with why: no scoped review since Michael's last message,
   the last one still running (wait for its message), ended BLOCK, ended without an accepted verdict, or failed. After three blocks
   with no new review in between, the reason opens with a stop order: tell Michael the PR is blocked and end the turn.
@@ -152,11 +161,16 @@ styled with invented `--tk-*` tokens: every colour and border resolved to nothin
 reviews passed the diff. So a review, a `pr` that changes UI files (`index.html`, `src/**`, `public/**.css`) and
 every `ship` are blocked until the orchestrator has looked at the screen as the UI files are now:
 
-- The skill's `thatsit-app.ts screenshot <dir> [--path /route] [--scheme light] [--click "<selector>"]` serves the
+- The skill's `thatsit-app.ts screenshot <dir> [--path /route] [--scheme light] [--click "<selector>"] [--upload <file> [--into "<selector>"]]` serves the
   working tree with the app's own Vite dev server and takes a phone-size picture with the app's own Playwright
   (about a second). `--click` presses the control that opens a dialog, menu or tab once the app has rendered, so a
   change inside one is pictured; the comparison text says so, because on 2026-11-14 21:32 a toggle alignment fix in
   the settings dialog passed the gate as "not visible in this screenshot".
+  `--upload` sets a file on the app's file input after the click and closes any dialog left open, so the picture
+  shows the app with Michael's data. When his request names a file by path and the command did not upload it, the
+  result opens with a note asking for the picture again with `--upload <file>`; the mark records the file
+  (`... with <file>`). Not a gate: an app that takes no file would never pass one. Why: keeb PR #31 pictured the
+  default board, and the legend showing "9" where Michael's Sym layer types "(" was never seen.
 - On that bash call the guard snapshots the tree; on its result it appends the picture itself as an image block,
   so the model sees the screen in the same turn, plus `[pi-guard] screen seen <dir> at <snapshot>`. A failed
   command, a `RESULT` without a file, or a picture over 2 MB leaves no mark.

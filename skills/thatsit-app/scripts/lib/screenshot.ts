@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // A picture of an app's screen as a phone shows it, taken from the app's own working tree with the app's own
@@ -8,8 +8,11 @@ import { pathToFileURL } from "node:url";
 
 export type Scheme = "dark" | "light";
 /** `click`: a CSS selector (open shadow roots are pierced) clicked once the app rendered, so a dialog, menu or tab the
- *  change lives in is what the picture shows. */
-export type ScreenshotOpts = { path?: string; scheme?: Scheme; click?: string };
+ *  change lives in is what the picture shows. `upload`: a file set on the app's file input (`into`, default
+ *  `input[type=file]`) after the click, so the picture shows the app with Michael's data loaded; any dialog left open
+ *  is closed first, since the file input usually lives in one and the result is what matters. */
+export type ScreenshotOpts = { path?: string; scheme?: Scheme; click?: string; upload?: string; into?: string };
+export const DEFAULT_FILE_INPUT = "input[type=file]";
 export type Screenshot = { file: string; width: number; height: number; issues: string[] };
 
 export const VIEWPORT = { width: 390, height: 844 };
@@ -22,11 +25,12 @@ export const CLICK_TIMEOUT_MS = 10_000;
 export const SETTLE_MS = 300;
 
 /** Where the picture goes: test-results is ignored by git, so it never lands in a commit or a review diff. */
-export function screenFile(dir: string, scheme: Scheme, path = "/", click?: string): string {
+export function screenFile(dir: string, scheme: Scheme, path = "/", click?: string, upload?: string): string {
 	const slug = (s: string) => s.replace(/^\/+|\/+$/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
 	const route = slug(path);
 	const opened = click ? slug(click).slice(0, 40) : "";
-	return join(dir, "test-results", "screens", `phone-${scheme}${route ? `-${route}` : ""}${opened ? `-click-${opened}` : ""}.png`);
+	const loaded = upload ? slug(basename(upload)).slice(0, 40) : "";
+	return join(dir, "test-results", "screens", `phone-${scheme}${route ? `-${route}` : ""}${opened ? `-click-${opened}` : ""}${loaded ? `-with-${loaded}` : ""}.png`);
 }
 
 /** Normalises the --path value: a route starting with "/", or the root. */
@@ -52,6 +56,7 @@ type Page = {
 	on(event: string, cb: (arg: any) => void): void;
 	goto(url: string, o?: Record<string, unknown>): Promise<unknown>;
 	click(selector: string, o?: Record<string, unknown>): Promise<unknown>;
+	setInputFiles(selector: string, files: string, o?: Record<string, unknown>): Promise<unknown>;
 	waitForTimeout(ms: number): Promise<void>;
 	waitForFunction(fn: string, arg?: unknown, o?: Record<string, unknown>): Promise<unknown>;
 	waitForLoadState(state: string, o?: Record<string, unknown>): Promise<void>;
@@ -80,12 +85,14 @@ export async function appDeps(dir: string): Promise<Deps> {
 // Evaluated in the page as expressions (source text carries no transpiler helpers).
 const RENDERED = "(document.querySelector('app-main')?.shadowRoot?.childElementCount ?? 0) > 0";
 const PAGE_HEIGHT = "Math.ceil(document.documentElement.scrollHeight)";
+// Closes every open <dialog>, through open shadow roots, and says how many it closed.
+const CLOSE_DIALOGS = "(() => { let n = 0; const walk = (root) => { for (const el of root.querySelectorAll('*')) { if (el.tagName === 'DIALOG' && el.open) { el.close(); n += 1; } if (el.shadowRoot) walk(el.shadowRoot); } }; walk(document); return n; })()";
 
 export async function screenshotApp(dir: string, opts: ScreenshotOpts = {}, deps?: Deps): Promise<Screenshot> {
 	const d = deps ?? (await appDeps(dir));
 	const scheme: Scheme = opts.scheme ?? "dark";
 	const route = routeOf(opts.path);
-	const file = screenFile(dir, scheme, route, opts.click);
+	const file = screenFile(dir, scheme, route, opts.click, opts.upload);
 	mkdirSync(join(dir, "test-results", "screens"), { recursive: true });
 	const issues: string[] = [];
 	// The dev server serves the working tree as it is, uncommitted edits included, with no build step.
@@ -115,6 +122,16 @@ export async function screenshotApp(dir: string, opts: ScreenshotOpts = {}, deps
 				await page.waitForTimeout(SETTLE_MS);
 			} catch (err) {
 				issues.push(`--click ${opts.click}: ${(err as Error).message.split("\n")[0]}; the picture shows the screen without the click`);
+			}
+		}
+		if (opts.upload) {
+			const into = opts.into ?? DEFAULT_FILE_INPUT;
+			try {
+				await page.setInputFiles(into, resolve(opts.upload), { timeout: CLICK_TIMEOUT_MS });
+				await page.waitForTimeout(SETTLE_MS);
+				if ((await page.evaluate<number>(CLOSE_DIALOGS)) > 0) await page.waitForTimeout(SETTLE_MS);
+			} catch (err) {
+				issues.push(`--upload ${opts.upload} into ${into}: ${(err as Error).message.split("\n")[0]}; the picture shows the app without the file`);
 			}
 		}
 		await page.evaluate("document.fonts.ready");

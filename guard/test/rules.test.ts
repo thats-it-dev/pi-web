@@ -999,3 +999,53 @@ test("reviewHeader: a docs-only diff gets the doc brief, not the code one", () =
 	assert.match(code, /npm run verify/);
 	assert.doesNotMatch(reviewHeader(scope), /not of code/, "kind defaults to code");
 });
+
+// --- Michael's file is the oracle (keeb PR #31, 2026-11-17: tests asserted the code's own output, the spec the same wrong rule) ---
+
+import { requestFiles, screenshotUpload } from "../rules.ts";
+
+test("requestFiles: the existing files Michael's request names by path, ~ expanded, punctuation stripped, four at most", () => {
+	const isFile = (p: string) => p.endsWith(".json") || p.endsWith(".md");
+	assert.deepEqual(requestFiles(undefined, home, isFile), []);
+	assert.deepEqual(requestFiles("upload the keyboard JSON like the one at ~/workspace/keymaps/go60-36.json, and hint the layer.", home, isFile), ["/home/m/workspace/keymaps/go60-36.json"]);
+	assert.deepEqual(requestFiles("see /home/m/a.json and `~/b.md` (also ~/b.md) but not ~/missing.txt or /dev/null", home, isFile), ["/home/m/a.json", "/home/m/b.md"]);
+	assert.deepEqual(requestFiles("~/1.json ~/2.json ~/3.json ~/4.json ~/5.json", home, isFile).length, 4);
+	assert.deepEqual(requestFiles("a url https://x.y/z.json is not a path", home, isFile), []);
+});
+
+test("reviewHeader with inputs makes the file the oracle above spec and tests, in the code brief and the doc brief", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff", request: "use ~/workspace/keymaps/go60-36.json", inputs: ["/home/m/workspace/keymaps/go60-36.json"] };
+	const code = reviewHeader({ ...scope, files: [{ path: "src/a.ts", added: "3", removed: "1" }] });
+	assert.match(code, /Michael's file: \/home\/m\/workspace\/keymaps\/go60-36\.json\. It is the oracle, above docs\/spec\.md and above the tests\./);
+	assert.match(code, /pick ten entries/);
+	assert.match(code, /An expected value that repeats the code's output[^.]*is a P1 finding and the merge verdict is BLOCK/);
+	assert.match(code, /the file wins and the spec line is a P1/);
+	assert.ok(code.indexOf("It is the oracle") < code.indexOf("[The parent's request]"));
+	const docs = reviewHeader({ ...scope, kind: "docs", files: [{ path: "docs/superpowers/specs/2026-11-17-x.md", added: "3", removed: "1" }] });
+	assert.match(docs, /Michael's file: \/home\/m\/workspace\/keymaps\/go60-36\.json\. Open it\. Every rule the document states about how such a file is read/);
+	assert.match(docs, /a rule the file contradicts is a P1 and the merge verdict is BLOCK/);
+	assert.doesNotMatch(docs, /It is the oracle/);
+	const none = reviewHeader({ ...scope, inputs: [], files: [] });
+	assert.doesNotMatch(none, /Michael's file/);
+});
+
+test("screenshotUpload reads the --upload file off the command, quoted or not, ~ expanded", () => {
+	assert.equal(screenshotUpload("node x.ts screenshot ~/workspace/apps/keeb --upload ~/workspace/keymaps/go60-36.json", home), "/home/m/workspace/keymaps/go60-36.json");
+	assert.equal(screenshotUpload(`node x.ts screenshot keeb --click 'button[aria-label="Settings"]' --upload "/tmp/my file.json" --scheme light`, home), "/tmp/my file.json");
+	assert.equal(screenshotUpload("node x.ts screenshot keeb --path /stats", home), undefined);
+});
+
+test("screenCompareContent asks for the picture with Michael's file loaded until the command uploaded it; the mark says which", () => {
+	const inputs = ["/home/m/workspace/keymaps/go60-36.json"];
+	const without = screenCompareContent(undefined, [], inputs);
+	assert.equal(without.length, 2);
+	assert.match((without[0] as { text: string }).text, /^\[pi-guard\] Michael's request names \/home\/m\/workspace\/keymaps\/go60-36\.json, and this picture was taken without it\. .*--upload \/home\/m\/workspace\/keymaps\/go60-36\.json/);
+	const other = screenCompareContent(undefined, [], inputs, "/tmp/else.json");
+	assert.equal(other.length, 2);
+	const withIt = screenCompareContent(undefined, [], inputs, inputs[0]);
+	assert.equal(withIt.length, 1);
+	assert.match((withIt[0] as { text: string }).text, /^Compare the screen with/);
+	assert.equal(screenCompareContent(undefined, [], []).length, 1);
+	assert.equal(screenMark("/home/m/workspace/apps/keeb", "a".repeat(40), inputs[0]), `[pi-guard] screen seen /home/m/workspace/apps/keeb at ${"a".repeat(40)} with ${inputs[0]}`);
+	assert.equal(lastScreen([{ type: "message", message: { role: "toolResult", content: [{ type: "text", text: screenMark("/home/m/workspace/apps/keeb", "a".repeat(40), inputs[0]) }] } }], "/home/m/workspace/apps/keeb"), "a".repeat(40));
+});

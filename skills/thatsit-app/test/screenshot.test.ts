@@ -10,6 +10,7 @@ test("screenFile names the picture by scheme and route, under the ignored test-r
 	assert.equal(screenFile("/a/keeb", "light", "/"), "/a/keeb/test-results/screens/phone-light.png");
 	assert.equal(screenFile("/a/keeb", "dark", "/settings/sync"), "/a/keeb/test-results/screens/phone-dark-settings-sync.png");
 	assert.equal(screenFile("/a/keeb", "dark", "/", 'button[aria-label="Settings"]'), "/a/keeb/test-results/screens/phone-dark-click-button-aria-label-Settings.png");
+	assert.equal(screenFile("/a/keeb", "dark", "/", undefined, "/home/m/workspace/keymaps/go60-36.json"), "/a/keeb/test-results/screens/phone-dark-with-go60-36-json.png");
 });
 
 test("routeOf accepts a route with or without the slash", () => {
@@ -29,12 +30,23 @@ function fakes(pageHeight: number, rendered = true) {
 			if (selector === "#missing") throw new Error("Timeout 10000ms exceeded.\nwaiting for locator('#missing')");
 			calls.push(`click ${selector}`);
 		},
+		setInputFiles: async (selector: string, file: string) => {
+			if (selector === "#nofile") throw new Error("Timeout 10000ms exceeded.\nwaiting for locator('#nofile')");
+			calls.push(`upload ${file} into ${selector}`);
+		},
 		waitForTimeout: async () => undefined,
 		waitForFunction: async () => {
 			if (!rendered) throw new Error("timeout");
 		},
 		waitForLoadState: async () => undefined,
-		evaluate: async <T>(expr: string): Promise<T> => (expr.includes("scrollHeight") ? pageHeight : undefined) as T,
+		evaluate: async <T>(expr: string): Promise<T> => {
+			if (expr.includes("scrollHeight")) return pageHeight as T;
+			if (expr.includes("DIALOG")) {
+				calls.push("close dialogs");
+				return 1 as T;
+			}
+			return undefined as T;
+		},
 		screenshot: async (o: { path: string; clip: { height: number } }) => {
 			calls.push(`shot ${o.clip.height}`);
 			const { writeFileSync } = await import("node:fs");
@@ -80,4 +92,18 @@ test("screenshotApp clicks the selector once the app rendered, and reports a cli
 	assert.deepEqual(calls, ["listen", "goto http://127.0.0.1:5173/", 'click button[aria-label="Settings"]', "shot 900", "close browser", "close server"]);
 	const miss = await screenshotApp(dir, { click: "#missing" }, fakes(900).deps);
 	assert.match(miss.issues[0], /^--click #missing: Timeout 10000ms exceeded\.; the picture shows the screen without the click$/);
+});
+
+test("screenshotApp uploads the file after the click, closes the dialog it came through, and reports a missing input", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "shot-"));
+	const { deps, calls } = fakes(900);
+	const r = await screenshotApp(dir, { click: 'button[aria-label="Settings"]', upload: "/home/m/workspace/keymaps/go60-36.json" }, deps);
+	assert.equal(r.file, join(dir, "test-results", "screens", "phone-dark-click-button-aria-label-Settings-with-go60-36-json.png"));
+	assert.deepEqual(r.issues, []);
+	assert.deepEqual(calls, ["listen", "goto http://127.0.0.1:5173/", 'click button[aria-label="Settings"]', "upload /home/m/workspace/keymaps/go60-36.json into input[type=file]", "close dialogs", "shot 900", "close browser", "close server"]);
+	const into = fakes(900);
+	await screenshotApp(dir, { upload: "x.json", into: "dialog input.layout" }, into.deps);
+	assert.ok(into.calls.includes(`upload ${join(process.cwd(), "x.json")} into dialog input.layout`), "relative paths resolve against the caller's cwd");
+	const miss = await screenshotApp(dir, { upload: "/x.json", into: "#nofile" }, fakes(900).deps);
+	assert.match(miss.issues[0], /^--upload \/x\.json into #nofile: Timeout 10000ms exceeded\.; the picture shows the app without the file$/);
 });

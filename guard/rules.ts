@@ -1,6 +1,6 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
 export type Block = { block: true; reason: string };
@@ -20,7 +20,7 @@ export const REASONS = {
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
 	reviewBlockedSame:
 		"Blocked: the last review of this exact tree ended with the merge verdict BLOCK, and a second opinion on the same code is not a review. Send its P0 and P1 findings to the worker, run `npm run verify`, commit, then call the reviewer again: the next review covers the change and the fix together. If you are sure a finding is wrong, don't argue it with the reviewer: tell Michael which finding and why, and end your turn. The PR gate stays shut until he says.",
-	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light). The picture comes back in the result together with docs/spec.md and the pictures Michael sent: compare them and write down what differs. Missing colours, borders or fills, a shifted grid, overlapping labels, a control that is gone, a side or an order the spec states differently, mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When nothing differs, go on to the review (or to ship for a first version).`,
+	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light, \`--upload <file>\` to load a file Michael's request names, so the picture shows his data and not the shipped content). The picture comes back in the result together with docs/spec.md and the pictures Michael sent: compare them and write down what differs. Missing colours, borders or fills, a shifted grid, overlapping labels, a control that is gone, a side or an order the spec states differently, mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When nothing differs, go on to the review (or to ship for a first version).`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
 	worktreeInstall:
@@ -162,10 +162,40 @@ const SHIPS = /thatsit-app\.ts\s+ship\b/;
 /** The app a `screenshot` command pictures, or undefined for any other command. */
 export const screenshotDir = (command: string, cwd: string, home: string): string | undefined => (SCREENSHOT.test(command) ? appDir(command, cwd, home) : undefined);
 
-/** Appended by the guard to a screenshot command's result, beside the picture: the app state it shows. */
+/** The file a `screenshot` command loads into the app (`--upload <file>`), with `~` expanded; undefined without one. */
+export function screenshotUpload(command: string, home: string): string | undefined {
+	const m = /--upload\s+(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(command);
+	const file = m?.[1] ?? m?.[2] ?? m?.[3];
+	return file ? file.replace(/^~(?=\/)/, home) : undefined;
+}
+
+/** Appended by the guard to a screenshot command's result, beside the picture: the app state it shows, and the file
+ *  it was loaded with. */
 export const SCREEN_MARK = "[pi-guard] screen seen ";
-export const screenMark = (dir: string, snap: string) => `${SCREEN_MARK}${dir} at ${snap}`;
+export const screenMark = (dir: string, snap: string, upload?: string) => `${SCREEN_MARK}${dir} at ${snap}${upload ? ` with ${upload}` : ""}`;
 const SEEN = /\[pi-guard\] screen seen (\S+) at ([0-9a-f]{7,64})/g;
+
+/** The files Michael's request names by path (`~/x/y.json`, `/home/.../y.json`) that exist: the data the change
+ *  reads, which the review checks the tests against and the screen is pictured with. At most four, in order. */
+export function requestFiles(request: string | undefined, home: string, isFile: (path: string) => boolean = defaultIsFile): string[] {
+	if (!request) return [];
+	const out: string[] = [];
+	for (const m of request.matchAll(/(?:^|[\s"'`(\[<])((?:~\/|\/)[\w.@+-]+(?:\/[\w.@+-]+)*)/g)) {
+		const path = m[1].replace(/[.,;:!?]+$/, "").replace(/^~(?=\/)/, home);
+		if (out.includes(path) || !isFile(path)) continue;
+		out.push(path);
+		if (out.length === 4) break;
+	}
+	return out;
+}
+
+function defaultIsFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
 
 /** A picture Michael sent on this branch, with the words it came with: a reference the screen is compared against,
  *  or the broken screen he saw. The branch keeps them through compaction, so the comparison outlives the context. */
@@ -186,8 +216,16 @@ export function userPictures(branch: Iterable<unknown>, max = MAX_USER_PICTURES)
 /** The blocks that follow the picture in a screenshot result: the spec and Michael's pictures to compare it with, then
  *  the comparison the orchestrator owes before going on. The fret run of 2026-11-13 22:08 passed a board with the nut on
  *  the wrong side and no degree numbers because "looks right" was judged against nothing. */
-export function screenCompareContent(spec: string | undefined, pictures: UserPicture[]): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+export function screenCompareContent(spec: string | undefined, pictures: UserPicture[], inputs: string[] = [], upload?: string): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
 	const out: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
+	// A picture of the shipped content is not a look at a change that reads Michael's file: keeb 2026-11-17 (PR #31)
+	// pictured the default board, and the legend showing "9" where his Sym layer types "(" was never seen.
+	if (inputs.length && !(upload && inputs.includes(upload))) {
+		out.push({
+			type: "text",
+			text: `[pi-guard] Michael's request names ${inputs.join(" and ")}, and this picture was taken without it. If the app reads such a file, run the screenshot command again with --upload ${inputs[0]} (and --click '<selector>' for the control that opens the file input, if one is needed): the picture must show his data, and what it draws for that file counts, not what it draws for the shipped content.`,
+		});
+	}
 	if (spec) out.push({ type: "text", text: `docs/spec.md, what the screen must match:\n\n${spec}` });
 	for (const p of pictures) {
 		out.push({ type: "text", text: `Michael sent this picture with: "${p.text.slice(0, 300)}"` });
@@ -631,6 +669,8 @@ export type ReviewScope = {
 	kind?: "code" | "docs";
 	/** Michael's last message on the branch, verbatim (lastRequest): what the review must check the diff against. */
 	request?: string;
+	/** The files that message names by path and that exist (requestFiles): the data the change reads. */
+	inputs?: string[];
 	/** Where the diff starts: the last review's snapshot, or the branch point from main. */
 	base: string;
 	baseFrom: "review" | "main";
@@ -660,6 +700,7 @@ export function reviewHeader(s: ReviewScope): string {
 					s.request,
 					"",
 					"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives.",
+					...(s.inputs?.length ? ["", inputsOracle(s.inputs)] : []),
 				]
 			: []),
 		"",
@@ -691,9 +732,22 @@ function docReviewHeader(s: ReviewScope, files: string, from: string): string {
 			: ["- A decision the doc leaves open that the plan or the code will have to make, and a non-goal that contradicts a goal."]),
 		`Put independent reads in one turn. You have ${REVIEW_BUDGET.hard} tool calls; at ${REVIEW_BUDGET.soft} write your review.`,
 		...(s.request ? ["", "[Michael's request, verbatim. The parent's summary below may have lost part of it.]", s.request, "", "Check that the document answers what Michael asked for, point by point; a point it drops or contradicts is a P1 finding and the merge verdict is BLOCK."] : []),
+		...(s.inputs?.length
+			? [
+					"",
+					`Michael's file: ${s.inputs.join(", ")}. Open it. Every rule the document states about how such a file is read (what an entry means, which entries count, what a value becomes) is checked against the file's own entries and what they mean in that format; a rule the file contradicts is a P1 and the merge verdict is BLOCK. Name the entries you checked.`,
+				]
+			: []),
 		"",
 		"[The parent's request]",
 	].join("\n");
+}
+
+/** The paragraph that makes Michael's file the oracle of a code review. Keeb PR #31 (2026-11-17): every test the
+ *  reviewer cited passed, and their expected values were the code's own output (`7 · Sym` for a key that types `&`);
+ *  the spec supplied the same wrong rule. Only running the file through the code showed it. */
+function inputsOracle(inputs: string[]): string {
+	return `Michael's file: ${inputs.join(", ")}. It is the oracle, above docs/spec.md and above the tests. Open it, pick ten entries the change reads (spread over its sections, the odd ones included), and for each write down what the entry means in its own format, then check that against the value a test expects for it, or against the fixture copied from it. An expected value that repeats the code's output, or that you cannot derive from the entry without running the code, is a P1 finding and the merge verdict is BLOCK. Where docs/spec.md and the file disagree about what an entry means, the file wins and the spec line is a P1. Name the ten entries and what you found for each in your review.`;
 }
 
 /** The text of Michael's last message on the branch, verbatim, cut at `max` characters; undefined when there is none. */

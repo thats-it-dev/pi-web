@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -237,7 +237,7 @@ export function specText(dir: string): string | undefined {
 
 /** The blocks appended to a screenshot command's result: the picture, the spec and Michael's pictures from the branch
  *  to compare it with, the comparison owed, and the mark. */
-export function screenContent(file: string, dir: string, snap: string, branch: Iterable<unknown> = []): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
+export function screenContent(file: string, dir: string, snap: string, branch: Iterable<unknown> = [], upload?: string, home = homedir()): ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] {
 	let bytes: Buffer;
 	try {
 		bytes = readFileSync(file);
@@ -249,8 +249,8 @@ export function screenContent(file: string, dir: string, snap: string, branch: I
 	const pictures = userPictures(branch).filter((p) => p.data.length <= (MAX_PICTURE_BYTES * 4) / 3);
 	return [
 		{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
-		...screenCompareContent(specText(dir), pictures),
-		{ type: "text", text: screenMark(dir, snap) },
+		...screenCompareContent(specText(dir), pictures, requestFiles(lastRequest(branch), home), upload),
+		{ type: "text", text: screenMark(dir, snap, upload) },
 	];
 }
 
@@ -317,7 +317,8 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// dropped "space and enter switch layers instead of typing", the worker enshrined that behavior in a test, and the
 	// review passed it.
 	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
-	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request: lastRequest(branch) })}\n${task}`;
+	const request = lastRequest(branch);
+	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home) })}\n${task}`;
 	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
 	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
@@ -346,7 +347,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
 	// Screenshot commands in flight: tool call id -> the app and the snapshot the picture will show.
-	const screens = new Map<string, { dir: string; snap: string }>();
+	const screens = new Map<string, { dir: string; snap: string; upload?: string }>();
 	// Apps checked once for a checkout left on a merged branch, and the note owed to the call that triggered the switch.
 	const freshened = new Set<string>();
 	const switched = new Map<string, string>();
@@ -385,10 +386,11 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		});
 		if (block) return block;
 		if (event.toolName === "bash") {
-			const dir = screenshotDir(String(event.input?.command ?? ""), ctx.cwd, home);
+			const command = String(event.input?.command ?? "");
+			const dir = screenshotDir(command, ctx.cwd, home);
 			if (dir) {
 				try {
-					screens.set(event.toolCallId, { dir, snap: snapshot(dir) });
+					screens.set(event.toolCallId, { dir, snap: snapshot(dir), upload: screenshotUpload(command, home) });
 				} catch {
 					// No snapshot, no mark: the picture still comes back, the gate stays shut.
 				}
@@ -430,7 +432,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			if (!file) return plain();
 			// The branch, not the context: Michael's pictures stay on it after a compaction.
 			const branch = [...(ctx?.sessionManager?.getBranch() ?? [])];
-			return withExtra(screenContent(file, screen.dir, screen.snap, branch));
+			return withExtra(screenContent(file, screen.dir, screen.snap, branch, screen.upload, home));
 		}
 		if (unscoped.delete(event.toolCallId)) return event.isError ? plain() : withExtra([{ type: "text", text: REVIEW_UNSCOPED }]);
 		const scoped = reviews.get(event.toolCallId);

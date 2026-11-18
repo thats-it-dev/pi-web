@@ -64,4 +64,7 @@ test("parseArgs screenshot takes --path, --scheme and --click", () => {
 	assert.deepEqual(parseArgs(["screenshot", "fret", "--click", 'button[aria-label="Settings"]', "--scheme", "light"]), { cmd: "screenshot", name: "fret", scheme: "light", click: 'button[aria-label="Settings"]' });
 	assert.equal(parseArgs(["screenshot", "fret", "--click"]), null);
 	assert.equal(parseArgs(["screenshot", "fret", "--open", "x"]), null);
+	assert.deepEqual(parseArgs(["screenshot", "fret", "--upload", "~/k.json"]), { cmd: "screenshot", name: "fret", upload: "~/k.json" });
+	assert.deepEqual(parseArgs(["screenshot", "fret", "--click", "button", "--upload", "~/k.json", "--into", "dialog input[type=file]"]), { cmd: "screenshot", name: "fret", click: "button", upload: "~/k.json", into: "dialog input[type=file]" });
+	assert.equal(parseArgs(["screenshot", "fret", "--into", "input"]), null, "--into needs --upload");
 });
