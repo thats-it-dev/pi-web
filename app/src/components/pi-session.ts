@@ -2,6 +2,7 @@ import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AppCommand, Capabilities, CommandResult, FileInput, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import { MESSAGE_SWALLOWED, swallowed } from "../lib/prompt-result.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
@@ -335,7 +336,7 @@ export class PiSession extends LitElement {
 		const msg = s?.snapshot ? takeHandoff(s.id) : null;
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
-		if (msg.superpowers && !superpowersOn(s.snapshot)) await this.run({ type: "prompt", text: "/superpowers on", mode: "send" });
+		if (msg.superpowers && !superpowersOn(s.snapshot)) await this.run({ type: "set_superpowers", on: true });
 		await this.send(msg.text, msg.images, msg.files, "send");
 	}
 
@@ -360,6 +361,11 @@ export class PiSession extends LitElement {
 			const r = await this.run({ type: "prompt", text: parsed.text, images: images.length ? images : undefined, files: files.length ? files : undefined, mode: streaming ? mode : "send" });
 			ok = Boolean(r?.ok);
 			if (r?.pending) this.pendingPrompt = { text, images, files }; // may still fail later as a command_error
+			// A message pi "handled" without a run reached nobody: back to the composer with a warning, not gone.
+			if (swallowed(parsed.text, r)) {
+				toast(MESSAGE_SWALLOWED, "warning");
+				ok = false;
+			}
 		}
 		if (!ok) this.composer?.restore(text, images, files);
 	}
@@ -646,7 +652,7 @@ export class PiSession extends LitElement {
 					this.composer?.pickFiles(kind);
 				},
 				pickCwd: () => {},
-				toggleSuperpowers: () => void this.run({ type: "prompt", text: `/superpowers ${superpowersOn(snap) ? "off" : "on"}`, mode: "send" }),
+				toggleSuperpowers: () => void this.run({ type: "set_superpowers", on: !superpowersOn(snap) }),
 			},
 		);
 		if (step === "model")

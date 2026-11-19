@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
 
 const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
@@ -1048,4 +1048,20 @@ test("screenCompareContent asks for the picture with Michael's file loaded until
 	assert.equal(screenCompareContent(undefined, [], []).length, 1);
 	assert.equal(screenMark("/home/m/workspace/apps/keeb", "a".repeat(40), inputs[0]), `[pi-guard] screen seen /home/m/workspace/apps/keeb at ${"a".repeat(40)} with ${inputs[0]}`);
 	assert.equal(lastScreen([{ type: "message", message: { role: "toolResult", content: [{ type: "text", text: screenMark("/home/m/workspace/apps/keeb", "a".repeat(40), inputs[0]) }] } }], "/home/m/workspace/apps/keeb"), "a".repeat(40));
+});
+
+// --- a reply that hands Michael a merge command ---
+
+test("a reply that hands Michael a merge command is sent back once", () => {
+	const handed = say("thatsit.dev is live. Task 7 of 7: cutover done, only your merge remains.\n\nRun this to ship the repo state:\n\n```\ngh pr merge 2 --merge\n```\n\nTL;DR [site cutover done]: PR #2 awaits your merge, CI green.");
+	assert.equal(suggestsMerge("Run `gh pr merge 2 --merge` when you are happy."), true);
+	assert.equal(suggestsMerge("Merge it now and I'll tag v1."), true);
+	assert.equal(suggestsMerge("You can close it with gh pr close 4."), true);
+	assert.equal(suggestsMerge("PR #2 is open and CI is green: https://github.com/m/site/pull/2 and the preview is live."), false);
+	assert.equal(suggestsMerge("The merge-base is main; mergeAll sums the parts; the keymap merges two layers."), false);
+	assert.equal(shouldNudgeMerge([user, handed]), true);
+	assert.equal(shouldNudgeMerge([user, edit, result, handed]), true);
+	assert.equal(shouldNudgeMerge([user, handed, { role: "custom", customType: MERGE_NUDGE_TYPE, content: "..." }, handed]), false);
+	assert.equal(shouldNudgeMerge([user, long]), false);
+	assert.equal(shouldNudgeMerge([user, edit]), false);
 });

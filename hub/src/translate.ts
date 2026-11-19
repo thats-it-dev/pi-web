@@ -38,5 +38,8 @@ export function toRpc(cmd: RpcTranslatable): RpcCommand {
 		}
 		case "clear_queue":
 			return { type: "clear_queue" };
+		case "set_superpowers":
+			// An extension command: pi runs it at once, even mid-run, and answers disposition "handled" without a turn.
+			return { type: "prompt", message: `/superpowers ${cmd.on ? "on" : "off"}` };
 	}
 }

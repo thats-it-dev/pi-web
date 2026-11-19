@@ -989,6 +989,35 @@ export function prNudge(apps: string[]): string {
 	return `You changed ${apps.map(name).join(" and ")} but did not open or update its pull request. Do it yourself now; never hand Michael commands to run. If you are on main, or on a branch whose PR is already merged, first create a new branch from main (git switch -c <short-name>). Commit, then run pr:\n${cmds}\nThen wait for CI with the bg_bash tool (never bash), tell Michael the PR link and end your turn:\n${waitCmds}\nMichael merges the PR; never merge or close it yourself, and don't suggest a merge command. If Michael said not to open a PR, say so in one line instead.`;
 }
 
+// --- a reply that hands Michael a merge command ---
+
+export const MERGE_NUDGE_TYPE = "pi-guard-merge";
+export const MERGE_NUDGE =
+	"Your reply tells Michael to merge or close the pull request, or hands him the command for it. Michael merges on his own, in his own time: write the reply again without the merge or close command and without asking him to merge. Give him the PR link and the preview link and say whether CI is green.";
+
+// The command rule's text form: `gh pr merge` / `gh pr close`, inline or in a code block, or a plain instruction to
+// merge (the website session 2026-11-19: the guard blocked `gh pr merge 2 --merge --admin`, and seven minutes later
+// the reply told Michael "Run this ... gh pr merge 2 --merge").
+const MERGE_TEXT = /\bgh\s+pr\s+(?:merge|close)\b|\bgit\s+merge\s+\S+/i;
+const MERGE_ASK = /\b(?:run|execute)\s+(?:the\s+)?merge\b|\bmerge\s+(?:it|this|the\s+pr|pr\s+#?\d+)\b[^.\n]*\b(?:now|please|when you can|to ship)\b|\bonly your merge remains\b|\bawaits your merge\b/i;
+
+/** True when the reply text carries a merge/close command or tells Michael to merge. */
+export function suggestsMerge(text: string): boolean {
+	return MERGE_TEXT.test(text) || MERGE_ASK.test(text);
+}
+
+// The run ended on a reply that suggests a merge: sent back once, whatever else the run did (a reply alone can break
+// this rule).
+export function shouldNudgeMerge(messages: Msg[]): boolean {
+	let start = messages.length;
+	while (start > 0 && messages[start - 1].role !== "user") start--;
+	const run = messages.slice(start);
+	const last = run.at(-1);
+	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
+	if (run.some((m) => m.role === "custom" && m.customType === MERGE_NUDGE_TYPE)) return false;
+	return suggestsMerge(textOf(last));
+}
+
 // Compaction. Some extensions inject their rules as a message at session start and again after every
 // compaction (i-have-adhd). pi's summarizer reads that message as the user's first request and makes it the
 // summary's goal, so the real task is lost when a compaction falls between turns. They are re-added anyway.

@@ -204,7 +204,10 @@ export type AppCommand =
 	| { type: "export" }
 	| { type: "dialog_response"; id: string; value?: string; confirmed?: boolean; cancelled?: boolean }
 	| { type: "clear_queue" }
-	| { type: "set_approval"; mode: ApprovalMode };
+	| { type: "set_approval"; mode: ApprovalMode }
+	// The superpowers switch. It reaches pi as the extension's `/superpowers on|off` command, but it is not a message: a
+	// message typed alongside it must never race it or be mistaken for it (a message went missing that way 2026-11-19).
+	| { type: "set_superpowers"; on: boolean };
 
 export const APP_COMMAND_TYPES: readonly AppCommand["type"][] = [
 	"attach",
@@ -223,6 +226,7 @@ export const APP_COMMAND_TYPES: readonly AppCommand["type"][] = [
 	"dialog_response",
 	"clear_queue",
 	"set_approval",
+	"set_superpowers",
 ];
 
 export interface CommandResult {

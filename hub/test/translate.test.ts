@@ -19,4 +19,7 @@ test("app commands map to pi RPC commands", () => {
 	assert.deepEqual(toRpc({ type: "bash", command: "ls", excludeFromContext: true }), { type: "bash", command: "ls", excludeFromContext: true });
 	assert.deepEqual(toRpc({ type: "dialog_response", id: "d1", value: "blue" }), { type: "extension_ui_response", id: "d1", value: "blue" });
 	assert.deepEqual(toRpc({ type: "dialog_response", id: "d2", cancelled: true }), { type: "extension_ui_response", id: "d2", cancelled: true });
+	// The switch is its own command on the wire, so it is never a message in the composer's queue.
+	assert.deepEqual(toRpc({ type: "set_superpowers", on: true }), { type: "prompt", message: "/superpowers on" });
+	assert.deepEqual(toRpc({ type: "set_superpowers", on: false }), { type: "prompt", message: "/superpowers off" });
 });

@@ -41,6 +41,16 @@ question, with no `pr`, `ship` or `gateway-pr` (through `bash` or `bg_bash`) aft
 publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
 message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, never hand Michael commands to run, and never merge: Michael merges. (The `bg` extension's `bg-bash-done` message for a green `pr-wait` says the same, so the rule is read at the moment it matters even when the skill was never loaded.)
 
+## Merge handed to Michael
+
+When a run ends on a reply that carries `gh pr merge` or `gh pr close` (inline or in a code block) or tells Michael to
+merge ("only your merge remains", "merge it now"), the guard adds a visible `pi-guard-merge` message and continues once:
+write the reply again without the command, give the PR and preview links, say whether CI is green. The merge *command*
+was already blocked (see above); this is its text form. Why: in the website session of 2026-11-19 the guard blocked
+`gh pr merge 2 --merge --admin`, the model wrote "Merging is yours, not mine", and seven minutes later its reply said
+"Run this to ship the repo state: `gh pr merge 2 --merge`". The rule lived in the thatsit-app skill, which that
+non-app repo never loaded, so it is also now in `~/.pi/agent/AGENTS.md` for every repo.
+
 ## Checkout left on a merged branch
 
 The first tool call of a session that works in an app (a shell command or edit path naming `~/workspace/apps/<name>`,
