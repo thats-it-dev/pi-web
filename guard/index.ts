@@ -2,10 +2,10 @@
 // working on thatsit.app apps, and restarts a coding run that stops without a reply. Rules: rules.ts.
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge } from "./rules.ts";
+import { basename, dirname, join } from "node:path";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -113,11 +113,41 @@ function callApp(toolName: string, input: Record<string, unknown>, cwd: string, 
 	return undefined;
 }
 
+/** The repo's trunk: `main`, or `master` where that is the branch that exists (pi-web). */
+export function mainBranch(dir: string): string {
+	for (const name of ["main", "master"]) {
+		try {
+			execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], { cwd: dir, stdio: "pipe", timeout: 5000 });
+			return name;
+		} catch {
+			// not this one
+		}
+	}
+	return "main";
+}
+
+/** The git root of a path under ~/workspace outside apps, for the review gate on other repos: the toplevel of the
+ *  nearest directory that exists (a worktree is its own root). Undefined outside ~/workspace, under apps, or outside any repo. */
+export function repoRoot(path: string, home: string): string | undefined {
+	const ws = `${join(home, "workspace")}/`;
+	if (!path.startsWith(ws) || path.startsWith(`${ws}apps/`)) return undefined;
+	let dir = path;
+	while (dir.startsWith(ws) && !existsSync(dir)) dir = dirname(dir);
+	if (!dir.startsWith(ws)) return undefined;
+	try {
+		const cwd = statSync(dir).isDirectory() ? dir : dirname(dir);
+		const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+		return root.startsWith(ws) && !root.startsWith(`${ws}apps/`) ? root : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 // Files the branch changes against main, committed, staged, unstaged or untracked. When git can't say, assume code changed.
 export function codeChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 });
-		const files = [...run(["diff", "--name-only", "main...HEAD"]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n"), ...run(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(Boolean);
+		const files = [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n"), ...run(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(Boolean);
 		return files.length === 0 || files.some((f) => !reviewFree(f));
 	} catch {
 		return true;
@@ -128,7 +158,7 @@ export function codeChanged(dir: string): boolean {
 export function docsChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
-		return [...run(["diff", "--name-only", "main...HEAD"]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(designDoc);
+		return [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(designDoc);
 	} catch {
 		return false;
 	}
@@ -138,7 +168,7 @@ export function docsChanged(dir: string): boolean {
 export function uiChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
-		return [...run(["diff", "--name-only", "main...HEAD"]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
+		return [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
 	} catch {
 		return true;
 	}
@@ -276,14 +306,19 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// The call's own cwd names the app as well as the task does: on keeb 2026-11-16 the orchestrator passed
 	// cwd=<app> on every reviewer call and, from the 11th on, a diff path relative to it, and none was scoped.
 	const callCwd = typeof input.cwd === "string" && input.cwd ? input.cwd.replace(/^~(?=\/)/, home) : cwd;
-	const dir = reviewApp(task, callCwd, home);
+	// An app first; else any other git repo under ~/workspace the task or the call's cwd names (its root, so a worktree
+	// is reviewed as itself).
+	const app = reviewApp(task, callCwd, home);
+	const named = app ? undefined : workspacePath(task, callCwd, home);
+	const dir = app ?? (named ? repoRoot(named, home) : undefined);
 	if (!dir) return undefined;
 	// A docs-only change (a design doc, a plan) needs no verify and no screen: keeb 2026-11-17, flash ran the full
 	// verify to get a plan review past this gate.
 	const docsOnly = !codeChanged(dir);
 	if (!docsOnly && hasScript(dir, "verify") && !verifiedSinceEdit(branch, dir, cwd, home)) return { block: true, reason: REASONS.reviewUnverified };
 	// The orchestrator looks at a UI change before anyone reviews its code: a wrong picture goes back to the worker.
-	if (!docsOnly && uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
+	// (The screenshot command is the app skill's, so only an app has a screen gate.)
+	if (!docsOnly && app && uiChanged(dir) && !screenUpToDate(dir, branch)) return { block: true, reason: REASONS.screen };
 	const snap = snapshot(dir);
 	// A review that ended BLOCK is not re-run on the same tree: keeb 2026-11-17 18:27, the orchestrator asked the
 	// reviewer to "re-verify" its P0 with its own counter-evidence, and the gate let the unchanged code through.
@@ -297,7 +332,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 		baseFrom = "review";
 	} else {
 		try {
-			base = git(dir, ["merge-base", "main", snap]);
+			base = git(dir, ["merge-base", mainBranch(dir), snap]);
 		} catch {
 			base = git(dir, ["rev-parse", "HEAD"]);
 		}
@@ -377,6 +412,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			codeChanged,
 			docsChanged,
 			reviewGap: (dir) => reviewGap(branch(), dir),
+			repoRoot: (path) => repoRoot(path, home),
 			lines,
 			rewrites,
 			orchestrator,

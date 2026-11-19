@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -303,7 +303,8 @@ test("lastReview: the snapshot of the newest mark for that app", () => {
 
 test("reviewApp: an apps path in the task, then the diff file name, then the cwd", () => {
 	assert.equal(reviewApp("Review ~/workspace/apps/keeb for X", home, home), "/home/m/workspace/apps/keeb");
-	assert.equal(reviewApp("Review /tmp/touchtype-review.diff", home, home), "/home/m/workspace/apps/touchtype");
+	assert.equal(reviewApp("Review /tmp/touchtype-review.diff", home, home, () => true), "/home/m/workspace/apps/touchtype");
+	assert.equal(reviewApp("Review /tmp/website-next-review.diff", home, home, () => false), undefined, "a diff named for a repo outside apps is not an app");
 	assert.equal(reviewApp("Review it", "/home/m/workspace/apps/tips/src", home), "/home/m/workspace/apps/tips");
 	assert.equal(reviewApp("Review the plan", home, home), undefined);
 });
@@ -892,7 +893,7 @@ test("reviewGap says why the review gate is shut, and orders a stop after three 
 	const user = { type: "message", message: { role: "user", content: "go" } };
 	const res = (text: string, isError = false) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }], isError } });
 	const blocked = res("Blocked: run the reviewer before opening the PR. Run `npm run verify`...", true);
-	assert.match(reviewGap([user], dir) ?? "", /^No reviewer call since Michael's last message was scoped to this app/);
+	assert.match(reviewGap([user], dir) ?? "", /^No reviewer call since Michael's last message was scoped to this repo/);
 	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "running"), "The last scoped review (run run-a) is still running: wait for its subagent-notify message, then run this command again.");
 	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "Let me look at one more file") ?? "", /ended without a verdict the guard accepts/);
 	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "## Review\n- Merge verdict: OK"), undefined, "a counted review has no gap");
@@ -1064,4 +1065,44 @@ test("a reply that hands Michael a merge command is sent back once", () => {
 	assert.equal(shouldNudgeMerge([user, handed, { role: "custom", customType: MERGE_NUDGE_TYPE, content: "..." }, handed]), false);
 	assert.equal(shouldNudgeMerge([user, long]), false);
 	assert.equal(shouldNudgeMerge([user, edit]), false);
+});
+
+// --- the review gate on any repo under ~/workspace ---
+
+test("workspacePath finds a non-app path under ~/workspace in a command, else takes the cwd", () => {
+	assert.equal(workspacePath("cd ~/workspace/ref/worktrees/website-next && git push -u origin next", "/home/m", "/home/m"), "/home/m/workspace/ref/worktrees/website-next");
+	assert.equal(workspacePath("git -C /home/m/workspace/pi-web push", "/home/m", "/home/m"), "/home/m/workspace/pi-web");
+	assert.equal(workspacePath("cd ~/workspace/apps/keeb && git push", "/home/m", "/home/m"), undefined, "apps have their own rules");
+	assert.equal(workspacePath("git push", "/home/m/workspace/ref/website", "/home/m"), "/home/m/workspace/ref/website");
+	assert.equal(workspacePath("git push", "/home/m", "/home/m"), undefined);
+	assert.equal(workspacePath("Review the branch in /home/m/workspace/ref/website.", "/home/m", "/home/m"), "/home/m/workspace/ref/website");
+});
+
+test("a push or gh pr create in a workspace repo outside apps needs a review, like an app's pr", () => {
+	const repo = "/home/m/workspace/ref/worktrees/website-next";
+	const base = { ...env(), repoRoot: (p: string) => (p.startsWith(repo) ? repo : undefined), reviewed: () => false, codeChanged: () => true };
+	const push = `cd ${repo} && git push -u origin next`;
+	assert.equal(checkShell(push, base)?.reason, REASONS.reviewRepo);
+	assert.equal(checkShell(`cd ${repo} && gh pr create --base main --head next --title t --body b`, base)?.reason, REASONS.reviewRepo);
+	assert.equal(checkShell(push, { ...base, reviewGap: () => "why" })?.reason, `${REASONS.reviewRepo}\nwhy`);
+	assert.equal(checkShell(push, { ...base, reviewed: () => true }), undefined, "reviewed");
+	assert.equal(checkShell(push, { ...base, codeChanged: () => false }), undefined, "docs only");
+	assert.equal(checkShell(push, { ...base, codeChanged: () => false, docsChanged: () => true })?.reason, REASONS.reviewRepo, "a design doc gets its review");
+	assert.equal(checkShell(`cd ${repo} && git commit -qm x && npm test`, base), undefined, "not a publish");
+	assert.equal(checkShell("cd /home/m/elsewhere && git push", base), undefined, "outside workspace");
+	assert.equal(checkShell(push, { ...base, repoRoot: () => undefined }), undefined, "not a git repo");
+	assert.equal(checkShell(push, env()), undefined, "without the checks the command runs");
+	assert.equal(checkShell("cd ~/workspace/apps/keeb && git push", base)?.reason, REASONS.push, "apps keep their own rule");
+	assert.match(REASONS.reviewRepo, /^Blocked: run the reviewer before opening the PR/, "the stop-order counter in reviewGap reads this head");
+});
+
+test("verify in a repo outside apps counts by the command's cd target", () => {
+	const repo = "/home/m/workspace/ref/website";
+	const b = [
+		{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "e", name: "edit", arguments: { path: `${repo}/src/a.ts` } }] } },
+		{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "v", name: "bash", arguments: { command: `cd ${repo} && npm run verify` } }] } },
+		{ type: "message", message: { role: "toolResult", toolCallId: "v", isError: false, content: [] } },
+	];
+	assert.equal(verifiedSinceEdit(b, repo, "/home/m", "/home/m"), true);
+	assert.equal(verifiedSinceEdit(b.slice(0, 1), repo, "/home/m", "/home/m"), false);
 });

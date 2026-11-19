@@ -28,6 +28,8 @@ export const REASONS = {
 	orchestrator:
 		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Commits and `npm run verify` in the main checkout are yours; the pull request is Michael's to merge.",
 	merge: "Blocked: never merge or close a pull request; Michael merges. Green CI means your work is done: reply with the PR link and the preview link, say CI is green, and end your turn. Don't suggest a merge command either.",
+	reviewRepo:
+		'Blocked: run the reviewer before opening the PR or pushing this branch. A git repo under ~/workspace gets the same review gate as an app: call the `subagent` tool (call `subagents_enable` first if it is not available) with agent "reviewer", `cwd` set to the repo, and a task that names Michael\'s request. The guard writes the diff against main and the review scope itself; don\'t write a diff. If the repo has `npm run verify`, run it green first. A review that ended without a `## Review` block or `No issues found.` doesn\'t count: call the reviewer again. Fix what you confirm, commit, list the findings you fixed and rejected in the PR body, then rerun this command.',
 };
 
 // Merging or closing a PR by the gh CLI or the REST API (a push to main in an app is the push rule's). Michael merges (SKILL.md step 7),
@@ -68,6 +70,21 @@ function appName(rel: string): string | undefined {
 	if (!m) return undefined;
 	const name = (m[1] === "worktrees" ? m[2] : m[1])?.replace(/\.+$/, "");
 	return name || undefined;
+}
+
+/** A path under ~/workspace that is not an app: the first one in the text (trailing punctuation dropped), else the cwd
+ *  when it is such a path. What the review gate scopes a repo by; its git root is `Env.repoRoot`'s (index.ts), since
+ *  the path may be a worktree or a file that does not exist yet. */
+export function workspacePath(text: string, cwd: string, home: string): string | undefined {
+	const ws = join(home, "workspace");
+	const apps = `${join(ws, "apps")}/`;
+	const expanded = text.replace(/(^|[\s="'(])(~|\$HOME|\$\{HOME\})(?=\/)/g, `$1${home}`);
+	const escaped = ws.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	for (const m of expanded.matchAll(new RegExp(`${escaped}/[^\\s"'()]+`, "g"))) {
+		const path = m[0].replace(/[.,;:!?]+$/, "");
+		if (!path.startsWith(apps)) return path;
+	}
+	return cwd.startsWith(`${ws}/`) && !cwd.startsWith(apps) ? cwd : undefined;
 }
 
 /** pi's settings put the agent pair in charge: the pair orchestrator (or the pi tune) as the session model, the MoE as the subagent default. */
@@ -139,6 +156,9 @@ export type Env = {
 	docsChanged?: (dir: string) => boolean;
 	/** Why the review gate is shut for the app, when `reviewed` is false (reviewGap). Absent: the plain reason. */
 	reviewGap?: (dir: string) => string | undefined;
+	/** The git root of a path under ~/workspace outside apps (a worktree is its own root), undefined when there is none.
+	 *  Absent: pushes and PRs from repos outside apps are not gated. */
+	repoRoot?: (path: string) => string | undefined;
 	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
 	lines?: (path: string) => number | undefined;
 	/** Paths whose overwrite was already blocked once; the second try goes through. */
@@ -283,8 +303,8 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	// Merging needs no app path in the command (`gh pr merge 28 --repo thats-it-dev/keeb` names only the repo).
 	if (merges(command)) return { block: true, reason: REASONS.merge };
 	const dir = appDir(command, env.cwd, env.home);
-	if (!dir) return undefined;
-	if (/\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/.test(command)) return { block: true, reason: REASONS.push };
+	if (!dir) return checkRepoShell(command, env);
+	if (PUSHES.test(command)) return { block: true, reason: REASONS.push };
 	if (INSTALLS.test(command) && workDir(command, env.cwd, env.home).startsWith(`${join(env.home, "workspace", "apps", "worktrees")}/`)) return { block: true, reason: REASONS.worktreeInstall };
 	if (env.orchestrator && writesAppCode(command, env.cwd, env.home)) return { block: true, reason: REASONS.orchestrator };
 	if (/\bgh\s+(?:run\s+(?:list|watch)|pr\s+checks)\b/.test(command)) return { block: true, reason: REASONS.ci };
@@ -311,6 +331,21 @@ export function checkShell(command: string, env: Env): Block | undefined {
 }
 
 const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
+const PUSHES = /\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/;
+const PUBLISHES = new RegExp(`${PUSHES.source}|\\bgh\\s+pr\\s+create\\b`);
+
+// Any other git repo under ~/workspace gets an app's review gate at its own publish point, a push or `gh pr create`,
+// without the skill's scripts. Why: the website session of 2026-11-19 pushed a 77-file branch and opened its PR with
+// no review at all, because ~/workspace/ref/website is not an app.
+function checkRepoShell(command: string, env: Env): Block | undefined {
+	if (!PUBLISHES.test(command) || !env.reviewed || !env.repoRoot) return undefined;
+	const at = workspacePath(command, env.cwd, env.home);
+	const repo = at ? env.repoRoot(at) : undefined;
+	if (!repo || env.reviewed(repo)) return undefined;
+	if (!((env.codeChanged?.(repo) ?? true) || (env.docsChanged?.(repo) ?? false))) return undefined;
+	const gap = env.reviewGap?.(repo);
+	return { block: true, reason: gap ? `${REASONS.reviewRepo}\n${gap}` : REASONS.reviewRepo };
+}
 
 /** Files a PR can change without a code review: docs, Markdown and CI config. */
 export function reviewFree(path: string): boolean {
@@ -477,7 +512,7 @@ export function lastReview(branch: Iterable<unknown>, dir: string, runState: Run
 
 /** Appended to a reviewer launch the guard did not scope: it will never count for the PR gate, and the model
  *  should know that now, not after ten blocked `pr` calls (keeb 2026-11-16: 11 unscoped reviews in a row). */
-export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to an app (the task names no ~/workspace/apps/<name> path and the call's cwd is not in one), so it does not count for the PR gate. For an app review, call the reviewer again with `cwd` set to the app or the app's path in the task.";
+export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to a repo (the task names no path under ~/workspace and the call's cwd is not in one), so it does not count for the PR gate. Call the reviewer again with `cwd` set to the app or repo, or with its path in the task.";
 
 /** The gap line for a review that ended BLOCK: the orchestrator's own reading of the findings does not reopen the gate. */
 const REVIEW_BLOCKED_GAP = (who: string) =>
@@ -516,7 +551,7 @@ export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunS
 		}
 	}
 	let why: string;
-	if (!last) why = "No reviewer call since Michael's last message was scoped to this app: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or whose task names its ~/workspace/apps/<name> path, and only those count.";
+	if (!last) why = "No reviewer call since Michael's last message was scoped to this repo: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or repo, or whose task names its path under ~/workspace, and only those count.";
 	else if (last.kind === "finished") return undefined;
 	else if (last.kind === "blocked") why = REVIEW_BLOCKED_GAP("The last scoped review");
 	else if (last.runId === UNKNOWN_RUN) why = "The last scoped review's launch result carried no run id, so it can never count: call the reviewer again.";
@@ -533,12 +568,22 @@ export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunS
 	return `${stop}${why}`;
 }
 
-/** The app a reviewer call is about: an apps path in the task, then a /tmp/<name>-review.diff, then the cwd. */
-export function reviewApp(task: string, cwd: string, home: string): string | undefined {
+/** The app a reviewer call is about: an apps path in the task, then a /tmp/<name>-review.diff naming an app that
+ *  exists (a repo outside apps gets the same diff name, and is not an app), then the cwd. */
+export function reviewApp(task: string, cwd: string, home: string, isDir: (path: string) => boolean = defaultIsDir): string | undefined {
 	const named = appDir(task, "", home);
 	if (named) return named;
 	const diff = /\/tmp\/([A-Za-z0-9._-]+)-review\.diff/.exec(task)?.[1];
-	return diff ? join(home, "workspace", "apps", diff) : appDir("", cwd, home);
+	const fromDiff = diff ? join(home, "workspace", "apps", diff) : undefined;
+	return fromDiff && isDir(fromDiff) ? fromDiff : appDir("", cwd, home);
+}
+
+function defaultIsDir(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
 }
 
 /** A subagent call that runs a reviewer some way other than a direct `agent: "reviewer"` call. */
@@ -569,7 +614,8 @@ export function verifiedSinceEdit(branch: Iterable<unknown>, dir: string, cwd: s
 					if (full.startsWith(`${dir}/`) && !reviewFree(full.slice(dir.length + 1))) lastEdit = i;
 				}
 				const command = c.arguments?.command;
-				if (c.name === "bash" && typeof command === "string" && /\bnpm\s+run\s+verify\b/.test(command) && appDir(command, cwd, home) === dir && c.id) verifies.add(c.id);
+				// An app is named by its path; any other repo by the command's `cd` (or the session cwd).
+				if (c.name === "bash" && typeof command === "string" && /\bnpm\s+run\s+verify\b/.test(command) && (appDir(command, cwd, home) ?? workDir(command, cwd, home)) === dir && c.id) verifies.add(c.id);
 			}
 		} else if (m.role === "toolResult" && m.toolCallId && verifies.has(m.toolCallId) && !m.isError) {
 			lastVerify = i;

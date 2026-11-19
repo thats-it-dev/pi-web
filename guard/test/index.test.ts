@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
+import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
 import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -401,7 +401,7 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	assert.equal(screenUpToDate(dir, entries), true);
 	const r2 = h.tool_call({ toolName: "bash", toolCallId: "pr2", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.equal(r2?.block, true, "looked; the review gate is next");
-	assert.match(String(r2?.reason), /^Blocked: run the reviewer before opening the PR[\s\S]*\nNo reviewer call since Michael's last message was scoped to this app/);
+	assert.match(String(r2?.reason), /^Blocked: run the reviewer before opening the PR[\s\S]*\nNo reviewer call since Michael's last message was scoped to this repo/);
 	// A failed command or one that reported no picture leaves no mark.
 	h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command } }, ctx);
 	assert.equal(h.tool_result({ ...result, toolCallId: "s2", content: [{ type: "text", text: 'RESULT {"ok":false,"reason":"no vite"}' }] }, ctx), undefined);
@@ -572,4 +572,66 @@ test("scopeReview: a docs-only change is reviewed without verify or a screen, wi
 	// Code on top of it brings the verify gate back.
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
 	assert.deepEqual(scopeReview({ agent: "reviewer", cwd: dir, task: "Review" }, [], home, home), { block: true, reason: REASONS.reviewUnverified });
+});
+
+// --- the review gate on any repo under ~/workspace ---
+
+function wsRepo(trunk = "master") {
+	const home = mkdtempSync(join(tmpdir(), "guard-home-"));
+	const dir = join(home, "workspace", "ref", "site");
+	mkdirSync(join(dir, "src"), { recursive: true });
+	const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: dir, stdio: "pipe" });
+	git("init", "-q", "-b", trunk);
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n");
+	git("add", "-A");
+	git("commit", "-qm", "one");
+	git("switch", "-qc", "next");
+	return { home, dir, git };
+}
+
+test("repoRoot: a git repo under ~/workspace outside apps, by any path in it; apps, loose dirs and outside paths are not", () => {
+	const { home, dir } = wsRepo();
+	assert.equal(repoRoot(join(dir, "src", "new.ts"), home), dir, "a file that does not exist yet");
+	assert.equal(repoRoot(dir, home), dir);
+	assert.equal(repoRoot(join(home, "workspace", "apps", "keeb"), home), undefined);
+	mkdirSync(join(home, "workspace", "loose"));
+	assert.equal(repoRoot(join(home, "workspace", "loose"), home), undefined);
+	assert.equal(repoRoot(join(home, "elsewhere"), home), undefined);
+	assert.equal(mainBranch(dir), "master");
+});
+
+test("scopeReview scopes a reviewer call on a workspace repo outside apps, by cwd or by a path in the task, against its master", () => {
+	const { home, dir } = wsRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	assert.equal(codeChanged(dir), true, "read against master, not a failed `main` diff");
+	const input: Record<string, unknown> = { agent: "reviewer", cwd: dir, task: "Review the branch" };
+	const r = scopeReview(input, [msg("user", { content: "rebuild it" })], home, home) as { dir: string; snap: string };
+	assert.equal(r.dir, dir, "no verify script and no screen gate: scoped straight away");
+	assert.equal(input.cwd, dir);
+	assert.match(String(input.task), /- src\/a\.ts \(\+1 -1\)/);
+	assert.match(String(input.task), /rebuild it/);
+	const byPath: Record<string, unknown> = { agent: "reviewer", task: `Review ${join(dir, "src")} against master` };
+	assert.equal((scopeReview(byPath, [], home, home) as { dir: string }).dir, dir, "a path inside the repo scopes to its root");
+	assert.equal(scopeReview({ agent: "reviewer", cwd: join(home, "workspace", "nowhere"), task: "Review" }, [], home, home), undefined, "not a repo");
+});
+
+test("through pi: a push from a workspace repo outside apps is blocked until its tree was reviewed", () => {
+	const { home, dir } = wsRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = (branch: unknown[]) => ({ cwd: home, sessionManager: { getBranch: () => branch } });
+	const push = { toolName: "bash", input: { command: `cd ${dir} && git push -u origin next` } };
+	const r = h.tool_call(push, ctx([msg("user", { content: "ship it" })]));
+	assert.match(String(r?.reason), /^Blocked: run the reviewer before opening the PR or pushing this branch/);
+	assert.match(String(r?.reason), /No reviewer call since Michael's last message/);
+	const pr = { toolName: "bash", input: { command: `cd ${dir} && gh pr create --base master --head next --title t --body b` } };
+	assert.match(String(h.tool_call(pr, ctx([]))?.reason), /^Blocked: run the reviewer/);
+	const reviewed = [msg("user", { content: "ship it" }), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snapshot(dir)) }] })];
+	assert.equal(h.tool_call(push, ctx(reviewed)), undefined, "the tree as the review left it may go");
+	// One finished review per user message opens the gate (fixing its P2s and pushing needs no second review, as in apps);
+	// Michael's next message shuts it again until the new tree is reviewed.
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
+	assert.equal(h.tool_call(push, ctx(reviewed)), undefined, "a fix after the review in the same turn may go");
+	assert.match(String(h.tool_call(push, ctx([...reviewed, msg("user", { content: "and now this" })]))?.reason), /^Blocked: run the reviewer/, "a new request needs a new review");
+	assert.equal(h.tool_call({ toolName: "bash", input: { command: `cd ${dir} && npm test` } }, ctx([])), undefined, "only publishing is gated");
 });

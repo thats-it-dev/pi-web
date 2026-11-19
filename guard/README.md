@@ -164,6 +164,16 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
 first, no test or config spelunking, and the same tool budget in its frontmatter.
 
+### Any other repo under `~/workspace`
+
+A git repo under `~/workspace` that is not an app gets the same gate at its own publish point: `git push` and
+`gh pr create` are blocked until a scoped review finished since Michael's last message, or the tree is exactly as the
+last review left it (`pi-guard` reason `reviewRepo`). A reviewer call is scoped by its `cwd` or a path in its task, with
+the git root as the dir (a worktree is reviewed as itself), against the repo's `main` or `master`. Verify is required
+only when the repo has a `verify` script, and there is no screen gate (the screenshot command is the app skill's). Why:
+the website session of 2026-11-19 pushed a 77-file branch from `~/workspace/ref/worktrees/website-next` and opened its
+PR with no review at all, because only apps were gated.
+
 ## Look at the screen
 
 Verify proves the code runs; nothing in it shows what the app draws. The fret app (2026-11-13) shipped a fretboard
