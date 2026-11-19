@@ -265,7 +265,7 @@ export function screenCompareContent(spec: string | undefined, pictures: UserPic
 	const against = [spec ? "docs/spec.md" : "", pictures.length ? "Michael's pictures above (what he asked for, or what he saw broken)" : "", "Michael's request"].filter(Boolean).join(", ");
 	out.push({
 		type: "text",
-		text: `Compare the screen with ${against} and write down what differs before going on: elements missing or extra, order and side (left-handed layouts, nut, labels), colours by role, numbers and labels in each element. A difference goes back to the worker with the picture's path; the review waits. Only when nothing differs, go on. If the change, or Michael's picture, is in a state this screen does not show (an open dialog or menu, another route), picture that state first: the screenshot command with --click '<css selector of the control that opens it>' or --path /route. "Not visible in this screenshot" is not a pass.`,
+		text: `Compare the screen with ${against} and write down what differs before going on: elements missing or extra, order and side (left-handed layouts, nut, labels), colours by role, numbers and labels in each element. A difference goes back to the worker with the picture's path; the review waits. Only when nothing differs, go on. If the change, or Michael's picture, is in a state this screen does not show (an open dialog or menu, another route), picture that state first: the screenshot command with --click '<css selector of the control that opens it>' or --path /route. "Not visible in this screenshot" is not a pass. The kit counts too: a dialog that is not the kit sheet (its heading bar with the close button), a checkbox where a switch belongs, a row whose label is not on the left edge or whose control is not on the right, an icon or icon button drawn by hand, go back to the worker like any other difference.`,
 	});
 	return out;
 }
@@ -733,6 +733,8 @@ export type ReviewScope = {
 	dir: string;
 	/** "docs" when the diff holds no code: a design doc or plan review, briefed differently (no tests to cite). */
 	kind?: "code" | "docs";
+	/** The skill's Style rules (styleRulesOf), briefed when the diff touches a UI file. */
+	kit?: string;
 	/** Michael's last message on the branch, verbatim (lastRequest): what the review must check the diff against. */
 	request?: string;
 	/** The files that message names by path and that exist (requestFiles): the data the change reads. */
@@ -769,9 +771,61 @@ export function reviewHeader(s: ReviewScope): string {
 					...(s.inputs?.length ? ["", inputsOracle(s.inputs)] : []),
 				]
 			: []),
+		...kitRules(s),
 		"",
 		"[The parent's request]",
 	].join("\n");
+}
+
+/** The kit paragraph of a code review brief, when the diff touches a UI file and the skill's rules are at hand. Keeb
+ *  2026-11-19 (PR #34): the settings dialog kept its hand-built checkboxes, close button and label grid through a
+ *  review whose brief said nothing about the kit, and Michael found the drift after the merge. */
+function kitRules(s: ReviewScope): string[] {
+	const ui = s.files.filter((f) => uiFile(f.path)).map((f) => f.path);
+	if (!s.kit || !ui.length) return [];
+	return [
+		"",
+		`[Kit rules. The diff touches UI files (${ui.join(", ")}); check each changed UI file against these.]`,
+		s.kit,
+		"A changed UI file that hand-builds what the kit provides (a dialog or confirm that is not `tk-sheet` with the `.form` pattern, an on/off control that is not `.switch`, an icon button that is not `.icon-btn`, a pasted SVG icon, a local copy of a kit class or pattern), or that writes a colour, `font-family` or `border-radius`, is a P1 finding and the merge verdict is BLOCK. Code the diff leaves alone is out of scope; a hunk that edits such code and leaves it hand-built is in it.",
+	];
+}
+
+// --- the app's rules reach the session that works on it ---
+
+/** The "Style rules" section of the thatsit-app SKILL.md, heading included, up to the next section; undefined when
+ *  the skill has no such heading. pi lists a skill by name and description only and the model has to read the file:
+ *  in the 20 app sessions before 2026-11-19 it never did, so the guard carries this section itself. */
+export function styleRulesOf(skillMd: string): string | undefined {
+	const start = /(?:^|\n)## Style rules\n/.exec(skillMd);
+	if (!start) return undefined;
+	const rest = skillMd.slice(start.index + (start[0].startsWith("\n") ? 1 : 0));
+	const end = rest.indexOf("\n## ");
+	return (end >= 0 ? rest.slice(0, end) : rest).trimEnd();
+}
+
+/** True when the branch holds a read of the thatsit-app SKILL.md (by any spelling of home, or through the symlink's
+ *  target): its rules are then already in the context. */
+export function skillRead(branch: Iterable<unknown>, home: string): boolean {
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "assistant" || !Array.isArray(e.message.content)) continue;
+		for (const c of e.message.content as ToolCallPart[]) {
+			const path = c.arguments?.path;
+			if (c.type === "toolCall" && c.name === "read" && typeof path === "string" && /(?:^|\/)thatsit-app\/SKILL\.md$/.test(path.replace(/^~(?=\/)/, home))) return true;
+		}
+	}
+	return false;
+}
+
+/** The note that carries an app's rules into the session working on it, appended to its first call into the app:
+ *  the app's AGENTS.md when the session's cwd did not load it (pi reads project context from its cwd, and a pi-web
+ *  session sits in home), and the skill's Style rules unless the skill was read. Undefined when there is nothing to carry. */
+export function appBrief(dir: string, agentsMd: string | undefined, styleRules: string | undefined): string | undefined {
+	const parts: string[] = [];
+	if (agentsMd) parts.push(`The rules of ${dir}, which this session's cwd did not load: follow them in every change there.\n\n<project_instructions path="${dir}/AGENTS.md">\n${agentsMd.trimEnd()}\n</project_instructions>`);
+	if (styleRules) parts.push(`From the thatsit-app skill (~/.pi/agent/skills/thatsit-app/SKILL.md), the rules every UI change in an app follows; the design system page it names has each pattern with its code:\n\n${styleRules}`);
+	return parts.length ? `[pi-guard] ${parts.join("\n\n")}` : undefined;
 }
 
 /** The brief for a design doc or plan review. On keeb 2026-11-17 (flash, PR #31) the plan review went out with the

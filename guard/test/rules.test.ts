@@ -1158,3 +1158,60 @@ test("the pair's code-path rule and the long-overwrite rule reach any path under
 	assert.deepEqual(checkToolCall("write", { path: "/home/m/workspace/ref/website/src/big.ts", content: "x" }, env({ lines, rewrites: new Set() })), { block: true, reason: REASONS.overwrite });
 	assert.equal(checkToolCall("write", { path: "/home/m/elsewhere/big.ts", content: "x" }, env({ lines, rewrites: new Set() })), undefined);
 });
+
+// --- the app's rules reach the session that works on it (keeb 2026-11-19: the skill's Style rules were never read) ---
+
+import { appBrief, skillRead, styleRulesOf } from "../rules.ts";
+
+const skillMd = "---\nname: thatsit-app\n---\n\n# thatsit.app apps\n\nintro\n\n## Style rules\n\n- Import Lit only from kit.\n- Use only kit components: `tk-sheet`.\n\n## When something fails\n\n- rerun\n";
+
+test("styleRulesOf lifts the Style rules section out of the skill, heading included, and nothing without it", () => {
+	assert.equal(styleRulesOf(skillMd), "## Style rules\n\n- Import Lit only from kit.\n- Use only kit components: `tk-sheet`.");
+	assert.equal(styleRulesOf("# skill\n\n## Other\n\ntext\n"), undefined);
+	assert.equal(styleRulesOf("## Style rules\n\n- last section\n"), "## Style rules\n\n- last section");
+});
+
+test("skillRead: a read of the thatsit-app SKILL.md on the branch, by any spelling of home; other reads are not one", () => {
+	const read = (path: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r", name: "read", arguments: { path } }] } });
+	assert.equal(skillRead([], home), false);
+	assert.equal(skillRead([read("/home/m/workspace/apps/keeb/AGENTS.md")], home), false);
+	assert.equal(skillRead([read("/home/m/.pi/agent/skills/thatsit-app/README.md")], home), false);
+	assert.equal(skillRead([read("~/.pi/agent/skills/thatsit-app/SKILL.md")], home), true);
+	assert.equal(skillRead([read("/home/m/.pi/agent/skills/thatsit-app/SKILL.md")], home), true);
+	// The skill's real location is a symlink into pi-web; a read through it counts too.
+	assert.equal(skillRead([read("/home/m/workspace/pi-web/skills/thatsit-app/SKILL.md")], home), true);
+});
+
+test("appBrief carries AGENTS.md and the style rules, either alone, and nothing when there is nothing to carry", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const both = appBrief(dir, "# keeb\n\n- rule", "## Style rules\n\n- kit");
+	assert.ok(both);
+	assert.match(both, /^\[pi-guard\] The rules of \/home\/m\/workspace\/apps\/keeb, which this session's cwd did not load: follow them in every change there\.\n\n<project_instructions path="\/home\/m\/workspace\/apps\/keeb\/AGENTS\.md">\n# keeb\n\n- rule\n<\/project_instructions>/);
+	assert.match(both, /\n\nFrom the thatsit-app skill \(~\/\.pi\/agent\/skills\/thatsit-app\/SKILL\.md\), the rules every UI change in an app follows; the design system page it names has each pattern with its code:\n\n## Style rules\n\n- kit$/);
+	const rulesOnly = appBrief(dir, undefined, "## Style rules\n\n- kit");
+	assert.ok(rulesOnly);
+	assert.doesNotMatch(rulesOnly, /project_instructions/);
+	assert.match(rulesOnly, /^\[pi-guard\] From the thatsit-app skill/);
+	const agentsOnly = appBrief(dir, "# keeb", undefined);
+	assert.ok(agentsOnly);
+	assert.doesNotMatch(agentsOnly, /thatsit-app skill/);
+	assert.equal(appBrief(dir, undefined, undefined), undefined);
+});
+
+test("reviewHeader briefs the kit rules when the diff touches a UI file, and only then", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff" };
+	const kit = "## Style rules\n\n- Use only kit components: `tk-sheet`.";
+	const ui = reviewHeader({ ...scope, files: [{ path: "src/ui/settings-dialog.ts", added: "3", removed: "1" }, { path: "test/a.test.ts", added: "1", removed: "0" }], kit });
+	assert.match(ui, /\[Kit rules\. The diff touches UI files \(src\/ui\/settings-dialog\.ts\); check each changed UI file against these\.\]\n## Style rules\n\n- Use only kit components: `tk-sheet`\.\n/);
+	assert.match(ui, /A changed UI file that hand-builds what the kit provides .* is a P1 finding and the merge verdict is BLOCK\./);
+	assert.ok(ui.indexOf("[Kit rules.") < ui.indexOf("[The parent's request]"));
+	const tests = reviewHeader({ ...scope, files: [{ path: "test/a.test.ts", added: "1", removed: "0" }], kit });
+	assert.doesNotMatch(tests, /Kit rules/);
+	const noKit = reviewHeader({ ...scope, files: [{ path: "src/ui/settings-dialog.ts", added: "3", removed: "1" }] });
+	assert.doesNotMatch(noKit, /Kit rules/);
+});
+
+test("the screen comparison counts a kit pattern built by hand as a difference", () => {
+	const owed = screenCompareContent(undefined, []).at(-1) as { text: string };
+	assert.match(owed.text, /The kit counts too: a dialog that is not the kit sheet .* a checkbox where a switch belongs, a row whose label is not on the left edge or whose control is not on the right, .* go back to the worker like any other difference\./);
+});

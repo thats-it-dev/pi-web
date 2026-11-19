@@ -664,3 +664,75 @@ test("the first call into a workspace repo outside apps whose checkout sits on a
 	const r = handlers.tool_result({ toolName: "bash", toolCallId: "c1", content: [{ type: "text", text: "" }] }, ctx);
 	assert.match(r.content.at(-1).text, /was still on branch next, whose PR is merged; switched it to master/);
 });
+
+test("the first call into an app from a session whose cwd is elsewhere gets the app's AGENTS.md and the skill's style rules on its result, once per app and again after a compaction", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "AGENTS.md"), "# keeb\n\n- Files under src stay under 400 lines.\n");
+	mkdirSync(join(home, ".pi", "agent", "skills", "thatsit-app"), { recursive: true });
+	writeFileSync(join(home, ".pi", "agent", "skills", "thatsit-app", "SKILL.md"), "---\nname: thatsit-app\n---\n\n# apps\n\n## Change an existing app\n\n1. branch\n\n## Style rules\n\n- Use only kit components: `tk-sheet`.\n\n## When something fails\n\n- rerun\n");
+	const h = load(() => false, { HOME: home });
+	const entries: unknown[] = [];
+	const ctx = { cwd: home, sessionManager: { getBranch: () => entries } };
+	assert.equal(h.tool_call({ toolName: "bash", toolCallId: "c1", input: { command: `cd ${dir} && git status --short` } }, ctx), undefined);
+	const r = h.tool_result({ toolName: "bash", toolCallId: "c1", content: [{ type: "text", text: "" }] }, ctx);
+	assert.equal(r.content.length, 2);
+	assert.match(r.content[1].text, /^\[pi-guard\] The rules of .*\/workspace\/apps\/keeb, which this session's cwd did not load/);
+	assert.match(r.content[1].text, /<project_instructions path="[^"]*\/keeb\/AGENTS\.md">\n# keeb\n\n- Files under src stay under 400 lines\.\n<\/project_instructions>/);
+	assert.match(r.content[1].text, /From the thatsit-app skill[\s\S]*## Style rules\n\n- Use only kit components: `tk-sheet`\.$/);
+	// The second call into the app carries nothing more.
+	assert.equal(h.tool_call({ toolName: "edit", toolCallId: "c2", input: { path: join(dir, "src", "a.ts") } }, ctx), undefined);
+	assert.equal(h.tool_result({ toolName: "edit", toolCallId: "c2", content: [{ type: "text", text: "ok" }] }, ctx), undefined);
+	// A compaction summarises the brief away, so the next call into the app gets it again.
+	h.session_before_compact({ preparation: { messagesToSummarize: [], turnPrefixMessages: [] } }, ctx);
+	h.tool_call({ toolName: "bash", toolCallId: "c3", input: { command: `cd ${dir} && ls` } }, ctx);
+	assert.match(h.tool_result({ toolName: "bash", toolCallId: "c3", content: [{ type: "text", text: "" }] }, ctx).content[1].text, /^\[pi-guard\] The rules of/);
+	// A blocked call delivers nothing, and does not spend the one delivery.
+	const h2 = load(() => false, { HOME: home });
+	assert.equal(h2.tool_call({ toolName: "bash", toolCallId: "b1", input: { command: `cd ${dir} && git push` } }, ctx)?.block, true);
+	h2.tool_call({ toolName: "bash", toolCallId: "b2", input: { command: `cd ${dir} && ls` } }, ctx);
+	assert.match(h2.tool_result({ toolName: "bash", toolCallId: "b2", content: [{ type: "text", text: "" }] }, ctx).content[1].text, /^\[pi-guard\] The rules of/);
+});
+
+test("a session whose cwd is in the app already has AGENTS.md, so it gets the style rules alone; a read of the skill makes the brief unnecessary", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "AGENTS.md"), "# keeb\n");
+	mkdirSync(join(home, ".pi", "agent", "skills", "thatsit-app"), { recursive: true });
+	writeFileSync(join(home, ".pi", "agent", "skills", "thatsit-app", "SKILL.md"), "# apps\n\n## Style rules\n\n- kit only\n");
+	// A pi-subagents worker: a child whose cwd is the app (or one of its worktrees).
+	const child = load(() => false, { HOME: home, PI_SUBAGENT_CHILD: "1" });
+	const ctx = { cwd: join(dir, "src"), sessionManager: { getBranch: () => [] } };
+	child.tool_call({ toolName: "edit", toolCallId: "c1", input: { path: join(dir, "src", "a.ts") } }, ctx);
+	const r = child.tool_result({ toolName: "edit", toolCallId: "c1", content: [{ type: "text", text: "ok" }] }, ctx);
+	assert.equal(r.content.length, 2);
+	assert.match(r.content[1].text, /^\[pi-guard\] From the thatsit-app skill[\s\S]*- kit only$/);
+	assert.doesNotMatch(r.content[1].text, /project_instructions/);
+	// The skill already read on the branch: its rules are in context, and the app's AGENTS.md too.
+	const read = [msg("assistant", { content: [{ type: "toolCall", id: "r", name: "read", arguments: { path: "~/.pi/agent/skills/thatsit-app/SKILL.md" } }] })];
+	const parent = load(() => false, { HOME: home });
+	parent.tool_call({ toolName: "bash", toolCallId: "p1", input: { command: `cd ${dir} && ls` } }, { ...ctx, sessionManager: { getBranch: () => read } });
+	assert.equal(parent.tool_result({ toolName: "bash", toolCallId: "p1", content: [{ type: "text", text: "" }] }, ctx), undefined);
+	// A session in an app with no AGENTS.md and no skill on disk gets nothing at all.
+	const bare = appRepo();
+	const b = load(() => false, { HOME: bare.home });
+	b.tool_call({ toolName: "bash", toolCallId: "n1", input: { command: `cd ${bare.dir} && ls` } }, { cwd: bare.home, sessionManager: { getBranch: () => [] } });
+	assert.equal(b.tool_result({ toolName: "bash", toolCallId: "n1", content: [{ type: "text", text: "" }] }, { cwd: bare.home }), undefined);
+});
+
+test("a scoped review of a UI change carries the kit rules; one that changes no UI file does not", () => {
+	const { home, dir } = appRepo();
+	mkdirSync(join(home, ".pi", "agent", "skills", "thatsit-app"), { recursive: true });
+	writeFileSync(join(home, ".pi", "agent", "skills", "thatsit-app", "SKILL.md"), "# apps\n\n## Style rules\n\n- Use only kit components: `tk-sheet`.\n");
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const input: Record<string, unknown> = { agent: "reviewer", task: `Review ${dir}` };
+	const r = scopeReview(input, ready(dir), home, home);
+	assert.ok(r && !("block" in r));
+	assert.match(String(input.task), /\[Kit rules\. The diff touches UI files \(src\/a\.ts\)[\s\S]*- Use only kit components: `tk-sheet`\./);
+	const { home: h2, dir: d2 } = appRepo();
+	mkdirSync(join(h2, ".pi", "agent", "skills", "thatsit-app"), { recursive: true });
+	writeFileSync(join(h2, ".pi", "agent", "skills", "thatsit-app", "SKILL.md"), "# apps\n\n## Style rules\n\n- kit\n");
+	mkdirSync(join(d2, "test"));
+	writeFileSync(join(d2, "test", "a.test.ts"), "it('x', () => {});\n");
+	const input2: Record<string, unknown> = { agent: "reviewer", task: `Review ${d2}` };
+	assert.ok(!("block" in (scopeReview(input2, verified(d2), h2, h2) ?? {})));
+	assert.doesNotMatch(String(input2.task), /Kit rules/);
+});

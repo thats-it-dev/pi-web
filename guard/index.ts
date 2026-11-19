@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -179,6 +179,28 @@ export function uiChanged(dir: string): boolean {
 		return [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
 	} catch {
 		return true;
+	}
+}
+
+/** The Style rules of the installed thatsit-app skill; undefined when the skill or the section is missing. */
+export function styleRules(home: string): string | undefined {
+	try {
+		return styleRulesOf(readFileSync(join(home, ".pi", "agent", "skills", "thatsit-app", "SKILL.md"), "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+/** An AGENTS.md longer than this is cut: the rules come first in every template, the context is not free. */
+export const MAX_AGENTS_CHARS = 12000;
+
+/** The app's AGENTS.md as written; undefined when it has none. */
+export function agentsMd(dir: string): string | undefined {
+	try {
+		const text = readFileSync(join(dir, "AGENTS.md"), "utf8");
+		return text.length > MAX_AGENTS_CHARS ? `${text.slice(0, MAX_AGENTS_CHARS)}\n[cut here; read AGENTS.md for the rest]` : text;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -365,7 +387,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// review passed it.
 	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
 	const request = lastRequest(branch);
-	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home) })}\n${task}`;
+	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined })}\n${task}`;
 	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
 	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
@@ -395,9 +417,13 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
 	// Screenshot commands in flight: tool call id -> the app and the snapshot the picture will show.
 	const screens = new Map<string, { dir: string; snap: string; upload?: string }>();
-	// Apps checked once for a checkout left on a merged branch, and the note owed to the call that triggered the switch.
+	// Apps checked once for a checkout left on a merged branch; apps whose rules this session was handed (again after a
+	// compaction, which summarises them away); and the notes owed to the call that triggered either, by tool call id.
 	const freshened = new Set<string>();
-	const switched = new Map<string, string>();
+	const briefed = new Set<string>();
+	const notes = new Map<string, string[]>();
+	const addNote = (id: string, text: string) => notes.set(id, [...(notes.get(id) ?? []), text]);
+	const appsRoot = `${join(home, "workspace", "apps")}/`;
 	// Reviewer launches the guard could not tie to an app: their result says so, since they never count.
 	const unscoped = new Set<string>();
 
@@ -405,12 +431,13 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
 		// The first call into an app this session: a clean checkout on a merged branch goes back to main before the
 		// call runs, so neither the worker's edits nor the orchestrator's commit land on top of the merge.
-		const app = child ? undefined : callScope(event.toolName, event.input ?? {}, ctx.cwd, home);
+		const scope = callScope(event.toolName, event.input ?? {}, ctx.cwd, home);
+		const app = child ? undefined : scope;
 		if (app && !freshened.has(app)) {
 			freshened.add(app);
 			const stale = mergedBranch(app, prState);
 			const head = stale ? switchToMain(app) : undefined;
-			if (stale && head) switched.set(event.toolCallId, switchedNote(app, stale, head, mainBranch(app)));
+			if (stale && head) addNote(event.toolCallId, switchedNote(app, stale, head, mainBranch(app)));
 		}
 		const block = checkToolCall(event.toolName, event.input ?? {}, {
 			cwd: ctx.cwd,
@@ -434,6 +461,15 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			uiChanged,
 		});
 		if (block) return block;
+		// The first call that goes through into an app: its result carries the app's rules, which a session in home never
+		// loaded and which the skill lists but the model does not read (keeb 2026-11-19: a settings dialog rebuilt by
+		// hand, every kit rule unread). A worker in the app already has AGENTS.md and gets the style rules alone.
+		const inApp = scope?.startsWith(appsRoot) ? scope : undefined;
+		if (inApp && !briefed.has(inApp)) {
+			briefed.add(inApp);
+			const note = appBrief(inApp, appDir("", ctx.cwd, home) === inApp ? undefined : agentsMd(inApp), skillRead(branch(), home) ? undefined : styleRules(home));
+			if (note) addNote(event.toolCallId, note);
+		}
 		if (event.toolName === "bash") {
 			const command = String(event.input?.command ?? "");
 			const dir = screenshotDir(command, ctx.cwd, home);
@@ -467,10 +503,10 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			const text = partialAnswers(event.input, event.details);
 			return text ? { content: [{ type: "text", text }], details: event.details } : undefined;
 		}
-		// The note for a call that found its app on a merged branch rides on whatever else this result gets.
-		const note = switched.get(event.toolCallId);
-		switched.delete(event.toolCallId);
-		const extra: { type: "text"; text: string }[] = note ? [{ type: "text", text: note }] : [];
+		// The notes for a call that found its app on a merged branch, or was the first into the app, ride on whatever
+		// else this result gets.
+		const extra: { type: "text"; text: string }[] = (notes.get(event.toolCallId) ?? []).map((text) => ({ type: "text", text }));
+		notes.delete(event.toolCallId);
 		const withExtra = (content: unknown[]) => ({ content: [...(event.content ?? []), ...content, ...extra], structuredContent: event.structuredContent });
 		const plain = () => (extra.length ? withExtra([]) : undefined);
 		const screen = screens.get(event.toolCallId);
@@ -504,6 +540,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	pi.on("session_before_compact", (event) => {
 		dropReinjected(event.preparation?.messagesToSummarize);
 		dropReinjected(event.preparation?.turnPrefixMessages);
+		// The summary keeps a line about the rules at best: the next call into each app hands them over again.
+		briefed.clear();
 		return undefined;
 	});
 

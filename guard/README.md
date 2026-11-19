@@ -74,6 +74,18 @@ an async `subagent` run it launched or revived has not sent its `subagent-notify
 then, and the done message starts the next one.
 At most 2 per user prompt.
 
+## The app's rules
+
+The first tool call of a session that goes through into an app (the same calls as above, child sessions included) gets
+the app's rules appended to its result, once per app and again after a compaction: the app's `AGENTS.md` inside a
+`<project_instructions>` block when the session's cwd did not load it (a pi-web session sits in home, so pi never
+reads the app's), and the `## Style rules` section of the thatsit-app skill unless a `read` of that SKILL.md is on the
+branch. A worker whose cwd is the app gets the style rules alone. Why: pi lists a skill by name and description and
+leaves the reading to the model, and in the 20 app sessions before 2026-11-19 it never read `thatsit-app/SKILL.md`;
+the guard's gates stood in for the skill's workflow steps, nothing stood in for its style rules. On keeb that day the
+settings dialog was reworked twice with hand-built checkboxes, close button and label grid, a kit-free review passed
+PR #34, and Michael found the drift after the merge.
+
 ## pr timeouts and CI waits
 
 A bash call that runs the skill's `pr` or `gateway-pr` with any timeout is blocked: those return as soon as the PR
@@ -148,6 +160,11 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator decided in its reasoning that the P0 was
   hypothetical, asked the reviewer to "re-verify" with its own counter-evidence, got "nothing changed since the last
   review, go on to pr" from the guard, and pushed.
+- When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
+  UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
+  `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that
+  writes a colour, font or radius is a P1 and BLOCK; a hunk that edits such code and leaves it hand-built counts too.
+  `agents/reviewer.md` says the kit rules in a guard brief are not the "style preferences" it otherwise skips.
 - A design doc or plan (`docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`) is reviewed too. A `pr` that
   adds or changes one is blocked until a scoped review ran, like a code PR. A reviewer call on a docs-only diff skips
   the verify and screen gates and gets a doc brief instead of the code one: check every claim about the code against
@@ -210,6 +227,9 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   session branch, so they survive compaction. Why: on 2026-11-13 22:08 the orchestrator checked a screenshot
   note by note, correctly, and passed a board with the nut on the wrong side and no degree numbers, because
   "looks right" was judged against its own idea and not the spec or the reference Michael had sent.
+  The comparison counts the kit too: a dialog that is not the kit sheet, a checkbox where a switch belongs, a row
+  whose label is not on the left edge or whose control is not on the right, an icon drawn by hand, go back to the
+  worker like any other difference (keeb 2026-11-19: two screens of the hand-built settings dialog passed as "fine").
 - The gate passes while no UI file differs between the last pictured snapshot and the working tree; briefs, docs
   and tests may change freely. A UI edit after the look needs a new picture.
 

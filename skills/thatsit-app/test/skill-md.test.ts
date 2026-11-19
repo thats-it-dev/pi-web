@@ -82,3 +82,13 @@ test("reruns of pr keep the same command; no dead npm-failed rule", () => {
 	assert.ok((m[2].match(/rerun the same `pr` command/g) ?? []).length >= 3);
 	assert.doesNotMatch(m[2], /the CLI ran the tests for you/);
 });
+
+test("SKILL.md has the Style rules section the guard hands to every app session and UI review", () => {
+	assert.ok(m);
+	const sec = m[2].match(/^## Style rules\n([\s\S]*?)(?=^## )/m)?.[1];
+	assert.ok(sec, "section missing");
+	for (const s of ["https://kit.thatsit.app/", "tk-sheet", "`.form`", "`.switch`", "`.icon-btn`", "sharedStyles", "No hex colors"]) {
+		assert.ok(sec.includes(s), `section does not name ${s}`);
+	}
+	assert.ok(sec.split("\n").length <= 20, "the section rides on every first call into an app; keep it short");
+});
