@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1105,4 +1105,22 @@ test("verify in a repo outside apps counts by the command's cd target", () => {
 	];
 	assert.equal(verifiedSinceEdit(b, repo, "/home/m", "/home/m"), true);
 	assert.equal(verifiedSinceEdit(b.slice(0, 1), repo, "/home/m", "/home/m"), false);
+});
+
+test("reposNeedingPr: a workspace repo edited this run with no push or gh pr create after the edit, keyed by its git root", () => {
+	const root = "/home/m/workspace/ref/worktrees/website-next";
+	const repoRoot = (p: string) => (p.startsWith(root) ? root : undefined);
+	const editRepo = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "write", arguments: { path: `${root}/src/render.ts` } }] };
+	const push = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: `cd ${root} && git push -q -u origin next && gh pr create --title t --body b` } }] };
+	const bareCd = { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: "git push" } }] };
+	const needs = (d: string) => d === root;
+	assert.deepEqual(reposNeedingPr([user, editRepo, result, long], "/home/m", "/home/m", repoRoot, needs), [root]);
+	assert.deepEqual(reposNeedingPr([user, editRepo, result, push, result, long], "/home/m", "/home/m", repoRoot, needs), [], "pushed after the edit");
+	assert.deepEqual(reposNeedingPr([user, push, result, editRepo, result, long], "/home/m", "/home/m", repoRoot, needs), [root], "edited after the push");
+	assert.deepEqual(reposNeedingPr([user, editRepo, result, bareCd, result, long], root, "/home/m", repoRoot, needs), [], "a bare push counts by the session cwd");
+	assert.deepEqual(reposNeedingPr([user, editRepo, result, long], "/home/m", "/home/m", repoRoot, () => false), [], "nothing left to publish");
+	assert.deepEqual(reposNeedingPr([user, editApp("~/workspace/apps/keeb/src/a.ts"), result, long], "/home/m", "/home/m", repoRoot, needs), [], "apps are the app nudge's");
+	assert.match(repoPrNudge([root]), /website-next/);
+	assert.match(repoPrNudge([root]), /gh pr create/);
+	assert.match(repoPrNudge([root]), /never merge or close it yourself/);
 });

@@ -635,3 +635,21 @@ test("through pi: a push from a workspace repo outside apps is blocked until its
 	assert.match(String(h.tool_call(push, ctx([...reviewed, msg("user", { content: "and now this" })]))?.reason), /^Blocked: run the reviewer/, "a new request needs a new review");
 	assert.equal(h.tool_call({ toolName: "bash", input: { command: `cd ${dir} && npm test` } }, ctx([])), undefined, "only publishing is gated");
 });
+
+test("through pi: a run that edited a workspace repo outside apps and left it unpushed gets the PR nudge", () => {
+	const { home, dir } = wsRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	assert.equal(needsPr(dir), true, "a branch off master, never pushed");
+	const finished = [
+		{ role: "user", content: "rebuild it" },
+		{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "edit", arguments: { path: join(dir, "src", "a.ts") } }] },
+		{ role: "toolResult", content: [{ type: "text", text: "ok" }] },
+		{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done, the branch is ready on your side. " + "x".repeat(400) }] },
+	];
+	const ctx = { cwd: home, sessionManager: { getBranch: () => [] } };
+	const r = load(needsPr, { HOME: home }).agent_before_settle({ outcome: "completed", context: { contextMessages: finished } }, ctx);
+	assert.equal(r.entries[0].customType, PR_NUDGE_TYPE);
+	assert.match(r.entries[0].content, /ref\/site|\bsite\b/);
+	assert.match(r.entries[0].content, /gh pr create/);
+	assert.doesNotMatch(r.entries[0].content, /thatsit-app\.ts/, "the app skill's commands are not for this repo");
+});

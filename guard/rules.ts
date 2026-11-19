@@ -1016,6 +1016,38 @@ export function appsNeedingPr(messages: Msg[], home: string, needsPr: (dir: stri
 	return [...lastEdit].filter(([, i]) => i > lastPush).map(([dir]) => dir).filter(needsPr);
 }
 
+/** The same for any other git repo under ~/workspace: edited or written this run, with no `git push` or `gh pr create`
+ *  naming it (by path or cwd) after the last edit, and work still to publish. `repoRoot` maps a path to its repo. */
+export function reposNeedingPr(messages: Msg[], cwd: string, home: string, repoRoot: (path: string) => string | undefined, needsPr: (dir: string) => boolean): string[] {
+	let start = messages.length;
+	while (start > 0 && messages[start - 1].role !== "user") start--;
+	const lastEdit = new Map<string, number>();
+	const lastPush = new Map<string, number>();
+	messages.slice(start).forEach((m, i) => {
+		if (m.role !== "assistant") return;
+		for (const c of parts(m) as Call[]) {
+			if (c.type !== "toolCall") continue;
+			if ((c.name === "edit" || c.name === "write") && typeof c.arguments?.path === "string") {
+				const at = workspacePath(c.arguments.path, cwd, home);
+				const dir = at ? repoRoot(at) : undefined;
+				if (dir) lastEdit.set(dir, i);
+			}
+			const command = String(c.arguments?.command ?? "");
+			if ((c.name === "bash" || c.name === "bg_bash") && PUBLISHES.test(command)) {
+				const at = workspacePath(command, cwd, home);
+				const dir = at ? repoRoot(at) : undefined;
+				if (dir) lastPush.set(dir, i);
+			}
+		}
+	});
+	return [...lastEdit].filter(([dir, i]) => i > (lastPush.get(dir) ?? -1)).map(([dir]) => dir).filter(needsPr);
+}
+
+export function repoPrNudge(repos: string[]): string {
+	const name = (d: string) => d.split("/").pop();
+	return `You changed ${repos.map(name).join(" and ")} but did not push it or open its pull request. Do it yourself now; never hand Michael commands to run. If you are on the trunk (main or master), first create a branch (git switch -c <short-name>). Commit, call the reviewer (the guard scopes it to the repo; the push is blocked until a review finished), then push and open the PR in the repo:\ngit push -u origin <branch>\ngh pr create --title "<short title>" --body "<what and why>"\nThen tell Michael the PR link and end your turn. Michael merges the PR; never merge or close it yourself, and don't suggest a merge command. If Michael said not to open a PR, say so in one line instead.`;
+}
+
 export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	if (!apps.length) return false;
 	let start = messages.length;

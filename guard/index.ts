@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath } from "./rules.ts";
+import { appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -51,7 +51,7 @@ export function needsPr(dir: string): boolean {
 	const head = lines.find((l) => l.startsWith("# branch.head "))?.slice(14);
 	const ahead = Number(/^# branch\.ab \+(\d+)/m.exec(out)?.[1] ?? 0);
 	if (ahead > 0) return true;
-	return head !== "main" && !lines.some((l) => l.startsWith("# branch.upstream "));
+	return head !== mainBranch(dir) && !lines.some((l) => l.startsWith("# branch.upstream "));
 }
 
 export type PrState = (dir: string, branch: string) => "MERGED" | undefined;
@@ -527,7 +527,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		const open = openTodos(ctx.sessionManager?.getBranch() ?? []);
 		if (shouldNudgeTodos(messages, open)) return { entries: [{ type: "custom_message", customType: TODO_NUDGE_TYPE, content: todoNudge(open), display: true }], continue: true };
 		const apps = appsNeedingPr(messages, home, gitNeedsPr);
-		if (!shouldNudgePr(messages, apps)) return undefined;
-		return { entries: [{ type: "custom_message", customType: PR_NUDGE_TYPE, content: prNudge(apps), display: true }], continue: true };
+		const repos = reposNeedingPr(messages, ctx.cwd, home, (p) => repoRoot(p, home), gitNeedsPr);
+		if (!shouldNudgePr(messages, [...apps, ...repos])) return undefined;
+		const content = [...(apps.length ? [prNudge(apps)] : []), ...(repos.length ? [repoPrNudge(repos)] : [])].join("\n\n");
+		return { entries: [{ type: "custom_message", customType: PR_NUDGE_TYPE, content, display: true }], continue: true };
 	});
 }

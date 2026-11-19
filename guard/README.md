@@ -51,6 +51,10 @@ was already blocked (see above); this is its text form. Why: in the website sess
 "Run this to ship the repo state: `gh pr merge 2 --merge`". The rule lived in the thatsit-app skill, which that
 non-app repo never loaded, so it is also now in `~/.pi/agent/AGENTS.md` for every repo.
 
+The same nudge covers any other git repo under `~/workspace`, keyed by the repo's git root: edited this run, no
+`git push` or `gh pr create` naming it (by path or cwd) after the last edit, and work left to publish against its
+`main` or `master`. Its text says to branch, commit, call the reviewer, then push and `gh pr create` itself.
+
 ## Checkout left on a merged branch
 
 The first tool call of a session that works in an app (a shell command or edit path naming `~/workspace/apps/<name>`,
