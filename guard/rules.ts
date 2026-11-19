@@ -28,6 +28,8 @@ export const REASONS = {
 	orchestrator:
 		"Blocked: you are the orchestrator of the agent pair; you never edit, write or delete app code yourself. Your files are the plan, the ledger and the briefs. A failing verify, e2e or review finding goes back to a worker: resume the worker (`subagent` with `action: \"resume\"` and the failing output) or dispatch a fresh one with a brief that names the failure. Commits and `npm run verify` in the main checkout are yours; the pull request is Michael's to merge.",
 	merge: "Blocked: never merge or close a pull request; Michael merges. Green CI means your work is done: reply with the PR link and the preview link, say CI is green, and end your turn. Don't suggest a merge command either.",
+	ciRepo:
+		"Blocked: don't wait for or poll CI yourself (no sleep, gh run list, gh pr checks without --watch). Wait once, in the background: run `gh pr checks <number> --watch --fail-fast` (or `gh run watch <run-id> --exit-status`) with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes. On a failure read `gh run view <run-id> --log-failed`, fix, commit, push, and watch again with bg_bash.",
 	reviewRepo:
 		'Blocked: run the reviewer before opening the PR or pushing this branch. A git repo under ~/workspace gets the same review gate as an app: call the `subagent` tool (call `subagents_enable` first if it is not available) with agent "reviewer", `cwd` set to the repo, and a task that names Michael\'s request. The guard writes the diff against main and the review scope itself; don\'t write a diff. If the repo has `npm run verify`, run it green first. A review that ended without a `## Review` block or `No issues found.` doesn\'t count: call the reviewer again. Fix what you confirm, commit, list the findings you fixed and rejected in the PR body, then rerun this command.',
 };
@@ -95,15 +97,22 @@ export function pairSettings(settings: unknown): boolean {
 	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
 }
 
-/** The file is app code: inside an app (or one of its worktrees) and not docs, Markdown, CI config or the plan workspace. */
+/** The file is code the pair's workers own: inside an app (or one of its worktrees), or any other path under ~/workspace,
+ *  and not docs, Markdown, CI config or the plan workspace. */
 export function appCodePath(raw: string, cwd: string, home: string): boolean {
 	const expanded = raw.replace(/^(~|\$HOME|\$\{HOME\})(?=\/)/, home);
 	const path = isAbsolute(expanded) ? expanded : join(cwd, expanded);
 	const apps = join(home, "workspace", "apps");
-	if (!path.startsWith(`${apps}/`)) return false;
-	let rel = path.slice(apps.length + 1);
-	rel = rel.startsWith("worktrees/") ? rel.split("/").slice(3).join("/") : rel.split("/").slice(1).join("/");
-	return rel !== "" && !/^(?:docs|\.superpowers|\.github)\//.test(rel) && !/\.md$/i.test(rel);
+	if (path.startsWith(`${apps}/`)) {
+		let rel = path.slice(apps.length + 1);
+		rel = rel.startsWith("worktrees/") ? rel.split("/").slice(3).join("/") : rel.split("/").slice(1).join("/");
+		return rel !== "" && !/^(?:docs|\.superpowers|\.github)\//.test(rel) && !/\.md$/i.test(rel);
+	}
+	// Outside apps the repo root is not known here, so the exclusions apply at any depth.
+	const ws = join(home, "workspace");
+	if (!path.startsWith(`${ws}/`)) return false;
+	const rel = path.slice(ws.length + 1);
+	return rel !== "" && !/(?:^|\/)(?:docs|\.superpowers|\.github)\//.test(rel) && !/\.md$/i.test(rel);
 }
 
 const WRITES = /(?:^|[\s|])(?:sed\s+(?:-\S+\s+)*-[A-Za-z]*i|perl\s+(?:-\S+\s+)*-[A-Za-z]*i|tee|rm|mv|cp|truncate|git\s+apply|git\s+checkout\s+\S+\s+--|git\s+restore|npm\s+(?:i|install|uninstall|rm)|pnpm\s+(?:add|remove|i|install)|yarn\s+(?:add|remove))(?![\w-])|(?<![0-9&])>{1,2}(?!&)/;
@@ -157,8 +166,10 @@ export type Env = {
 	/** Why the review gate is shut for the app, when `reviewed` is false (reviewGap). Absent: the plain reason. */
 	reviewGap?: (dir: string) => string | undefined;
 	/** The git root of a path under ~/workspace outside apps (a worktree is its own root), undefined when there is none.
-	 *  Absent: pushes and PRs from repos outside apps are not gated. */
+	 *  Absent: repos outside apps get none of the repo rules. */
 	repoRoot?: (path: string) => string | undefined;
+	/** The tool the command came through: waiting on CI is allowed only through `bg_bash`. */
+	tool?: string;
 	/** Line count of an existing file, undefined when there is none. Absent: overwrites are not checked. */
 	lines?: (path: string) => number | undefined;
 	/** Paths whose overwrite was already blocked once; the second try goes through. */
@@ -302,18 +313,27 @@ export function discards(command: string): boolean {
 export function checkShell(command: string, env: Env): Block | undefined {
 	// Merging needs no app path in the command (`gh pr merge 28 --repo thats-it-dev/keeb` names only the repo).
 	if (merges(command)) return { block: true, reason: REASONS.merge };
-	const dir = appDir(command, env.cwd, env.home);
-	if (!dir) return checkRepoShell(command, env);
-	if (PUSHES.test(command)) return { block: true, reason: REASONS.push };
-	if (INSTALLS.test(command) && workDir(command, env.cwd, env.home).startsWith(`${join(env.home, "workspace", "apps", "worktrees")}/`)) return { block: true, reason: REASONS.worktreeInstall };
+	// An app, else any other git repo under ~/workspace: the app skill's rules apply to the first, the rest to both.
+	const app = appDir(command, env.cwd, env.home);
+	const repo = app ? undefined : repoOf(command, env);
+	const dir = app ?? repo;
+	if (!dir) return undefined;
+	if (app && PUSHES.test(command)) return { block: true, reason: REASONS.push };
+	if (app && INSTALLS.test(command) && workDir(command, env.cwd, env.home).startsWith(`${join(env.home, "workspace", "apps", "worktrees")}/`)) return { block: true, reason: REASONS.worktreeInstall };
 	if (env.orchestrator && writesAppCode(command, env.cwd, env.home)) return { block: true, reason: REASONS.orchestrator };
-	if (/\bgh\s+(?:run\s+(?:list|watch)|pr\s+checks)\b/.test(command)) return { block: true, reason: REASONS.ci };
-	if (/\bgh\s+run\s+view\b/.test(command) && !/--log-failed\b/.test(command)) return { block: true, reason: REASONS.ci };
+	// CI: an app waits through the skill's pr-wait; any other repo watches once through bg_bash.
+	const ci = app ? REASONS.ci : REASONS.ciRepo;
+	if (app && /\bgh\s+(?:run\s+(?:list|watch)|pr\s+checks)\b/.test(command)) return { block: true, reason: ci };
+	if (repo && (/\bgh\s+run\s+list\b/.test(command) || (/\bgh\s+pr\s+checks\b/.test(command) && !/--watch\b/.test(command)))) return { block: true, reason: ci };
+	if (repo && /\bgh\s+(?:pr\s+checks\b[^;&|\n]*--watch|run\s+watch)\b/.test(command) && env.tool !== "bg_bash") return { block: true, reason: ci };
+	if (/\bgh\s+run\s+view\b/.test(command) && !/--log-failed\b/.test(command)) return { block: true, reason: ci };
 	// A short sleep (a server starting, a deploy propagating) is fine; CI polling used minutes.
 	const sleep = /\bsleep\s+(\d+)/.exec(command);
-	if (sleep && Number(sleep[1]) >= 60) return { block: true, reason: REASONS.ci };
-	if (/\bpython3?\b/.test(command) && pythonRewrite(command) && appDir("", workDir(command, env.cwd, env.home), env.home)) {
-		return { block: true, reason: REASONS.rewrite };
+	if (sleep && Number(sleep[1]) >= 60) return { block: true, reason: ci };
+	// A rewrite that runs inside the app or repo; a scratch script in /tmp that only mentions the path is fine.
+	if (/\bpython3?\b/.test(command) && pythonRewrite(command)) {
+		const runsIn = workDir(command, env.cwd, env.home);
+		if (appDir("", runsIn, env.home) || repoOf("", { ...env, cwd: runsIn })) return { block: true, reason: REASONS.rewrite };
 	}
 	if (RUNS_E2E.test(command) && env.busy) {
 		const worker = env.busy(dir);
@@ -323,29 +343,29 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
 	// A first version always has a screen; a PR needs the look only when it changes UI files.
 	if (env.screenSeen && (SHIPS.test(command) || (OPENS_PR.test(command) && (env.uiChanged?.(dir) ?? true))) && !env.screenSeen(dir)) return { block: true, reason: REASONS.screen };
-	if (OPENS_PR.test(command) && env.reviewed && !env.reviewed(dir) && ((env.codeChanged?.(dir) ?? true) || (env.docsChanged?.(dir) ?? false))) {
+	// The review gate, at each kind's publish point: the skill's pr for an app, a push or gh pr create for any other repo.
+	const publishes = app ? OPENS_PR.test(command) : PUBLISHES.test(command);
+	if (publishes && env.reviewed && !env.reviewed(dir) && ((env.codeChanged?.(dir) ?? true) || (env.docsChanged?.(dir) ?? false))) {
 		const gap = env.reviewGap?.(dir);
-		return { block: true, reason: gap ? `${REASONS.review}\n${gap}` : REASONS.review };
+		const reason = app ? REASONS.review : REASONS.reviewRepo;
+		return { block: true, reason: gap ? `${reason}\n${gap}` : reason };
 	}
 	return undefined;
 }
 
+/** The git root of the workspace repo (outside apps) a command works in, by a path it names or the cwd. */
+function repoOf(command: string, env: Env): string | undefined {
+	if (!env.repoRoot) return undefined;
+	const at = workspacePath(command, env.cwd, env.home);
+	return at ? env.repoRoot(at) : undefined;
+}
+
 const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 const PUSHES = /\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/;
-const PUBLISHES = new RegExp(`${PUSHES.source}|\\bgh\\s+pr\\s+create\\b`);
-
 // Any other git repo under ~/workspace gets an app's review gate at its own publish point, a push or `gh pr create`,
 // without the skill's scripts. Why: the website session of 2026-11-19 pushed a 77-file branch and opened its PR with
 // no review at all, because ~/workspace/ref/website is not an app.
-function checkRepoShell(command: string, env: Env): Block | undefined {
-	if (!PUBLISHES.test(command) || !env.reviewed || !env.repoRoot) return undefined;
-	const at = workspacePath(command, env.cwd, env.home);
-	const repo = at ? env.repoRoot(at) : undefined;
-	if (!repo || env.reviewed(repo)) return undefined;
-	if (!((env.codeChanged?.(repo) ?? true) || (env.docsChanged?.(repo) ?? false))) return undefined;
-	const gap = env.reviewGap?.(repo);
-	return { block: true, reason: gap ? `${REASONS.reviewRepo}\n${gap}` : REASONS.reviewRepo };
-}
+const PUBLISHES = new RegExp(`${PUSHES.source}|\\bgh\\s+pr\\s+create\\b`);
 
 /** Files a PR can change without a code review: docs, Markdown and CI config. */
 export function reviewFree(path: string): boolean {
@@ -842,7 +862,7 @@ export function checkToolCall(toolName: string, input: Record<string, unknown>, 
 		const v = checkShell(command, env);
 		if (v) return v;
 	}
-	if (python.some((code) => pythonRewrite(code) && appDir(code, env.cwd, env.home))) return { block: true, reason: REASONS.rewrite };
+	if (python.some((code) => pythonRewrite(code) && (appDir(code, env.cwd, env.home) || workspacePath(code, env.cwd, env.home)))) return { block: true, reason: REASONS.rewrite };
 	if (env.orchestrator && (toolName === "edit" || toolName === "write") && typeof input.path === "string" && appCodePath(input.path, env.cwd, env.home)) {
 		return { block: true, reason: REASONS.orchestrator };
 	}
@@ -857,7 +877,7 @@ function checkOverwrite(raw: string, env: Env): Block | undefined {
 	if (!env.lines || !env.rewrites) return undefined;
 	const expanded = raw.replace(/^~(?=\/)/, env.home);
 	const path = isAbsolute(expanded) ? expanded : join(env.cwd, expanded);
-	if (!path.startsWith(`${join(env.home, "workspace", "apps")}/`)) return undefined;
+	if (!path.startsWith(`${join(env.home, "workspace")}/`)) return undefined;
 	if ((env.lines(path) ?? 0) <= OVERWRITE_LINES || env.rewrites.has(path)) return undefined;
 	env.rewrites.add(path);
 	return { block: true, reason: REASONS.overwrite };

@@ -72,7 +72,7 @@ function ghPrState(dir: string, branch: string): "MERGED" | undefined {
 export function mergedBranch(dir: string, prState: PrState = ghPrState): string | undefined {
 	try {
 		const branch = execFileSync("git", ["branch", "--show-current"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim();
-		if (!branch || branch === "main") return undefined;
+		if (!branch || branch === mainBranch(dir)) return undefined;
 		if (execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim() !== "") return undefined;
 		return prState(dir, branch) === "MERGED" ? branch : undefined;
 	} catch {
@@ -80,10 +80,11 @@ export function mergedBranch(dir: string, prState: PrState = ghPrState): string 
 	}
 }
 
-/** Switch a clean checkout to main and fast-forward it; the short head afterwards, or undefined when the switch failed. */
+/** Switch a clean checkout to its trunk (main or master) and fast-forward it; the short head afterwards, or undefined
+ *  when the switch failed (a worktree whose trunk is checked out elsewhere, for one). */
 export function switchToMain(dir: string): string | undefined {
 	try {
-		git(dir, ["switch", "main"]);
+		git(dir, ["switch", mainBranch(dir)]);
 	} catch {
 		return undefined;
 	}
@@ -99,15 +100,22 @@ export function switchToMain(dir: string): string | undefined {
 	}
 }
 
-export const switchedNote = (dir: string, branch: string, head: string) => `[pi-guard] ${dir} was still on branch ${branch}, whose PR is merged; switched it to main (${head}) before this call. New work starts on a new branch from main (git switch -c <short-name>).`;
+export const switchedNote = (dir: string, branch: string, head: string, trunk = "main") => `[pi-guard] ${dir} was still on branch ${branch}, whose PR is merged; switched it to ${trunk} (${head}) before this call. New work starts on a new branch from ${trunk} (git switch -c <short-name>).`;
 
-// The app a tool call works in, for the merged-branch check: a shell command's path, an edit's path, a worker's brief.
-function callApp(toolName: string, input: Record<string, unknown>, cwd: string, home: string): string | undefined {
-	if (toolName === "edit" || toolName === "write") return typeof input.path === "string" ? appDir(input.path, "", home) : undefined;
-	if (toolName === "subagent") return appDir(String(input.task ?? input.message ?? ""), "", home);
+// The app, or other workspace repo, a tool call works in, for the merged-branch check: a shell command's path, an
+// edit's path, a worker's brief.
+function callScope(toolName: string, input: Record<string, unknown>, cwd: string, home: string): string | undefined {
+	const scope = (text: string, at: string) => {
+		const app = appDir(text, at, home);
+		if (app) return app;
+		const named = workspacePath(text, at, home);
+		return named ? repoRoot(named, home) : undefined;
+	};
+	if (toolName === "edit" || toolName === "write") return typeof input.path === "string" ? scope(input.path, "") : undefined;
+	if (toolName === "subagent") return scope(String(input.task ?? input.message ?? ""), "");
 	const { shell } = codeOf(toolName, input);
 	for (const command of shell) {
-		const dir = appDir(command, cwd, home);
+		const dir = scope(command, cwd);
 		if (dir) return dir;
 	}
 	return undefined;
@@ -300,7 +308,11 @@ export function defaultResident(): string[] {
 }
 
 export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident): Block | { dir: string; snap: string; async: boolean } | undefined {
-	if (indirectReviewer(input) && reviewApp(JSON.stringify(input), cwd, home)) return { block: true, reason: REASONS.reviewWorkflow };
+	if (indirectReviewer(input)) {
+		const json = JSON.stringify(input);
+		const named = workspacePath(json, cwd, home);
+		if (reviewApp(json, cwd, home) || (named && repoRoot(named, home))) return { block: true, reason: REASONS.reviewWorkflow };
+	}
 	if (input.agent !== "reviewer") return undefined;
 	const task = String(input.task ?? "");
 	// The call's own cwd names the app as well as the task does: on keeb 2026-11-16 the orchestrator passed
@@ -393,12 +405,12 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
 		// The first call into an app this session: a clean checkout on a merged branch goes back to main before the
 		// call runs, so neither the worker's edits nor the orchestrator's commit land on top of the merge.
-		const app = child ? undefined : callApp(event.toolName, event.input ?? {}, ctx.cwd, home);
+		const app = child ? undefined : callScope(event.toolName, event.input ?? {}, ctx.cwd, home);
 		if (app && !freshened.has(app)) {
 			freshened.add(app);
 			const stale = mergedBranch(app, prState);
 			const head = stale ? switchToMain(app) : undefined;
-			if (stale && head) switched.set(event.toolCallId, switchedNote(app, stale, head));
+			if (stale && head) switched.set(event.toolCallId, switchedNote(app, stale, head, mainBranch(app)));
 		}
 		const block = checkToolCall(event.toolName, event.input ?? {}, {
 			cwd: ctx.cwd,
@@ -413,6 +425,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			docsChanged,
 			reviewGap: (dir) => reviewGap(branch(), dir),
 			repoRoot: (path) => repoRoot(path, home),
+			tool: event.toolName,
 			lines,
 			rewrites,
 			orchestrator,

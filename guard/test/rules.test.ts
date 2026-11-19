@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge } from "../rules.ts";
+import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -532,7 +532,9 @@ test("the orchestrator of the agent pair never edits app code itself; docs, plan
 	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/apps/keeb/docs/superpowers/plans/2026-11-12-x.md", edits: [] }, o), undefined);
 	assert.equal(checkToolCall("write", { path: "/home/m/workspace/apps/keeb/.superpowers/sdd/x/task-1-brief.md", content: "" }, o), undefined);
 	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/apps/keeb/README.md", edits: [] }, o), undefined);
-	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/pi-web/guard/rules.ts", edits: [] }, o), undefined);
+	// Any other repo under ~/workspace is the workers' too (2026-11-18); outside workspace nothing applies.
+	assert.equal(checkToolCall("edit", { path: "/home/m/workspace/pi-web/guard/rules.ts", edits: [] }, o)?.reason, REASONS.orchestrator);
+	assert.equal(checkToolCall("edit", { path: "/home/m/elsewhere/rules.ts", edits: [] }, o), undefined);
 	// Shell writes to app code count too; running, merging and committing do not.
 	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`, o), REASONS.orchestrator);
 	assert.equal(bash("rm /home/m/workspace/apps/keeb/src/ui/card.ts", o), REASONS.orchestrator);
@@ -1123,4 +1125,36 @@ test("reposNeedingPr: a workspace repo edited this run with no push or gh pr cre
 	assert.match(repoPrNudge([root]), /website-next/);
 	assert.match(repoPrNudge([root]), /gh pr create/);
 	assert.match(repoPrNudge([root]), /never merge or close it yourself/);
+});
+
+test("in a workspace repo outside apps: CI is watched once through bg_bash, python rewrites and discards are blocked, e2e runs one spec", () => {
+	const repo = "/home/m/workspace/ref/website";
+	const base = { ...env(), repoRoot: (p: string) => (p.startsWith(repo) ? repo : undefined) };
+	const at = (c: string) => `cd ${repo} && ${c}`;
+	assert.equal(checkShell(at("sleep 75 && gh pr checks 2"), base)?.reason, REASONS.ciRepo, "the website session's poll");
+	assert.equal(checkShell(at("gh run list --limit 3"), base)?.reason, REASONS.ciRepo);
+	assert.equal(checkShell(at("gh run view 44447989416"), base)?.reason, REASONS.ciRepo);
+	assert.equal(checkShell(at("gh run view 44447989416 --log-failed"), base), undefined, "reading the failing log is fine");
+	assert.equal(checkShell(at("gh pr checks 2 --watch --fail-fast"), { ...base, tool: "bash" })?.reason, REASONS.ciRepo, "watching belongs to bg_bash");
+	assert.equal(checkShell(at("gh pr checks 2 --watch --fail-fast"), { ...base, tool: "bg_bash" }), undefined);
+	assert.equal(checkShell(at("gh run watch 1 --exit-status"), { ...base, tool: "bg_bash" }), undefined);
+	assert.equal(checkShell(at("gh run watch 1 --exit-status"), { ...base, tool: "bash" })?.reason, REASONS.ciRepo);
+	assert.equal(checkShell(at("python3 - <<'PY'\np='src/a.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nPY"), base)?.reason, REASONS.rewrite);
+	assert.equal(checkShell(at("git checkout -- src/a.ts"), base)?.reason, REASONS.discard);
+	assert.equal(checkShell(at("git checkout -- src/a.ts"), { ...base, dirty: () => false }), undefined);
+	assert.equal(checkShell(at("npm run e2e"), base)?.reason, REASONS.e2e);
+	assert.equal(checkShell(at("npm run e2e"), { ...base, hasScript: () => false }), undefined, "no e2e:one script, no rule");
+	assert.equal(checkShell(at("git push"), { ...base, reviewed: () => true }), undefined, "a reviewed push is not a CI wait");
+	assert.equal(checkShell("cd /home/m/elsewhere && sleep 75 && gh pr checks 2", base), undefined, "outside workspace nothing applies");
+});
+
+test("the pair's code-path rule and the long-overwrite rule reach any path under ~/workspace", () => {
+	assert.equal(appCodePath("/home/m/workspace/ref/website/src/render.ts", "/home/m", "/home/m"), true);
+	assert.equal(appCodePath("/home/m/workspace/ref/website/docs/superpowers/plans/p.md", "/home/m", "/home/m"), false);
+	assert.equal(appCodePath("/home/m/workspace/ref/website/.github/workflows/deploy.yml", "/home/m", "/home/m"), false);
+	assert.equal(appCodePath("/home/m/workspace/ref/website/README.md", "/home/m", "/home/m"), false);
+	assert.equal(appCodePath("/home/m/elsewhere/src/a.ts", "/home/m", "/home/m"), false);
+	const lines = (p: string) => (p.endsWith("big.ts") ? 200 : undefined);
+	assert.deepEqual(checkToolCall("write", { path: "/home/m/workspace/ref/website/src/big.ts", content: "x" }, env({ lines, rewrites: new Set() })), { block: true, reason: REASONS.overwrite });
+	assert.equal(checkToolCall("write", { path: "/home/m/elsewhere/big.ts", content: "x" }, env({ lines, rewrites: new Set() })), undefined);
 });

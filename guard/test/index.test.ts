@@ -653,3 +653,14 @@ test("through pi: a run that edited a workspace repo outside apps and left it un
 	assert.match(r.entries[0].content, /gh pr create/);
 	assert.doesNotMatch(r.entries[0].content, /thatsit-app\.ts/, "the app skill's commands are not for this repo");
 });
+
+test("the first call into a workspace repo outside apps whose checkout sits on a merged branch switches it to its trunk", () => {
+	const { home, dir } = wsRepo("master");
+	const handlers: Record<string, (event: any, ctx: any) => any> = {};
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, () => false, { HOME: home }, undefined, () => "MERGED");
+	const ctx = { cwd: "/", sessionManager: { getBranch: () => [] } };
+	assert.equal(handlers.tool_call({ toolName: "bash", toolCallId: "c1", input: { command: `cd ${dir} && git status --short` } }, ctx), undefined);
+	assert.equal(execFileSync("git", ["branch", "--show-current"], { cwd: dir, encoding: "utf8" }).trim(), "master");
+	const r = handlers.tool_result({ toolName: "bash", toolCallId: "c1", content: [{ type: "text", text: "" }] }, ctx);
+	assert.match(r.content.at(-1).text, /was still on branch next, whose PR is merged; switched it to master/);
+});

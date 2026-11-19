@@ -6,7 +6,12 @@ in `rules.ts` as pure functions; `index.ts` wires them to pi's `tool_call` and `
 
 ## Blocked tool calls
 
-Only for commands that work in `~/workspace/apps/<name>` (a path in the command, or the session cwd).
+For commands that work in `~/workspace/apps/<name>` (a path in the command, or the session cwd), and since 2026-11-18
+for any other git repo under `~/workspace` (its git root; a worktree is its own). The app skill's rules, `push`,
+`worktree-install`, the screen gate and the `pr` gate, stay apps-only; `merge`, `rewrite`, `discard`, `e2e`, the
+long-overwrite rule and the pair's code-path rule apply to both; `ci` has a repo form (`ciRepo`: watch once through
+`bg_bash` with `gh pr checks --watch` or `gh run watch`), and the review gate sits on `git push` / `gh pr create` there.
+The merged-branch switch and the PR nudge cover both as well, against the repo's `main` or `master`.
 Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 
 | Rule | Blocks | Use instead |
