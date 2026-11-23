@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { ListMessage } from "../../shared/src/protocol.ts";
+import type { ListMessage, SessionType } from "../../shared/src/protocol.ts";
 import { HttpError } from "../src/errors.ts";
 import { BUSY_NOTICE, ELSEWHERE_NOTICE, FREE_NOTICE, Registry, type RegistryOptions } from "../src/registry.ts";
 import { FakeHandle } from "./support/fake-handle.ts";
@@ -15,6 +15,8 @@ function setup(opts: Partial<RegistryOptions> = {}) {
 	const starts: Array<Parameters<RegistryOptions["factory"]["startRpc"]>[0]> = [];
 	let n = 0;
 	let clock = 0;
+	const typeMap = new Map<string, SessionType>();
+	const types = { get: (id: string): SessionType => typeMap.get(id) ?? "code", set: (id: string, t: SessionType) => void typeMap.set(id, t) };
 	const changes: ListMessage[] = [];
 	const registry = new Registry({
 		factory: {
@@ -31,10 +33,11 @@ function setup(opts: Partial<RegistryOptions> = {}) {
 		maxHeadless: 6,
 		idleMs: 1000,
 		now: () => clock,
+		types,
 		...opts,
 	});
 	registry.onChange((m) => changes.push(m));
-	return { registry, started, starts, changes, setClock: (t: number) => (clock = t) };
+	return { registry, started, starts, changes, typeMap, setClock: (t: number) => (clock = t) };
 }
 
 test("concurrent ensure() starts one process per session", async () => {
@@ -51,7 +54,7 @@ test("create() passes the model choice to the factory; reopening a session passe
 	const choice = { provider: "fake", modelId: "fake-b", thinking: "high" as const };
 	await registry.create("/w", choice);
 	await registry.ensure("disk-1");
-	assert.deepEqual(starts[0], { cwd: "/w", model: choice });
+	assert.deepEqual(starts[0], { cwd: "/w", model: choice, type: "code" });
 	assert.equal(starts[1].model, undefined);
 });
 
@@ -380,4 +383,43 @@ test("a terminal attaching to an idle headless pi with background jobs waits; it
 	rpc.fire({ type: "state_changed" });
 	assert.deepEqual(b.notices, [BUSY_NOTICE, FREE_NOTICE]);
 	assert.equal(rpc.closed, false);
+});
+
+test("create records chat in the store and passes the type to the factory; code records nothing", async () => {
+	const { registry, starts, typeMap } = setup();
+	const h = await registry.create("/w", null, "chat");
+	assert.equal(starts[0].type, "chat");
+	assert.equal(typeMap.get(h.sessionId), "chat");
+	typeMap.clear();
+	await registry.create("/w");
+	assert.equal(starts[1].type, "code");
+	assert.equal(typeMap.size, 0);
+});
+
+test("ensure resumes with the stored type", async () => {
+	const { registry, starts, typeMap } = setup();
+	typeMap.set("disk-1", "chat");
+	await registry.ensure("disk-1");
+	await registry.ensure("disk-2");
+	assert.equal(starts[0].type, "chat");
+	assert.equal(starts[1].type, "code");
+});
+
+test("session_changed carries the parent's type to the new id", async () => {
+	const { registry } = setup();
+	const h = (await registry.create("/w", null, "chat")) as FakeHandle;
+	const from = h.sessionId;
+	h.fire({ type: "session_changed", from, to: "moved-1" });
+	assert.equal(registry.typeOf("moved-1"), "chat");
+	const c = (await registry.create("/w")) as FakeHandle;
+	c.fire({ type: "session_changed", from: c.sessionId, to: "moved-2" });
+	assert.equal(registry.typeOf("moved-2"), "code");
+});
+
+test("typeOf falls back to the parent session's type", async () => {
+	const { registry, typeMap } = setup();
+	typeMap.set("p", "chat");
+	assert.equal(registry.typeOf("child", "p"), "chat");
+	assert.equal(registry.typeOf("other", null), "code");
+	assert.equal(registry.typeOf("other"), "code");
 });

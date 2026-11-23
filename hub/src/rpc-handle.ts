@@ -21,6 +21,7 @@ import type {
 	ModelInfo,
 	PiEvent,
 	SessionStateInfo,
+	SessionType,
 	SessionStats,
 	Snapshot,
 	StreamMessage,
@@ -60,6 +61,7 @@ export interface RpcHandleOptions {
 	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
 	uploadsDir?: string; // the hub's uploads root; this session's attached files are under <uploadsDir>/<sessionId>
 	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
+	type?: SessionType; // "chat" or "code" (default); consumed by the chat-mode wiring
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
 

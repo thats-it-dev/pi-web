@@ -3,17 +3,18 @@
 // maxHeadless running, closes idle ones, and decides between a headless pi
 // and a terminal pi that want the same session (spec §3.2).
 
-import type { HandleKind, ListMessage, LiveState } from "../../shared/src/protocol.ts";
+import type { HandleKind, ListMessage, LiveState, SessionType } from "../../shared/src/protocol.ts";
 import { HttpError } from "./errors.ts";
 import type { SessionHandle } from "./handle.ts";
 import type { ModelChoice } from "./last-model.ts";
+import type { SessionTypeStore } from "./session-types.ts";
 
 export const BUSY_NOTICE = "This session is running in pi-web. Wait for it to finish, or /quit.";
 export const ELSEWHERE_NOTICE = "This session is open in another terminal; pi-web follows that one.";
 export const FREE_NOTICE = "This session is free now. /resume it to continue here with the latest messages.";
 
 export interface HandleFactory {
-	startRpc(opts: { cwd: string; sessionFile?: string; model?: ModelChoice | null }): Promise<SessionHandle>;
+	startRpc(opts: { cwd: string; sessionFile?: string; model?: ModelChoice | null; type: SessionType }): Promise<SessionHandle>;
 }
 
 export interface SessionLookup {
@@ -26,6 +27,7 @@ export interface RegistryOptions {
 	maxHeadless: number;
 	idleMs: number;
 	now?: () => number;
+	types?: Pick<SessionTypeStore, "get" | "set">; // main.ts passes the persistent store; unset, types live in memory
 }
 
 export interface LiveInfo {
@@ -36,6 +38,7 @@ export interface LiveInfo {
 
 export class Registry {
 	private opts: RegistryOptions;
+	private types: Pick<SessionTypeStore, "get" | "set">;
 	private handles = new Map<string, SessionHandle>();
 	private starting = new Map<string, Promise<SessionHandle>>();
 	private pending = 0;
@@ -46,6 +49,11 @@ export class Registry {
 
 	constructor(opts: RegistryOptions) {
 		this.opts = opts;
+		if (opts.types) this.types = opts.types;
+		else {
+			const chats = new Set<string>();
+			this.types = { get: (id) => (chats.has(id) ? "chat" : "code"), set: (id, t) => void (t === "chat" ? chats.add(id) : chats.delete(id)) };
+		}
 	}
 
 	get(id: string): SessionHandle | undefined {
@@ -81,7 +89,7 @@ export class Registry {
 		const p = (async () => {
 			const found = await this.opts.lookup.find(id);
 			if (!found) throw new HttpError(404, "Session not found");
-			return this.launch({ cwd: found.cwd, sessionFile: found.file });
+			return this.launch({ cwd: found.cwd, sessionFile: found.file, type: this.types.get(id) });
 		})();
 		this.starting.set(id, p);
 		try {
@@ -91,8 +99,18 @@ export class Registry {
 		}
 	}
 
-	create(cwd: string, choice?: ModelChoice | null): Promise<SessionHandle> {
-		return this.launch(choice ? { cwd, model: choice } : { cwd });
+	async create(cwd: string, choice?: ModelChoice | null, type: SessionType = "code"): Promise<SessionHandle> {
+		const h = await this.launch(choice ? { cwd, model: choice, type } : { cwd, type });
+		// The session id is only known once pi has started.
+		if (type === "chat") this.types.set(h.sessionId, "chat");
+		return h;
+	}
+
+	// A session's type: the store's record, else its parent's (a child session starts as its parent was), else code.
+	typeOf(id: string, parentSession?: string | null): SessionType {
+		const own = this.types.get(id);
+		if (own === "chat") return own;
+		return parentSession ? this.types.get(parentSession) : "code";
 	}
 
 	close(id: string): void {
@@ -217,6 +235,7 @@ export class Registry {
 						this.claim(h);
 						break;
 					}
+					if (this.types.get(e.from) === "chat") this.types.set(e.to, "chat");
 					if (this.handles.get(e.from) === h) this.handles.delete(e.from);
 					this.handles.set(e.to, h);
 					this.emitState(e.from);
