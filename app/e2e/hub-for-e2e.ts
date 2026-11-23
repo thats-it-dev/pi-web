@@ -159,6 +159,21 @@ writeFileSync(E2E_ENV_FILE, JSON.stringify({ piBin: pi.piBin, agentDir: pi.agent
 // New chats start in ~: make that a throwaway folder, not the real home.
 const home = join(pi.root, "home");
 mkdirSync(home);
+// A chat session (it lives in ~) and the hub's record of it: sessions not in session-types.json are code.
+{
+	const t = "2026-11-08T22:30:00.000Z";
+	writeFileSync(
+		join(seedDir, "chat.jsonl"),
+		[
+			{ type: "session", version: 3, id: "e2e-chat", timestamp: t, cwd: home },
+			{ type: "message", id: "u1", parentId: null, timestamp: t, message: { role: "user", content: [{ type: "text", text: "chatty hello" }], timestamp: 1 } },
+			{ type: "message", id: "a1", parentId: "u1", timestamp: t, message: { role: "assistant", content: [{ type: "text", text: "Hi there" }], timestamp: 2 } },
+		]
+			.map((e) => JSON.stringify(e))
+			.join("\n") + "\n",
+	);
+	writeFileSync(join(dataDir, "session-types.json"), JSON.stringify({ "e2e-chat": "chat" }));
+}
 Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir, HOME: home });
 process.on("exit", () => pi.cleanup());
 await import("../../hub/src/main.ts");
