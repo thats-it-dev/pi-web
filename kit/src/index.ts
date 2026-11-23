@@ -6,7 +6,7 @@ export { TkToasts } from "./tk-toasts.ts";
 export { TkHeader } from "./tk-header.ts";
 export { TkShell } from "./tk-shell.ts";
 export type { AsideSize, Panel, PanelsState } from "./panels.ts";
-export { ASIDE_DEFAULT_W, ASIDE_MIN_W, CHAT_FLOOR, MAIN_STRIP, SIDEBAR_W, asideWidthFor, clampAsideWidth, navFits, readAsideWidth, writeAsideWidth } from "./panels.ts";
+export { ASIDE_DEFAULT_W, ASIDE_MIN_W, CHAT_FLOOR, MAIN_STRIP, SIDEBAR_W } from "./panels.ts";
 export { TkStat } from "./charts/tk-stat.ts";
 export { TkStats } from "./charts/tk-stats.ts";
 export { TkSparkline } from "./charts/tk-sparkline.ts";

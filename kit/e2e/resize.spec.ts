@@ -74,6 +74,33 @@ test.describe("resizable aside", () => {
 		await expect(page.locator(nav)).toHaveClass(/drawer/);
 		await expect.poll(() => width(page, main)).toBeGreaterThanOrEqual(360);
 	});
+
+	test("full needs a docked aside: un-docking drops aside-full and the drawer keeps its own width", async ({ page }) => {
+		await page.setViewportSize({ width: 1000, height: 900 });
+		await page.locator("#dock-toggle").click();
+		await page.locator("#size-full").click();
+		await expect(page.locator(shell)).toHaveAttribute("aside-full", "");
+		await page.locator("#dock-toggle").click();
+		await expect(page.locator(shell)).not.toHaveAttribute("aside-full", "");
+		await page.locator(shell).evaluate((s: any) => s.show("aside"));
+		await expect(page.locator(aside)).toHaveClass(/drawer/);
+		// min(85vw, 360px) at 1000px; the box is a pixel wider for the drawer's border.
+		await expect(page.locator(aside)).toHaveCSS("width", "360px");
+	});
+
+	test("a shell without resizable draws no handle", async ({ page }) => {
+		await expect(page.locator("tk-shell .handle")).toHaveCount(1);
+		await page.locator(shell).evaluate((s) => s.removeAttribute("resizable"));
+		await expect(page.locator("tk-shell .handle")).toHaveCount(0);
+	});
+
+	test("without sizing the shell leaves an app's --aside-w alone", async ({ page }) => {
+		await page.locator(shell).evaluate((s: HTMLElement) => {
+			s.removeAttribute("resizable");
+			s.style.setProperty("--aside-w", "420px");
+		});
+		await expect.poll(() => width(page, aside)).toBe(420);
+	});
 });
 
 test.describe("fullscreen drawer", () => {

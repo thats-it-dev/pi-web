@@ -62,7 +62,7 @@ An empty slot means no panel: no column, no landmark and no header button. Exist
 - Only details, 900px and up: details is a docked column.
 - Only navigation, 900px and up: navigation is a docked column, as before.
 
-Docked columns are `--sidebar-w` (280px) and `--aside-w` (300px) wide. Drawers are at most 85vw or 360px wide.
+Docked columns are `--sidebar-w` (280px) and `--aside-w` (300px) wide. Drawers are at most 85vw or 360px wide. While sizing is engaged (`resizable`, `dock-aside`, or an `aside-size` other than `default`), the shell sets the docked aside's width itself, overriding any `--aside-w` the app sets.
 
 ### Resizing and sizes
 

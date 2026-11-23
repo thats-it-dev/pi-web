@@ -70,9 +70,9 @@ export class TkShell extends LitElement {
 			.layout.aside-closed { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0; }
 			.layout.nav-closed.aside-closed { grid-template-columns: 0 minmax(0, 1fr) 0; }
 			/* full size: the main area shrinks to a fixed strip and the aside takes the rest */
-			.layout.aside-full { grid-template-columns: var(--sidebar-w) var(--main-strip, 48px) var(--aside-w); }
-			.layout.aside-full.nav-closed { grid-template-columns: 0 var(--main-strip, 48px) var(--aside-w); }
-			.layout.aside-full .main { min-width: 0; }
+			/* the aside track takes the rest, so an app's own --main-strip never overflows the layout */
+			.layout.aside-full { grid-template-columns: var(--sidebar-w) var(--main-strip, 48px) minmax(0, 1fr); }
+			.layout.aside-full.nav-closed { grid-template-columns: 0 var(--main-strip, 48px) minmax(0, 1fr); }
 			/* while dragging the column follows the pointer instead of easing after it */
 			.layout.dragging { transition: none; }
 			.sidebar { grid-area: 1 / 1; border-right: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
@@ -286,6 +286,11 @@ export class TkShell extends LitElement {
 		const asideW = asideWidthFor(this.asideSize, { total, navDocked: navDocked && !this.navHidden, stored: this.storedAsideW });
 		const state = panelsState({ mode: this.mode, present: this.present, hidden: this.hiddenFlags, drawer: this.drawer, dockAside: this.dockAside, total, asideW: fitW });
 		return { state, asideW };
+	}
+
+	// Sizing is engaged once an app opts into any of it; otherwise the shell leaves --aside-w to the app's CSS.
+	private get sizing(): boolean {
+		return this.resizable || this.dockAside || this.asideSize !== "default";
 	}
 
 	// The full size is in effect only while the aside is a docked, open column.
@@ -504,8 +509,9 @@ export class TkShell extends LitElement {
 		};
 		const nav = panel("nav");
 		const aside = panel("aside");
-		// Only a docked column takes the computed width; a drawer keeps its own, whatever the size.
-		return html`<div class=${cls.filter(Boolean).join(" ")} style=${asideColumn ? `--aside-w:${asideW}px` : nothing}>
+		// Only a docked column takes the computed width, and only while sizing is engaged; a drawer keeps its own,
+		// and an app that never opts in keeps whatever --aside-w its CSS sets.
+		return html`<div class=${cls.filter(Boolean).join(" ")} style=${asideColumn && this.sizing ? `--aside-w:${asideW}px` : nothing}>
 			<aside class=${nav.cls} aria-label=${this.navLabel} ?hidden=${nav.hidden} ?inert=${nav.inert} tabindex=${nav.tabindex} @click=${this.onSidebarClick}><slot name="nav" @slotchange=${this.onSlot("nav")}></slot></aside>
 			<div class="overlay" @click=${this.closeDrawer}></div>
 			<main class="main" ?inert=${blocked}><slot></slot></main>
