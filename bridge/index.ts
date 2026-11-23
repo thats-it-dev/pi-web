@@ -53,7 +53,7 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 		name: "preview",
 		label: "Preview",
 		description:
-			"Show Michael a live, clickable preview in pi-web's Preview panel (and in his phone's browser). Call it with cwd after the first visual change to an app and before any PR, then tell him to look and end your turn; the page live-reloads as you edit. Call it with dir or file for an HTML mockup or prototype (no arguments returns a scratch folder to write the mockup in). Tailnet only; one preview per session; it stops when the session ends.",
+			"Show Michael a live, clickable preview in pi-web's Preview panel (and in his phone's browser). Call it with cwd after the first visual change to an app and before any PR, then ask Michael to look (one line ending in a question) and end your turn; the page live-reloads as you edit. Call it with dir or file for an HTML mockup or prototype (no arguments returns a scratch folder to write the mockup in). Tailnet only; one preview per session; it stops when the session ends.",
 		parameters: Type.Object({
 			cwd: Type.Optional(Type.String({ description: "A Vite app checkout (has a dev script): start its dev server and show it" })),
 			dir: Type.Optional(Type.String({ description: "A folder of static files (an HTML mockup or prototype): serve it and show it" })),

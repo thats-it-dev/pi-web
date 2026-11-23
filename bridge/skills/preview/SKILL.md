@@ -18,7 +18,7 @@ description: Use when you changed how a web app or page looks, or made an HTML m
 
 1. For an app, call `preview({ cwd })`. For a mockup, call `preview({ dir })` or `preview({ file })`.
    No mockup folder yet? Call `preview({})` first. It returns the scratch folder to write into.
-2. Tell Michael in one line that the preview is open, then end your turn.
+2. Ask Michael to look, in one line ending in a question, and end your turn.
 3. Edits live-reload. Don't call it again for the same app.
 4. Call `preview({ stop: true })` only when he says he is done, or before you switch to another app.
 
@@ -29,6 +29,6 @@ description: Use when you changed how a web app or page looks, or made an HTML m
 
 ## Don't
 
-- Don't screenshot the preview for him. He looks himself.
+- Don't send him pictures of the preview; your own `screenshot` check still runs.
 - Don't open a PR before he has looked, unless he waved it off.
 - Never make up a URL. The tool returns it.
