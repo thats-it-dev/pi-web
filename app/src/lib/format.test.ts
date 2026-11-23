@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "../../../shared/src/protocol.ts";
 import { formatAttachments } from "../../../shared/src/attachments.ts";
-import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatElapsed, formatTokens, groupSessions, parseArgsRaw, relativeTime, sessionTitle, summarizeToolArgs, truncateOutput, wordCount } from "./format.ts";
+import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatElapsed, filterByType, formatTokens, groupSessions, newSessionLabel, parseArgsRaw, relativeTime, sessionTitle, summarizeToolArgs, truncateOutput, wordCount } from "./format.ts";
 
 const s = (over: Partial<SessionSummary>): SessionSummary => ({
 	id: "x", cwd: "/home/m", name: null, firstPrompt: null, userMessages: 1, model: null, contextTokens: null,
@@ -92,5 +92,15 @@ describe("formatElapsed", () => {
 		expect(formatElapsed(45_000)).toBe("45s");
 		expect(formatElapsed(72_000)).toBe("1m 12s");
 		expect(formatElapsed(-5)).toBe("0s");
+	});
+});
+
+describe("session type", () => {
+	it("filterByType treats a missing type as code", () => {
+		expect(filterByType([s({ type: undefined as any }), s({ id: "c", type: "chat" })], "code").map((x) => x.id)).toEqual(["x"]);
+		expect(filterByType([s({ type: undefined as any }), s({ id: "c", type: "chat" })], "chat").map((x) => x.id)).toEqual(["c"]);
+	});
+	it("newSessionLabel", () => {
+		expect([newSessionLabel("code"), newSessionLabel("chat")]).toEqual(["new code session", "new chat"]);
 	});
 });

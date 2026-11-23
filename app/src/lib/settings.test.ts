@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultHubUrl, normalizeHubUrl } from "./settings.ts";
+import { afterEach, vi } from "vitest";
+import { defaultHubUrl, getSessionType, normalizeHubUrl, setSessionType } from "./settings.ts";
 
 describe("normalizeHubUrl", () => {
 	it("adds https and drops paths", () => {
@@ -16,5 +17,18 @@ describe("defaultHubUrl", () => {
 	it("uses the dev server's own origin on localhost only", () => {
 		expect(defaultHubUrl({ hostname: "localhost", origin: "http://localhost:5173" })).toBe("http://localhost:5173");
 		expect(defaultHubUrl({ hostname: "pi.thatsit.app", origin: "https://pi.thatsit.app" })).toBe(null);
+	});
+});
+
+describe("session type setting", () => {
+	afterEach(() => vi.unstubAllGlobals());
+	it("defaults to code and round-trips chat", () => {
+		const m = new Map<string, string>();
+		vi.stubGlobal("localStorage", { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => m.set(k, v), removeItem: (k: string) => m.delete(k) });
+		expect(getSessionType()).toBe("code");
+		setSessionType("chat");
+		expect(getSessionType()).toBe("chat");
+		m.set("pi-web:session-type", "junk");
+		expect(getSessionType()).toBe("code");
 	});
 });

@@ -9,7 +9,7 @@ import { type AsideSize, PHONE_MAX_W, type PreviewMode, TABLET_MAX_W, readTab } 
 import type { ProgressStore } from "../lib/progress-store.ts";
 import { browserPushEnv, resyncPush } from "../lib/push.ts";
 import { type Route, hrefFor, parseRoute } from "../lib/route.ts";
-import { getHubUrl } from "../lib/settings.ts";
+import { getHubUrl, getSessionType } from "../lib/settings.ts";
 import "./pi-aside.ts";
 import "./pi-new-chat.ts";
 import "./pi-session.ts";
@@ -276,7 +276,7 @@ export class PiApp extends LitElement {
 	private launch = () => {
 		const list = this.list;
 		if (this.route.name !== "home" || !list?.loaded) return;
-		const r = launchRoute(list.sessions, Date.now());
+		const r = launchRoute(list.sessions, Date.now(), getSessionType());
 		history.replaceState(null, "", hrefFor(r));
 		this.route = r;
 	};

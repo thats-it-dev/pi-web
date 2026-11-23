@@ -1,7 +1,7 @@
 import type { Goal } from "../../../shared/src/goal.ts";
 import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { SubagentChild } from "../../../shared/src/progress.ts";
-import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
+import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, SessionType, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
 export class HubError extends Error {
 	status: number;
@@ -62,7 +62,7 @@ export class HubApi {
 	defaults() {
 		return this.req<DefaultsInfo>("GET", "/api/defaults");
 	}
-	createSession(o: { cwd: string; model?: { provider: string; modelId: string }; thinking?: ThinkingLevel | null }) {
+	createSession(o: { cwd: string; model?: { provider: string; modelId: string }; thinking?: ThinkingLevel | null; type?: SessionType }) {
 		const { thinking, ...rest } = o;
 		return this.req<{ sessionId: string }>("POST", "/api/sessions", thinking ? { ...rest, thinking } : rest);
 	}
