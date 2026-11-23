@@ -99,11 +99,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); widt
 	</style>
 </head>
 <body>
-	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-demo:panels">
+	<tk-shell nav-label="Demo pages" aside-label="Details" store-key="kit-demo:panels" resizable>
 		<nav slot="nav"><a class="u on" href="">Design system</a><a class="u" href="#start">Start here</a><a class="u" href="#colour">Colour</a><a class="u" href="#type">Type</a><a class="u" href="#shape">Shape & motion</a><a class="u" href="#layout">Layout</a><a class="u" href="#buttons">Buttons</a><a class="u" href="#forms">Forms</a><a class="u" href="#feedback">Feedback</a><a class="u" href="#overlays">Overlays</a><a class="u" href="#lists">Lists & cards</a><a class="u" href="#data">Data</a><a class="u" href="#icons">Icons</a><a class="u" href="#a11y">Accessibility</a><a class="u" href="#rules">Rules</a><a class="u" href="./charts.html">Charts, in full</a></nav>
 		<tk-header menu-label="Open menu" aside-label="Details" aside-badge="3/7"><h1 slot="title">That's it kit</h1><button slot="actions" class="icon-btn" id="theme" aria-label="Switch theme" title="Switch theme"></button></tk-header>
 		<section>
 			<div class="wrap">
+			<div class="hrow" style="padding-top:18px">
+				<span class="label">Shell sizing</span>
+				<button class="btn" id="size-default" onclick="document.querySelector('tk-shell').setAttribute('aside-size','default')">Aside default</button>
+				<button class="btn" id="size-half" onclick="document.querySelector('tk-shell').setAttribute('aside-size','half')">Aside half</button>
+				<button class="btn" id="size-full" onclick="document.querySelector('tk-shell').setAttribute('aside-size','full')">Aside full</button>
+				<button class="btn" id="dock-toggle" onclick="document.querySelector('tk-shell').toggleAttribute('dock-aside')">Dock aside</button>
+				<button class="btn" id="fullscreen-toggle" onclick="document.querySelector('tk-shell').toggleAttribute('aside-fullscreen')">Fullscreen drawer</button>
+			</div>
 
 			<article id="start">
 				<h2>Start here</h2>

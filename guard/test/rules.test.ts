@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1303,3 +1303,78 @@ test("pinResidentModel: a subagent runs on a model llama-swap already has loaded
 	pinResidentModel(none, settings, [], "spark/inkling-2-mini");
 	assert.equal(none.model, undefined);
 });
+
+const previewBranch = (args: Record<string, unknown>, result: Record<string, unknown>) => [
+	{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "preview", arguments: args }] } },
+	{ type: "message", message: { role: "toolResult", toolCallId: "p1", toolName: "preview", ...result } },
+];
+
+test("previewOpened finds a successful preview call for the app and not for another", () => {
+	const branch = previewBranch({ cwd: "~/workspace/apps/fret" }, { isError: false, details: { url: "https://x:10600", kind: "dev" } });
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/fret`, home, home), true);
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/keeb`, home, home), false);
+	assert.equal(previewOpened([], `${home}/workspace/apps/fret`, home, home), false);
+	const rel = previewBranch({ dir: "src" }, { isError: false, details: { url: "u" } });
+	assert.equal(previewOpened(rel, `${home}/workspace/apps/fret`, `${home}/workspace/apps/fret`, home), true, "relative to cwd");
+	const file = previewBranch({ file: `${home}/workspace/apps/fret/dist/index.html` }, { details: { url: "u" } });
+	assert.equal(previewOpened(file, `${home}/workspace/apps/fret`, home, home), true, "a file under the app");
+});
+
+test("an errored or stopped preview does not count", () => {
+	const dir = `${home}/workspace/apps/fret`;
+	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: true, details: { url: "u" } }), dir, home, home), false);
+	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: false, details: { stopped: true } }), dir, home, home), false);
+});
+
+test("previewOpened: a preview call that names no path counts for the session cwd", () => {
+	const dir = `${home}/workspace/apps/fret`;
+	const branch = previewBranch({}, { isError: false, details: { url: "u" } });
+	assert.equal(previewOpened(branch, dir, dir, home), true);
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/keeb`, dir, home), false);
+});
+
+test("previewNote names the dir and the tool call, asks a question after the review and keeps pr-wait after a pr", () => {
+	const review = previewNote("/h/workspace/apps/fret", "review");
+	const pr = previewNote("/h/workspace/apps/fret", "pr");
+	for (const n of [review, pr]) {
+		assert.ok(n.startsWith(PREVIEW_NOTE_MARK));
+		assert.match(n, /preview\(\{ cwd: "\/h\/workspace\/apps\/fret" \}\)/);
+	}
+	assert.match(review, /ask him in one line whether it looks right, then end your turn/);
+	assert.match(pr, /the PR is open, but Michael hasn't seen it live/);
+	assert.match(pr, /start pr-wait with the bg_bash tool/);
+	assert.match(pr, /together with the PR link/);
+});
+
+{
+	// The plan-4 review's case: an app edit, a live preview opened, a short reply with no question.
+	const fret = `${home}/workspace/apps/fret`;
+	const user = { role: "user", content: "make the fret dots a touch bigger" };
+	const edit = { role: "assistant", content: [{ type: "toolCall", id: "e1", name: "edit", arguments: { path: `${fret}/src/app.css` } }] };
+	const edited = { role: "toolResult", toolCallId: "e1", toolName: "edit", content: [{ type: "text", text: "ok" }] };
+	const call = { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "preview", arguments: { cwd: "~/workspace/apps/fret" } }] };
+	const opened = (extra: Record<string, unknown>) => ({ role: "toolResult", toolCallId: "p1", toolName: "preview", content: [{ type: "text", text: "Preview open at https://x" }], ...extra });
+	const reply = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "The live preview is open; have a look." }] };
+	const nudges = (run: any[]) => [shouldNudge(run), shouldNudgePr(run, appsNeedingPr(run, home, () => true))];
+
+	test("a run that opened a live preview is waiting on Michael: no stall nudge, no PR nudge", () => {
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ details: { url: "https://x" } }), reply]), [false, false]);
+	});
+
+	test("without the preview, or with an errored one, both nudges still fire", () => {
+		const ran = { role: "assistant", content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "npm test" } }] };
+		const passed = { role: "toolResult", toolCallId: "b1", toolName: "bash", content: [{ type: "text", text: "ok" }] };
+		assert.deepEqual(nudges([user, edit, edited, ran, passed, reply]), [true, true]);
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: true, details: { url: "https://x" } }), reply]), [true, true]);
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: false, details: {} }), reply]), [true, true], "no url, no preview");
+	});
+
+	test("a run that opened a live preview gets no to-do nudge either; without the preview it does", () => {
+		const said = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "The preview is open in the Preview tab. Have a look." }] };
+		const open = [{ id: 1, subject: "Bigger fret dots", status: "pending" }];
+		assert.equal(shouldNudgeTodos([user, edit, edited, call, opened({ details: { url: "https://x" } }), said], open), false);
+		const ran = { role: "assistant", content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "npm test" } }] };
+		const passed = { role: "toolResult", toolCallId: "b1", toolName: "bash", content: [{ type: "text", text: "ok" }] };
+		assert.equal(shouldNudgeTodos([user, edit, edited, ran, passed, said], open), true);
+	});
+}

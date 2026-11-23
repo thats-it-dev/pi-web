@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles } from "@thatsit/kit";
 import type { ProgressStore } from "../lib/progress-store.ts";
+import { previewMode } from "../lib/preview-ui.ts";
 import { progressStyles, renderProgress } from "../render/progress.ts";
 
 // The session's progress (goal, plan, to-dos, subagents) in tk-shell's aside panel: a docked column on wide
@@ -69,6 +70,13 @@ export class PiProgressPanel extends LitElement {
 		this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
 	}
 
+	// pi-app answers by showing the Preview tab and cancelling the event; true then stops the link's navigation.
+	private openPreview(url: string, label: string): boolean {
+		const ev = new CustomEvent("pi-open-preview", { detail: { url, label, kind: "pages" }, bubbles: true, composed: true, cancelable: true });
+		this.dispatchEvent(ev);
+		return ev.defaultPrevented;
+	}
+
 	render() {
 		const view = this.store?.view;
 		if (!view || view.empty) return nothing;
@@ -78,6 +86,8 @@ export class PiProgressPanel extends LitElement {
 				selectedKey: this.selectedKey,
 				openChild: (key) => this.emit("pi-open-child", key),
 				openPlan: (path) => this.emit("pi-open-plan", path),
+				mode: previewMode(window.innerWidth),
+				openPreview: (url, label) => this.openPreview(url, label),
 			})}
 		</div>`;
 	}

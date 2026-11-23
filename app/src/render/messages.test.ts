@@ -21,7 +21,7 @@ vi.mock("marked", async (importOriginal) => {
 	return { ...real, Marked: CountingMarked };
 });
 
-const { renderConversation } = await import("./messages.ts");
+const { renderConversation, renderPreviewCard } = await import("./messages.ts");
 const { renderMarkdown } = await import("../lib/markdown.ts");
 
 function longConversation(turns: number): AgentMessage[] {
@@ -193,6 +193,36 @@ describe("images in the conversation", () => {
 		const loader = { load: async () => "blob:x", dispose() {} } as never;
 		const out = flat(renderConversation(createConversation([{ role: "user", content: [REF], timestamp: 1 }] as never), loader));
 		expect(out).toContain(".loader={");
+	});
+});
+
+describe("preview in the conversation", () => {
+	const previewCall = { type: "toolCall", id: "c1", name: "preview", arguments: {} };
+	const details = { url: "https://spark-713a.tail9274fa.ts.net:10600", label: "fret", kind: "dev", port: 10600, root: "/x" };
+	it("a finished preview renders a card with an Open preview link", () => {
+		const out = flat(renderConversation(convWith([previewCall], { content: [{ type: "text", text: "ok" }], details })));
+		expect(out).toContain("preview-card");
+		expect(out).toContain("Open preview");
+		expect(out).toContain("https://spark-713a.tail9274fa.ts.net:10600");
+		expect(out).toContain('target="_blank"');
+		expect(out).toContain('rel="noopener"');
+		expect(out).toContain("fret");
+		expect(out).toContain("spark-713a.tail9274fa.ts.net:10600");
+	});
+	it("an error result is the ordinary error card", () => {
+		const out = flat(renderConversation(convWith([previewCall], { content: [{ type: "text", text: "no" }], isError: true, details })));
+		expect(out).toContain('<details class="tool error">');
+		expect(out).not.toContain("preview-card");
+	});
+	it("a stopped result is the ordinary tool card", () => {
+		const out = flat(renderConversation(convWith([previewCall], { content: [{ type: "text", text: "stopped" }], details: { stopped: true } })));
+		expect(out).toContain("<details");
+		expect(out).not.toContain("preview-card");
+	});
+	it("renderPreviewCard shows the raw url when it does not parse", () => {
+		const out = flat(renderPreviewCard({ url: "not a url", label: "x", kind: "static" }));
+		expect(out).toContain("<code>");
+		expect(out).toContain("not a url");
 	});
 });
 

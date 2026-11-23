@@ -3,6 +3,7 @@ import { sharedStyles, toast } from "@thatsit/kit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AppCommand, Capabilities, CommandResult, FileInput, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { MESSAGE_SWALLOWED, swallowed } from "../lib/prompt-result.ts";
+import { type PreviewState, derivePreview } from "../../../shared/src/preview.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
@@ -78,6 +79,7 @@ export class PiSession extends LitElement {
 	private swipeFrom: { x: number; y: number } | null = null;
 	private attaching = false; // the sheet closed for the file picker: leave the keyboard down
 	private announced: ProgressStore | null = null; // last store sent with pi-progress
+	private announcedPreview: PreviewState | null = null; // last preview sent with pi-preview
 
 	static styles = [
 		sharedStyles,
@@ -233,6 +235,7 @@ export class PiSession extends LitElement {
 		this.progress?.stop();
 		this.progress = null;
 		this.announceProgress();
+		this.announcePreview(null);
 		const s = this.store;
 		if (!s) return;
 		s.removeEventListener("change", this.onStoreChange);
@@ -245,7 +248,16 @@ export class PiSession extends LitElement {
 		this.version++;
 		this.syncTicker();
 		this.announceProgress();
+		if (this.store) this.announcePreview(derivePreview(this.store.conv));
 	};
+
+	// Tell the app which preview the conversation has open (null: none, or stopped), when that changes.
+	private announcePreview(preview: PreviewState | null): void {
+		const was = this.announcedPreview;
+		if (was === preview || (was && preview && was.id === preview.id && was.url === preview.url && was.at === preview.at && was.kind === preview.kind)) return;
+		this.announcedPreview = preview;
+		this.dispatchEvent(new CustomEvent("pi-preview", { detail: { preview }, bubbles: true, composed: true }));
+	}
 
 	// Tell the app which progress store to show in the shell's aside panel: none while there is nothing to show.
 	private announceProgress(): void {
@@ -571,6 +583,10 @@ export class PiSession extends LitElement {
 		const cwd = snap?.cwd ?? s.cwdHint;
 		const statuses = [cwd ? abbreviateCwd(cwd, this.home) : null, ...Object.values(snap?.statuses ?? {})].filter((x): x is string => Boolean(x));
 		const dialog = s.dialogs[0];
+		// The dot means a preview is running, not that one was ever opened: the bridge reports `preview` in the statuses
+		// while its server runs (cleared on shutdown). A terminal session (bridge handle) reports no statuses: it keeps the
+		// conversation's word for it. A session read from history has no snapshot and so no running preview.
+		const previewLive = this.announcedPreview !== null && (snap?.statuses?.preview !== undefined || snap?.handleKind === "bridge");
 		return html`
 			${this.dragOver ? html`<div class="drop" aria-hidden="true">drop to attach</div>` : nothing}
 			<div class="chat">
@@ -580,7 +596,7 @@ export class PiSession extends LitElement {
 					: nothing}
 				<!-- The header scrolls with the chat (sticky at the top) so tucking it frees its space for messages. -->
 				<div class="scroll" ?hidden=${Boolean(this.childKey)} @scroll=${this.onScroll} @touchstart=${this.onDragStart} @touchmove=${this.onDragMove}>
-					<pi-header .store=${s} .version=${this.version} .heading=${heading} ?tucked=${this.tucked} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
+					<pi-header .store=${s} .version=${this.version} .heading=${heading} ?tucked=${this.tucked} .previewLive=${previewLive} @pi-open-sheet=${(e: CustomEvent<Sheet>) => this.openSheet(e.detail)}></pi-header>
 					<pi-messages .conv=${s.conv} .version=${this.version} .loader=${this.loader}></pi-messages>
 				</div>
 				${this.childKey ? nothing : this.renderTray(snap)}

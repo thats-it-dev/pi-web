@@ -1,7 +1,7 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 export type Block = { block: true; reason: string };
 
@@ -361,6 +361,39 @@ function repoOf(command: string, env: Env): string | undefined {
 }
 
 const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
+export const opensPr = (command: string): boolean => OPENS_PR.test(command);
+
+/** Appended to a scoped reviewer result (or, as a backstop, a `pr` result) when the app's UI changed and no live
+ *  preview was opened this session. */
+export const PREVIEW_NOTE_MARK = "[pi-guard] no live preview ";
+export const previewNote = (dir: string, when: "review" | "pr"): string =>
+	when === "review"
+		? `${PREVIEW_NOTE_MARK}for ${dir} this session. Michael can look at the app live in pi-web's Preview panel: call preview({ cwd: "${dir}" }) now and ask him in one line whether it looks right, then end your turn; open the PR after he has looked or waved it off, unless the change isn't visual.`
+		: `${PREVIEW_NOTE_MARK}for ${dir} this session: the PR is open, but Michael hasn't seen it live. Call preview({ cwd: "${dir}" }), then start pr-wait with the bg_bash tool as the skill says, and give him the preview together with the PR link.`;
+
+/** Whether the branch has a finished, successful `preview` call whose cwd/dir/file resolves under `dir`. */
+export function previewOpened(branch: Iterable<unknown>, dir: string, cwd: string, home: string): boolean {
+	const calls = new Map<string, string>();
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const part of m.content as ToolCallPart[]) {
+				if (part.type !== "toolCall" || part.name !== "preview" || !part.id) continue;
+				const a = part.arguments ?? {};
+				const named = [a.cwd, a.dir, a.file].find((v) => typeof v === "string" && v) as string | undefined;
+				const expanded = named ? (named === "~" || named.startsWith("~/") ? home + named.slice(1) : named) : cwd;
+				calls.set(part.id, resolve(cwd, expanded));
+			}
+		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
+			const path = calls.get(m.toolCallId);
+			const url = (m as { details?: { url?: unknown } }).details?.url;
+			if (path && typeof url === "string" && (path === dir || path.startsWith(`${dir}/`))) return true;
+		}
+	}
+	return false;
+}
 const PUSHES = /\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/;
 // Any other git repo under ~/workspace gets an app's review gate at its own publish point, a push or `gh pr create`,
 // without the skill's scripts. Why: the website session of 2026-11-19 pushed a 77-file branch and opened its PR with
@@ -1033,6 +1066,15 @@ export function waitingOnAsyncRun(run: Msg[]): boolean {
 
 const waitingOnBackground = (run: Msg[]) => waitingOnBgJob(run) || waitingOnAsyncRun(run);
 
+// The run opened a live preview (a `preview` result with a url): Michael is looking at the app, so the turn ending
+// there is the plan, not a stall, and no PR is owed yet (the guard's own nudges sent pi past the preview, plan 4 review).
+export function previewOpenedThisRun(run: Msg[]): boolean {
+	return run.some((m) => {
+		if (m.role !== "toolResult" || m.toolName !== "preview" || (m as { isError?: boolean }).isError) return false;
+		return typeof (m.details as { url?: unknown } | undefined)?.url === "string";
+	});
+}
+
 // The reply puts a question to Michael: a sentence of prose ends in "?" (markdown emphasis and closing
 // brackets aside; "a?.b" or "?q=" don't count). pi-web replies close with a "TL;DR:" line, so the question is rarely the last character.
 // Code blocks and quotes don't count.
@@ -1055,7 +1097,7 @@ export function shouldNudge(messages: Msg[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBackground(run)) return false;
+	if (waitingOnBackground(run) || previewOpenedThisRun(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (run.at(-2)?.role !== "toolResult") return false;
@@ -1093,7 +1135,8 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBackground(run)) return false;
+	// A preview the run opened is Michael's turn to look; "keep working on it" would push pi past it.
+	if (waitingOnBackground(run) || previewOpenedThisRun(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (asksUser(textOf(last))) return false;
@@ -1172,7 +1215,7 @@ export function shouldNudgePr(messages: Msg[], apps: string[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBackground(run)) return false;
+	if (waitingOnBackground(run) || previewOpenedThisRun(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (asksUser(textOf(last))) return false;

@@ -10,6 +10,7 @@
 	--chart-1: #e69500; --chart-2: #006eb8; --chart-3: #00978d; --chart-4: #8a2f7a;
 	--radius: 0.15rem;
 	--sidebar-w: 280px;
+	/* default only: tk-shell sets --aside-w on its own layout while the aside is docked (sizes, dragging) */
 	--aside-w: 300px;
 }
 

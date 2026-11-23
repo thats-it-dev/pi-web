@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import type { TkHeader } from "./tk-header.ts";
 import { sharedStyles } from "./styles.ts";
-import { type Hidden, type Mode, type Panel, type PanelsState, PHONE_MAX, WIDE_MIN, panelsState, readHidden, writeHidden } from "./panels.ts";
+import { ASIDE_DEFAULT_W, type AsideSize, type Hidden, type Mode, type Panel, type PanelsState, PHONE_MAX, WIDE_MIN, asideWidthFor, clampAsideWidth, isDocked, panelsState, readAsideWidth, readHidden, writeAsideWidth, writeHidden } from "./panels.ts";
 
 const PHONE_QUERY = `(max-width: ${PHONE_MAX}px)`;
 const WIDE_QUERY = `(min-width: ${WIDE_MIN}px)`;
@@ -18,9 +18,16 @@ export class TkShell extends LitElement {
 		storeKey: { attribute: "store-key" },
 		navHidden: { type: Boolean, attribute: "nav-hidden", reflect: true },
 		asideHidden: { type: Boolean, attribute: "aside-hidden", reflect: true },
+		resizable: { type: Boolean },
+		asideSize: { attribute: "aside-size", reflect: true },
+		dockAside: { type: Boolean, attribute: "dock-aside" },
+		asideFullscreen: { type: Boolean, attribute: "aside-fullscreen" },
 		mode: { state: true },
 		present: { state: true },
 		sheets: { state: true },
+		width: { state: true },
+		storedAsideW: { state: true },
+		dragging: { state: true },
 	};
 	declare navOpen: boolean;
 	declare asideOpen: boolean;
@@ -29,10 +36,19 @@ export class TkShell extends LitElement {
 	declare storeKey: string | null;
 	declare navHidden: boolean;
 	declare asideHidden: boolean;
+	declare resizable: boolean;
+	declare asideSize: AsideSize;
+	declare dockAside: boolean;
+	declare asideFullscreen: boolean;
 	declare private mode: Mode;
 	declare private present: Record<Panel, boolean>;
 	// Number of open tk-sheets, from tk-sheet-toggle on document.
 	declare private sheets: number;
+	// The shell's own width (px), which the aside width and the nav fit are computed against.
+	declare private width: number;
+	// Aside width the user dragged to, from <store-key>:aside-w; null means the default.
+	declare private storedAsideW: number | null;
+	declare private dragging: boolean;
 
 	static styles = [
 		sharedStyles,
@@ -53,8 +69,14 @@ export class TkShell extends LitElement {
 			.layout.nav-closed { grid-template-columns: 0 minmax(0, 1fr) var(--aside-w); }
 			.layout.aside-closed { grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0; }
 			.layout.nav-closed.aside-closed { grid-template-columns: 0 minmax(0, 1fr) 0; }
+			/* full size: the main area shrinks to a fixed strip and the aside takes the rest */
+			/* the aside track takes the rest, so an app's own --main-strip never overflows the layout */
+			.layout.aside-full { grid-template-columns: var(--sidebar-w) var(--main-strip, 48px) minmax(0, 1fr); }
+			.layout.aside-full.nav-closed { grid-template-columns: 0 var(--main-strip, 48px) minmax(0, 1fr); }
+			/* while dragging the column follows the pointer instead of easing after it */
+			.layout.dragging { transition: none; }
 			.sidebar { grid-area: 1 / 1; border-right: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
-			.details { grid-area: 1 / 3; border-left: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
+			.details { grid-area: 1 / 3; position: relative; border-left: 1px solid var(--line); min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); padding-top: env(safe-area-inset-top); }
 			/* a collapsed column keeps no border, or it would stick out of its 0-wide track; drawers keep theirs */
 			.nav-closed .sidebar:not(.drawer), .aside-closed .details:not(.drawer) { border-width: 0; }
 			.main { grid-area: 1 / 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -68,6 +90,9 @@ export class TkShell extends LitElement {
 			.details.drawer { right: 0; transform: translateX(100%); box-shadow: -2px 0 12px var(--shadow-color); }
 			/* the drawer itself takes focus only as a fallback target; its content shows the focus */
 			.drawer:focus { outline: none; }
+			:host([aside-fullscreen]) .details.drawer { width: 100vw; max-width: none; }
+			/* inside the column's edge: .details clips (overflow: hidden), so anything left of 0 is neither drawn nor hit */
+			.handle { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
 			.drawer.open { transform: none; visibility: visible; transition: transform 0.25s ease, visibility 0s; }
 			.overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 10; opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0s linear 0.25s; }
 			.drawer-open .overlay { opacity: 1; visibility: visible; transition: opacity 0.25s ease, visibility 0s; }
@@ -84,6 +109,11 @@ export class TkShell extends LitElement {
 	private opener: Element | null = null;
 	// Headers inside this shell, kept current with the panel state for their buttons.
 	private headers = new Set<TkHeader>();
+	private resizeObserver = new ResizeObserver((entries) => {
+		const w = entries[entries.length - 1]?.contentRect.width ?? 0;
+		// A shell that is not laid out (display: none) keeps its last width instead of clamping to nothing.
+		if (w > 0) this.width = Math.round(w);
+	});
 
 	constructor() {
 		super();
@@ -97,6 +127,13 @@ export class TkShell extends LitElement {
 		this.mode = this.computeMode();
 		this.present = { nav: false, aside: false };
 		this.sheets = 0;
+		this.resizable = false;
+		this.asideSize = "default";
+		this.dockAside = false;
+		this.asideFullscreen = false;
+		this.width = 0;
+		this.storedAsideW = null;
+		this.dragging = false;
 		// Added here, not in connectedCallback, so a header connecting in the same upgrade pass is never missed.
 		this.addEventListener("tk-open-nav", () => this.show("nav"));
 		this.addEventListener("tk-toggle-panel", (e) => this.withPanel(e, (p) => this.toggle(p)));
@@ -185,14 +222,22 @@ export class TkShell extends LitElement {
 			aside: !!this.querySelector(":scope > [slot=aside]"),
 		};
 		let raw: string | null = null;
+		let rawW: string | null = null;
 		try {
-			if (this.storeKey) raw = localStorage.getItem(this.storeKey);
+			if (this.storeKey) {
+				raw = localStorage.getItem(this.storeKey);
+				rawW = localStorage.getItem(`${this.storeKey}:aside-w`);
+			}
 		} catch {
 			// storage unavailable: use the attributes
 		}
 		const h = readHidden(raw, { nav: this.navHidden, aside: this.asideHidden });
 		this.navHidden = h.nav;
 		this.asideHidden = h.aside;
+		this.storedAsideW = readAsideWidth(rawW);
+		// The observer reports after the first layout; until then the window width is the best guess.
+		this.width = this.clientWidth || window.innerWidth;
+		this.resizeObserver.observe(this);
 		// Headers parsed before this element upgraded announced themselves to no one; pick them up here.
 		for (const header of this.querySelectorAll<TkHeader>("tk-header")) {
 			this.headers.add(header);
@@ -207,6 +252,9 @@ export class TkShell extends LitElement {
 		document.removeEventListener("keydown", this.onKey);
 		this.phoneMq.removeEventListener("change", this.onMode);
 		this.wideMq.removeEventListener("change", this.onMode);
+		this.resizeObserver.disconnect();
+		// A drag's window listeners would outlive the shell otherwise.
+		this.endDrag?.();
 		super.disconnectedCallback();
 	}
 
@@ -219,8 +267,103 @@ export class TkShell extends LitElement {
 	}
 
 	private get state(): PanelsState {
-		return panelsState({ mode: this.mode, present: this.present, hidden: this.hiddenFlags, drawer: this.drawer });
+		return this.layout().state;
 	}
+
+	private get asideW(): number {
+		return this.layout().asideW;
+	}
+
+	// Panel state and the docked aside's width. The nav docks only if it fits beside the aside at its
+	// narrow width ("if even narrow doesn't fit, the nav un-docks first"); the size the user picked
+	// (stored drag, half, full) is then clamped into whatever space the nav leaves, so a larger size
+	// shrinks to the chat floor rather than pushing the nav out, and full keeps the nav docked.
+	private layout(): { state: PanelsState; asideW: number } {
+		const total = this.width;
+		const fitW = Math.min(ASIDE_DEFAULT_W, this.storedAsideW ?? ASIDE_DEFAULT_W);
+		const navDocked = isDocked("nav", this.mode, this.present, { dockAside: this.dockAside, total, asideW: fitW });
+		// A hidden docked nav takes no column, so its space goes to the aside.
+		const asideW = asideWidthFor(this.asideSize, { total, navDocked: navDocked && !this.navHidden, stored: this.storedAsideW });
+		const state = panelsState({ mode: this.mode, present: this.present, hidden: this.hiddenFlags, drawer: this.drawer, dockAside: this.dockAside, total, asideW: fitW });
+		return { state, asideW };
+	}
+
+	// Sizing is engaged once an app opts into any of it; otherwise the shell leaves --aside-w to the app's CSS.
+	private get sizing(): boolean {
+		return this.resizable || this.dockAside || this.asideSize !== "default";
+	}
+
+	// The full size is in effect only while the aside is a docked, open column.
+	private asideFull(s: PanelsState): boolean {
+		return s.aside.docked && s.aside.open && this.asideSize === "full";
+	}
+
+	/** Forgets the dragged width: the aside goes back to the default 300px. */
+	resetAsideWidth(): void {
+		this.storedAsideW = null;
+		this.asideSize = "default";
+		if (this.storeKey) {
+			try {
+				localStorage.removeItem(`${this.storeKey}:aside-w`);
+			} catch {
+				// storage unavailable: the reset still applies for this page
+			}
+		}
+		// Apps that track the requested size hear about the reset as they do about a drag.
+		this.dispatchEvent(new CustomEvent("tk-aside-resize", { detail: { width: ASIDE_DEFAULT_W }, bubbles: true, composed: true }));
+	}
+
+	// Ends the drag in progress, if any. Set while dragging so a handle removed mid-drag can still end it.
+	private endDrag: (() => void) | null = null;
+
+	// Pointer capture keeps the drag on the handle even when the pointer runs over an iframe or off the window.
+	// The listeners sit on window, not the handle, so the drag still ends if the handle is removed mid-drag.
+	private onHandleDown = (e: PointerEvent) => {
+		if (e.button !== 0) return;
+		this.endDrag?.();
+		const handle = e.currentTarget as HTMLElement;
+		const id = e.pointerId;
+		handle.setPointerCapture(id);
+		const startX = e.clientX;
+		const startW = this.asideW;
+		let moved = false;
+		this.dragging = true;
+		const move = (ev: PointerEvent) => {
+			if (ev.pointerId !== id) return;
+			const s = this.state;
+			moved = true;
+			this.asideSize = "default";
+			// The handle is on the aside's left edge, so moving left widens it.
+			this.storedAsideW = clampAsideWidth(startW + (startX - ev.clientX), { total: this.width, navDocked: s.nav.docked && s.nav.open });
+		};
+		const onEnd = (ev: PointerEvent) => {
+			if (ev.pointerId === id) end();
+		};
+		const end = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", onEnd);
+			window.removeEventListener("pointercancel", onEnd);
+			handle.removeEventListener("lostpointercapture", onEnd);
+			this.endDrag = null;
+			this.dragging = false;
+			// A press without a move (half of a double-click) stores nothing.
+			if (!moved || this.storedAsideW === null) return;
+			const width = this.storedAsideW;
+			if (this.storeKey) {
+				try {
+					localStorage.setItem(`${this.storeKey}:aside-w`, writeAsideWidth(width));
+				} catch {
+					// storage unavailable or full: the width still applies for this page
+				}
+			}
+			this.dispatchEvent(new CustomEvent("tk-aside-resize", { detail: { width }, bubbles: true, composed: true }));
+		};
+		this.endDrag = end;
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", onEnd);
+		window.addEventListener("pointercancel", onEnd);
+		handle.addEventListener("lostpointercapture", onEnd);
+	};
 
 	private setHidden(panel: Panel, value: boolean): void {
 		if (panel === "nav") this.navHidden = value;
@@ -282,6 +425,10 @@ export class TkShell extends LitElement {
 		const prev = this.lastState;
 		this.lastState = now;
 		this.pushPanels(now);
+		// The effective full size, for app CSS: aside-size stays "full" while the aside is hidden or a drawer.
+		this.toggleAttribute("aside-full", this.asideFull(now));
+		// The handle went away mid-drag (un-docked, hidden, resizable dropped): its pointerup may never come.
+		if (this.endDrag && !this.renderRoot.querySelector(".handle")) this.endDrag();
 		if (!prev) return;
 		for (const p of PANELS) {
 			if (prev[p].open === now[p].open && prev[p].docked === now[p].docked) continue;
@@ -346,11 +493,12 @@ export class TkShell extends LitElement {
 	}
 
 	render() {
-		const s = this.state;
+		const { state: s, asideW } = this.layout();
+		const asideColumn = s.aside.docked && s.aside.open;
 		const drawer = drawerOf(s);
 		// While a drawer is open the rest of the shell is inert, unless a sheet (wherever it lives) needs input.
 		const blocked = drawer !== null && this.sheets === 0;
-		const cls = ["layout", this.navOpen ? "nav-open" : "", drawer ? "drawer-open" : "", s.nav.docked && s.nav.open ? "" : "nav-closed", s.aside.docked && s.aside.open ? "" : "aside-closed"];
+		const cls = ["layout", this.navOpen ? "nav-open" : "", drawer ? "drawer-open" : "", s.nav.docked && s.nav.open ? "" : "nav-closed", asideColumn ? "" : "aside-closed", this.asideFull(s) ? "aside-full" : "", this.dragging ? "dragging" : ""];
 		const panel = (p: Panel) => {
 			const ps = s[p];
 			const isDrawer = ps.present && !ps.docked;
@@ -364,11 +512,13 @@ export class TkShell extends LitElement {
 		};
 		const nav = panel("nav");
 		const aside = panel("aside");
-		return html`<div class=${cls.filter(Boolean).join(" ")}>
+		// Only a docked column takes the computed width, and only while sizing is engaged; a drawer keeps its own,
+		// and an app that never opts in keeps whatever --aside-w its CSS sets.
+		return html`<div class=${cls.filter(Boolean).join(" ")} style=${asideColumn && this.sizing ? `--aside-w:${asideW}px` : nothing}>
 			<aside class=${nav.cls} aria-label=${this.navLabel} ?hidden=${nav.hidden} ?inert=${nav.inert} tabindex=${nav.tabindex} @click=${this.onSidebarClick}><slot name="nav" @slotchange=${this.onSlot("nav")}></slot></aside>
 			<div class="overlay" @click=${this.closeDrawer}></div>
 			<main class="main" ?inert=${blocked}><slot></slot></main>
-			<aside class=${aside.cls} aria-label=${this.asideLabel} ?hidden=${aside.hidden} ?inert=${aside.inert} tabindex=${aside.tabindex}><slot name="aside" @slotchange=${this.onSlot("aside")}></slot></aside>
+			<aside class=${aside.cls} aria-label=${this.asideLabel} ?hidden=${aside.hidden} ?inert=${aside.inert} tabindex=${aside.tabindex}>${this.resizable && s.aside.docked ? html`<div class="handle" role="separator" aria-orientation="vertical" aria-label="Resize panel" @pointerdown=${this.onHandleDown} @dblclick=${() => this.resetAsideWidth()}></div>` : nothing}<slot name="aside" @slotchange=${this.onSlot("aside")}></slot></aside>
 		</div>`;
 	}
 }

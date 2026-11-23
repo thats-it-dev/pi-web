@@ -40,7 +40,7 @@ function fakes() {
 	const ctx: CtxLike = {
 		cwd: "/work",
 		hasUI: true,
-		ui: { notify: (message, type) => void calls.push(["notify", message, type]) },
+		ui: { notify: (message, type) => void calls.push(["notify", message, type]), setStatus: () => {} },
 		get model() {
 			return world.model;
 		},

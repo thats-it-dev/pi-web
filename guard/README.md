@@ -28,7 +28,8 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 
 When a run that edited or wrote a file ends right after a tool result with a reply shorter than 250
 characters that isn't a question, the guard adds a visible `pi-guard-nudge` message and continues once:
-reply in chat if done, carry on if not, or ask. At most 2 nudges per user prompt.
+reply in chat if done, carry on if not, or ask. At most 2 nudges per user prompt. A run that opened a live
+`preview` (a result with a url) is waiting on Michael, like one waiting on a background job: no nudge.
 
 ## Open to-dos
 
@@ -43,8 +44,8 @@ list pi left stale after finishing the work, and nowhere else.
 
 When a run edited or wrote files in an app (`~/workspace/apps/<name>`) and ended with a reply that isn't a
 question, with no `pr`, `ship` or `gateway-pr` (through `bash` or `bg_bash`) after the last edit, and git says the app still has work to
-publish (uncommitted changes, unpushed commits, or a branch never pushed), the guard adds a visible `pi-guard-pr`
-message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, never hand Michael commands to run, and never merge: Michael merges. (The `bg` extension's `bg-bash-done` message for a green `pr-wait` says the same, so the rule is read at the moment it matters even when the skill was never loaded.)
+publish (uncommitted changes, unpushed commits, or a branch never pushed), and the run opened no live `preview`
+(Michael is looking first), the guard adds a visible `pi-guard-pr` message: branch if needed, commit, run `pr` itself, wait for CI with `pr-wait` through `bg_bash`, never hand Michael commands to run, and never merge: Michael merges. (The `bg` extension's `bg-bash-done` message for a green `pr-wait` says the same, so the rule is read at the moment it matters even when the skill was never loaded.)
 
 ## Merge handed to Michael
 
@@ -232,6 +233,11 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   worker like any other difference (keeb 2026-11-19: two screens of the hand-built settings dialog passed as "fine").
 - The gate passes while no UI file differs between the last pictured snapshot and the working tree; briefs, docs
   and tests may change freely. A UI edit after the look needs a new picture.
+- Michael looks too, live: when UI files changed and no successful `preview` was opened for the app this session,
+  the scoped reviewer's result gets a `[pi-guard] no live preview ...` note (call `preview`, ask him in one line
+  whether it looks right, end the turn). If no review carried it, the `pr` result gets a backstop version (call
+  `preview`, start `pr-wait`, give him both links). Once per session across both, never in a subagent child,
+  never a block. Not on the screenshot: there it told pi to stop before the spec comparison.
 
 ## Workers and the request itself
 
@@ -248,4 +254,3 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   from a changed system prompt or an earlier message, and which. Why: the fret session of 2026-11-14 paid for
   eight full prefills on the 27b, about 18 of its 55 orchestrator minutes, and the server log shows the miss but
   not its cause.
-

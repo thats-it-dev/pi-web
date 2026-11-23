@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -436,8 +436,16 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// compaction, which summarises them away); and the notes owed to the call that triggered either, by tool call id.
 	const freshened = new Set<string>();
 	const briefed = new Set<string>();
+	// The preview note rides on one result per session: a nudge, not a gate.
+	let previewNudged = false;
 	const notes = new Map<string, string[]>();
 	const addNote = (id: string, text: string) => notes.set(id, [...(notes.get(id) ?? []), text]);
+	// Changed UI with no live preview opened: the note goes on this call's result, once per session, never in a child.
+	const previewNudge = (id: string, dir: string, when: "review" | "pr", branch: () => unknown[], cwd: string) => {
+		if (child || previewNudged || previewOpened(branch(), dir, cwd, home) || !uiChanged(dir)) return;
+		previewNudged = true;
+		addNote(id, previewNote(dir, when));
+	};
 	const appsRoot = `${join(home, "workspace", "apps")}/`;
 	// Reviewer launches the guard could not tie to an app: their result says so, since they never count.
 	const unscoped = new Set<string>();
@@ -495,6 +503,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 					// No snapshot, no mark: the picture still comes back, the gate stays shut.
 				}
 			}
+			// The backstop: a PR on changed UI with no live preview opened (the reviewer result did not carry the note).
+			const prDir = opensPr(command) ? appDir(command, ctx.cwd, home) : undefined;
+			if (prDir) previewNudge(event.toolCallId, prDir, "pr", branch, ctx.cwd);
 			return undefined;
 		}
 		if (event.toolName !== "subagent" || !event.input) return undefined;
@@ -509,8 +520,11 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			return { block: true, reason: `Blocked: pi-guard could not prepare the review diff (${(err as Error).message.split("\n")[0]}). Check the app's git state (git status in the app), then call the reviewer again.` };
 		}
 		if (scoped && "block" in scoped) return scoped;
-		if (scoped) reviews.set(event.toolCallId, scoped);
-		else if (event.input.agent === "reviewer") unscoped.add(event.toolCallId);
+		if (scoped) {
+			reviews.set(event.toolCallId, scoped);
+			// The review is done looking at the screen: the reviewer's result says the Preview panel exists, once.
+			previewNudge(event.toolCallId, scoped.dir, "review", branch, ctx.cwd);
+		} else if (event.input.agent === "reviewer") unscoped.add(event.toolCallId);
 		// Every other launch (a worker, a scout) runs on a loaded model too, for the same reason as the review.
 		else if (typeof event.input.agent === "string") pinResidentModel(event.input, readSettings(home), loadedModels(resident), sessionModel);
 		return undefined;

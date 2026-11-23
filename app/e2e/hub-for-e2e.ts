@@ -22,8 +22,11 @@ const model = await startFakeModel((req) => {
 		return { toolCalls: [{ id: "call_show", name: "show_image", args: { path: "shot.png", caption: "A red and blue test card" } }] };
 	return { thinking: "pondering", text: "Hello world" };
 });
+// The preview tool needs tailscale serve, so a running preview's status is faked: when the hub resumes the live
+// preview session, it reports `preview` in its statuses as the bridge does while a preview server runs.
+const PREVIEW_STATUS = `export default (pi) => pi.on("session_start", (_e, ctx) => { if (process.env.PI_WEB === "1" && ctx.sessionManager.getSessionId() === "e2e-preview-live") ctx.ui.setStatus("preview", "preview fret :10600"); });`;
 // Manual /compact needs older turns to summarize; auto-compaction stays off so only the test compacts.
-const pi = makePiEnv({ modelUrl: model.url, extensions: { "bridge.ts": `import bridge from ${JSON.stringify(BRIDGE)};\nexport default (pi) => (process.env.PI_WEB === "1" ? bridge(pi) : undefined);` }, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
+const pi = makePiEnv({ modelUrl: model.url, extensions: { "bridge.ts": `import bridge from ${JSON.stringify(BRIDGE)};\nexport default (pi) => (process.env.PI_WEB === "1" ? bridge(pi) : undefined);`, "preview-status.ts": PREVIEW_STATUS }, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
 rmSync(WORKDIR, { recursive: true, force: true });
 mkdirSync(join(WORKDIR, "docs"), { recursive: true });
 writeFileSync(join(WORKDIR, "docs", "notes.md"), "notes\n"); // for the @ mention test
@@ -103,6 +106,47 @@ writeFileSync(
 		.map((e) => JSON.stringify(e))
 		.join("\n") + "\n",
 );
+
+// Sessions that opened a dev preview (and one that then stopped it). The result timestamps are fresh, so on a tablet or
+// desktop the Preview tab takes the aside (a phone shows the reply's card instead). One more has a to-do list too (both
+// tabs) and an hour-old preview: reopened from history, it must not take over the aside. "e2e-preview-live" is the one
+// a test resumes: its pi reports the preview status (PREVIEW_STATUS above), so the header dot shows.
+const previewDetails = { url: "http://localhost:5173/", label: "fret", kind: "dev", port: 10600, root: "/x" };
+function previewSession(id: string, stopped: boolean, todo = false) {
+	const now = todo ? Date.now() - 3_600_000 : Date.now();
+	const call = (n: number, parentId: string) => ({ type: "message", id: `a${n}`, parentId, timestamp: at, message: { role: "assistant", content: [{ type: "toolCall", id: `tc${n}`, name: "preview", arguments: { cwd: "/x" } }], timestamp: now } });
+	const result = (n: number, details: unknown, text: string) => ({
+		type: "message",
+		id: `r${n}`,
+		parentId: `a${n}`,
+		timestamp: at,
+		message: { role: "toolResult", toolCallId: `tc${n}`, toolName: "preview", content: [{ type: "text", text }], details, isError: false, timestamp: now },
+	});
+	const entries: object[] = [
+		{ type: "session", version: 3, id, timestamp: at, cwd: WORKDIR },
+		{ type: "message", id: "u1", parentId: null, timestamp: at, message: { role: "user", content: [{ type: "text", text: "show me the app" }], timestamp: 1 } },
+		...(todo
+			? [
+					{ type: "message", id: "at", parentId: "u1", timestamp: at, message: { role: "assistant", content: [{ type: "toolCall", id: "tt", name: "todo", arguments: { action: "create", subject: "Build it" } }], timestamp: now } },
+					{
+						type: "message",
+						id: "rt",
+						parentId: "at",
+						timestamp: at,
+						message: { role: "toolResult", toolCallId: "tt", toolName: "todo", content: [{ type: "text", text: "Created #1" }], details: { action: "create", tasks: [{ id: 1, subject: "Build it", status: "in_progress", activeForm: "building it" }], nextId: 2 }, isError: false, timestamp: now },
+					},
+				]
+			: []),
+		call(1, todo ? "rt" : "u1"),
+		result(1, previewDetails, "Preview open at http://localhost:5173/ (fret, dev server on port 10600)"),
+	];
+	if (stopped) entries.push(call(2, "r1"), result(2, { stopped: true }, "Preview stopped"));
+	writeFileSync(join(seedDir, `${id}.jsonl`), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+}
+previewSession("e2e-preview", false);
+previewSession("e2e-preview-stopped", true);
+previewSession("e2e-preview-progress", false, true);
+previewSession("e2e-preview-live", false);
 
 const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);

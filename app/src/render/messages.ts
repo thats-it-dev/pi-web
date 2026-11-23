@@ -5,6 +5,7 @@ import { blocksText, formatTokens, parseArgsRaw, summarizeToolArgs, truncateOutp
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import { parseAttachments } from "../../../shared/src/attachments.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
+import { previewMode } from "../lib/preview-ui.ts";
 import { renderMarkdown, renderMarkdownUncached } from "../lib/markdown.ts";
 
 type ToolCall = Extract<ContentBlock, { type: "toolCall" }>;
@@ -123,6 +124,19 @@ function renderShowImage(call: ToolCall, image: ImageContent, loader: ImageLoade
 	</figure>`;
 }
 
+type PreviewCard = { url: string; label: string; kind: "dev" | "static" | "pages" };
+
+// A finished preview call: a card with an Open button (the app focuses the Preview tab; a phone follows the link).
+export function renderPreviewCard(d: PreviewCard, onOpen?: (d: PreviewCard, el: Element) => boolean) {
+	let host = d.url;
+	try {
+		host = new URL(d.url).host;
+	} catch {}
+	return html`<div class="preview-card"><a class="btn" href=${d.url} target="_blank" rel="noopener" @click=${(e: Event) => {
+		if (onOpen?.(d, e.currentTarget as Element)) e.preventDefault();
+	}}>Open preview</a><span class="txt">${d.label} · <code>${host}</code></span></div>`;
+}
+
 function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolRun | undefined, streaming: boolean, loader: ImageLoader | null) {
 	const done = Boolean(result) || run?.running === false;
 	const isError = result ? Boolean(result.isError) : Boolean(run?.isError);
@@ -131,6 +145,18 @@ function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolR
 		const details = (result?.details ?? run?.result?.details) as { image?: ImageContent } | undefined;
 		const image = imagesOf(content)[0] ?? (details?.image && details.image.type === "image" ? details.image : undefined);
 		if (image) return renderShowImage(call, image, loader);
+	}
+	if (call.name === "preview" && done && !isError) {
+		const d = (result?.details ?? run?.result?.details) as { url?: string; label?: string; kind?: "dev" | "static"; stopped?: boolean } | undefined;
+		if (d && !d.stopped && typeof d.url === "string" && d.kind) {
+			const card = { url: d.url, label: d.label ?? "", kind: d.kind };
+			return renderPreviewCard(card, (c, el) => {
+				// The app cancels the event when it has the preview to show; otherwise (stopped, or a phone) the link opens it.
+				const ev = new CustomEvent("pi-open-preview", { detail: c, bubbles: true, composed: true, cancelable: true });
+				el.dispatchEvent(ev);
+				return previewMode(window.innerWidth) !== "card" && ev.defaultPrevented;
+			});
+		}
 	}
 	const args = streaming ? toolArgs(call) : memo(call, "args", () => toolArgs(call));
 	const status = !done ? "running" : isError ? "error" : "ok";
@@ -180,6 +206,13 @@ export const markdownStyles = css`
 	}
 `;
 
+// The preview card: in the reply and in the Preview tab on a phone.
+export const previewCardStyles = css`
+	.preview-card { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
+	.preview-card .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; color: var(--text-secondary); }
+	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
+`;
+
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -193,6 +226,7 @@ export const messageStyles = css`
 	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
 	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */
 	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
+	${previewCardStyles}
 	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
 	.assistant { display: grid; gap: 8px; min-width: 0; }
 	${markdownStyles}

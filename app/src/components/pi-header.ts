@@ -7,12 +7,13 @@ import { headerStatus } from "../lib/status.ts";
 import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiHeader extends LitElement {
-	static properties = { store: { attribute: false }, draft: { attribute: false }, version: { attribute: false }, heading: { attribute: false }, tucked: { type: Boolean } };
+	static properties = { store: { attribute: false }, draft: { attribute: false }, version: { attribute: false }, heading: { attribute: false }, tucked: { type: Boolean }, previewLive: { attribute: false } };
 	declare store: SessionStore | null;
 	declare draft: { contextWindow: number } | null; // an unsent chat: no session yet, just the chosen model's window
 	declare version: number;
 	declare heading: string;
 	declare tucked: boolean;
+	declare previewLive: boolean; // the session has a preview open (the aside button gets a dot)
 
 	static styles = [
 		sharedStyles,
@@ -35,6 +36,7 @@ export class PiHeader extends LitElement {
 		this.version = 0;
 		this.heading = "";
 		this.tucked = false;
+		this.previewLive = false;
 	}
 
 	private emit(type: string, detail?: unknown): void {
@@ -64,7 +66,7 @@ export class PiHeader extends LitElement {
 	}
 
 	private frame(heading: string, pct: number | null, nums: string, status: string | null) {
-		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label="Progress">
+		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label=${this.previewLive ? "Progress, preview open" : "Progress"} aside-badge=${this.previewLive ? "•" : ""}>
 			<h1 slot="title">${heading}</h1>
 			${newChatButton()}
 			<button class="l2" aria-label="Session stats" @click=${() => this.emit("pi-open-sheet", "stats")}>

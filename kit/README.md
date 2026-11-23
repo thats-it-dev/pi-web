@@ -62,7 +62,21 @@ An empty slot means no panel: no column, no landmark and no header button. Exist
 - Only details, 900px and up: details is a docked column.
 - Only navigation, 900px and up: navigation is a docked column, as before.
 
-Docked columns are `--sidebar-w` (280px) and `--aside-w` (300px) wide. Drawers are at most 85vw or 360px wide.
+Docked columns are `--sidebar-w` (280px) and `--aside-w` (300px) wide. Drawers are at most 85vw or 360px wide. While sizing is engaged (`resizable`, `dock-aside`, or an `aside-size` other than `default`), the shell sets the docked aside's width itself, overriding any `--aside-w` the app sets.
+
+### Resizing and sizes
+
+The docked details column can be resized, snapped to a size, forced to dock, and shown as a full-width drawer. This supersedes the side-panels spec's "resizable widths" non-goal.
+
+- `resizable` (attribute, `boolean`, property `resizable`): draws a drag handle on the docked aside's inner (left) edge. Dragging sets the width; double-clicking the handle resets it to 300px. There is no handle on drawers. Leave it off on touch-only devices if you don't want a handle there.
+- `aside-size` (attribute, reflected, property `asideSize`): `"default" | "half" | "full"`, default `"default"`. `default` is the dragged width, or 300px. `half` is half the space beside the nav. `full` leaves the main area a 48px strip (override with `--main-strip`) and gives the aside the rest. Dragging sets it back to `default`. The size applies only to a docked column; drawers keep their own width. `aside-size` is the requested size: it stays `"full"` while the aside is hidden or a drawer.
+- `aside-full` (attribute, reflected by the shell, `boolean`, read-only): the effective state. It is present exactly while the full size is in effect (the aside is a docked, open column at `aside-size="full"`). Style the 48px strip with `tk-shell[aside-full]`, not `tk-shell[aside-size="full"]`, or a hidden aside would leave the chat collapsed with nothing beside it.
+- `dock-aside` (attribute, `boolean`, property `dockAside`): the aside docks from 900px up, even when there is a nav. If the nav, the aside at 300px and the 360px chat floor don't fit side by side, the nav un-docks (becomes a drawer) before the chat narrows.
+- `aside-fullscreen` (attribute, `boolean`, property `asideFullscreen`): the details drawer is `100vw` wide instead of `min(85vw, 360px)`.
+- `resetAsideWidth()`: method. Clears the dragged width and the stored value; the aside goes back to 300px and `aside-size` to `default`.
+- `tk-aside-resize`: event on the shell (bubbles, composed) after a drag ends, and also after a reset (`resetAsideWidth()` or a double-click on the handle), with the default width. `detail` is `{ width: number }`.
+- With `store-key` set, the dragged width is saved under `<store-key>:aside-w` (a plain integer string, e.g. `my-app:panels:aside-w`) and restored on load. It is per device.
+- Limits: the aside is never narrower than 240px, and the main area always keeps 360px (the chat floor), except in `full`, where it is the 48px strip. A stored width that no longer fits (the window shrank) is clamped live, not overflowed.
 
 ### Hiding and showing
 

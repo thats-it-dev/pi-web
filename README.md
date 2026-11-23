@@ -92,6 +92,9 @@ From the app you can watch the terminal session stream, prompt, steer and queue 
 
 pi can show an image in the conversation with its `show_image` tool: give it the path of a PNG, JPEG, GIF or WebP file (up to 2 MB, checked by content, not extension). The app shows it as a figure in the reply. Images load by reference: messages and history carry only a reference, and the app fetches the bytes when the figure scrolls into view. The `show-image` skill in `bridge/skills` tells pi when to use the tool.
 
+Pi can open a live preview in the app with its `preview` tool: `preview({ cwd })` serves an app checkout (live reload), `preview({ dir })` a folder, `preview({ file })` one file, `preview({})` returns the scratch folder for mockups, and `preview({ stop: true })` closes it.
+Previews are tailnet-only, one per session, and stop when the session ends.
+
 ## Progress panel
 
 The progress panel shows the session's goal, plan, to-dos and subagents. On desktop (1200 px and up) it's a right-hand column. On the phone it's a header badge that opens a full-screen view, or swipe in from the right edge. Tapping a subagent opens its thread read-only. The hub serves this data through read-only routes: `/api/sessions/:id/goal`, `/plan`, `/subagents` and `/subagents/:key/history`. The plan section depends on agents ticking the checkboxes as they go; that instruction lives in `~/.pi/agent/AGENTS.md`, outside this repo.
