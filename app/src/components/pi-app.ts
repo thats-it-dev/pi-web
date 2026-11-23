@@ -367,8 +367,7 @@ export class PiApp extends LitElement {
 		// A subagent route is the same pi-session element: only childKey changes, so the parent's stream stays open.
 		if (r.name === "session" || r.name === "subagent")
 			return html`<pi-session .api=${this.api} .list=${this.list} .sessionId=${r.id} .childKey=${r.name === "subagent" ? r.key : null} .home=${this.list?.home ?? ""}></pi-session>`;
-		// Task 5: pass .type=${this.sessionType} to pi-new-chat (property added there)
-		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
+		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""} .type=${this.sessionType}></pi-new-chat>`;
 		// home: launch() picks the route once the sessions are in; till then, a way to the sessions.
 		return html`<div class="waiting"><button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button></div>`;
 	}

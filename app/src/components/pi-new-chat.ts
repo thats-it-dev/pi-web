@@ -1,11 +1,11 @@
 import { LitElement, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
-import type { DefaultsInfo, FileInput, ImageInput, ModelInfo, ThinkingLevel } from "../../../shared/src/protocol.ts";
+import type { DefaultsInfo, FileInput, ImageInput, ModelInfo, SessionType, ThinkingLevel } from "../../../shared/src/protocol.ts";
 import type { HubApi } from "../lib/api.ts";
 import { routeAttachments } from "../lib/files.ts";
 import { DropTarget, dragHasFiles } from "../lib/drop.ts";
-import { type Draft, getDraft, handOff, resetDraft, updateDraft } from "../lib/draft.ts";
-import { abbreviateCwd } from "../lib/format.ts";
+import { type Draft, getDraft, handOff, resetDraft, retypeDraft, updateDraft } from "../lib/draft.ts";
+import { abbreviateCwd, newSessionLabel } from "../lib/format.ts";
 import { hrefFor } from "../lib/route.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { type MenuStep, chatMenu, chatMenuStyles, thinkingLevelsFor } from "../render/chat-menu.ts";
@@ -18,6 +18,7 @@ type Sheet = "model" | "menu";
 const SHEET_TITLES: Record<Sheet, string> = { model: "model", menu: "this chat" };
 const FOCUSABLE = "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])";
 const SLASH_ITEMS = slashItems([]); // pi's own commands are known only once it runs
+let draftType: SessionType = "code"; // the type the module-level draft's defaults are for
 
 // An unsent chat: just the composer and its draft (folder, model, approvals).
 // Nothing runs on the hub until the first send creates the session.
@@ -25,6 +26,7 @@ export class PiNewChat extends LitElement {
 	static properties = {
 		api: { attribute: false },
 		home: { attribute: false },
+		type: { attribute: false },
 		defaults: { state: true },
 		defaultsFailed: { state: true },
 		recentCwds: { state: true },
@@ -35,6 +37,7 @@ export class PiNewChat extends LitElement {
 	};
 	declare api: HubApi;
 	declare home: string;
+	declare type: SessionType; // the sidebar's code/chat choice: sets the folder and superpowers defaults
 	declare defaults: DefaultsInfo | null;
 	declare defaultsFailed: boolean;
 	declare recentCwds: string[];
@@ -62,6 +65,7 @@ export class PiNewChat extends LitElement {
 	constructor() {
 		super();
 		this.home = "";
+		this.type = "code";
 		this.defaults = null;
 		this.defaultsFailed = false;
 		this.recentCwds = [];
@@ -128,6 +132,15 @@ export class PiNewChat extends LitElement {
 		this.removeEventListener("drop", this.onDrop);
 	}
 
+
+	// The type switched under the draft: its folder and superpowers defaults
+	// follow. Coming back to a draft of the same type keeps what was picked.
+	willUpdate(changed: Map<PropertyKey, unknown>): void {
+		if (changed.has("type") && this.type !== draftType) {
+			retypeDraft(this.type);
+			draftType = this.type;
+		}
+	}
 
 	firstUpdated(): void {
 		const d = getDraft();
@@ -223,9 +236,12 @@ export class PiNewChat extends LitElement {
 		const d = getDraft();
 		const { model, thinking } = this.choice;
 		try {
-			const { sessionId } = await this.api.createSession({ cwd: d.cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}) });
-			handOff(sessionId, { text, images, files, approval: d.approval, superpowers: d.superpowers });
-			resetDraft();
+			const type = this.type;
+			const cwd = type === "chat" ? "~" : d.cwd; // a chat has no folder: it runs in home
+			const { sessionId } = await this.api.createSession({ cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}), type });
+			handOff(sessionId, { text, images, files, approval: d.approval });
+			resetDraft(type);
+			draftType = type;
 			this.sent = true;
 			location.hash = hrefFor({ name: "session", id: sessionId });
 		} catch (err) {
@@ -274,13 +290,13 @@ export class PiNewChat extends LitElement {
 		const { model, thinking } = this.choice;
 		return html`
 			${this.dragOver ? html`<div class="drop" aria-hidden="true">drop to attach</div>` : nothing}
-			<pi-header .draft=${{ contextWindow: model?.contextWindow ?? 0 }}></pi-header>
+			<pi-header .draft=${{ contextWindow: model?.contextWindow ?? 0 }} .heading=${newSessionLabel(this.type)}></pi-header>
 			<div class="empty"><p>what are we doing?</p></div>
 			<pi-composer
 				.items=${SLASH_ITEMS}
 				.model=${model}
 				.thinking=${thinking}
-				.folder=${abbreviateCwd(d.cwd, this.homeDir)}
+				.folder=${this.type === "chat" ? null : abbreviateCwd(d.cwd, this.homeDir)}
 				.busy=${this.busy}
 				.canImages=${Boolean(model?.input.includes("image"))}
 				@pi-submit=${this.onSubmit}
@@ -317,6 +333,7 @@ export class PiNewChat extends LitElement {
 				canImages: Boolean(model?.input.includes("image")),
 				cwd: abbreviateCwd(d.cwd, this.homeDir),
 				cwdFixed: false,
+				cwdHidden: this.type === "chat",
 				model: model ? `${model.name}${thinking ? ` · ${thinking}` : ""}` : "—",
 				approval,
 				superpowers: d.superpowers,

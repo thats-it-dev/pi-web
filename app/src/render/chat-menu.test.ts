@@ -13,7 +13,7 @@ const model = (over: Partial<ModelInfo> = {}): ModelInfo => ({
 	...over,
 });
 
-const view = { step: "root" as const, canImages: true, cwd: "~", cwdFixed: false, model: "flash · medium", approval: "semi" as const, superpowers: false, recentCwds: [] };
+const view = { step: "root" as const, canImages: true, cwd: "~", cwdFixed: false, cwdHidden: false, model: "flash · medium", approval: "semi" as const, superpowers: false, recentCwds: [] };
 
 describe("thinkingLevelsFor", () => {
 	it("hides levels for a non-reasoning model", () => {
@@ -39,6 +39,15 @@ describe("chatMenu rows", () => {
 		const folder = menuRows({ ...view, cwd: "~/src/pi-web", cwdFixed: true }).find((r) => r.key === "folder");
 		expect(folder).toMatchObject({ value: "~/src/pi-web", disabled: true, hint: "fixed once a chat starts" });
 		expect(menuRows(view).find((r) => r.key === "folder")?.disabled).toBe(false);
+	});
+
+	it("cwdHidden leaves the folder row out entirely", () => {
+		expect(menuRows({ ...view, cwdHidden: true }).map((r) => r.key)).not.toContain("folder");
+		expect(menuRows({ ...view, cwdFixed: true, cwdHidden: true }).map((r) => r.key)).toEqual(["attach", "file", "model", "approvals", "superpowers"]);
+	});
+
+	it("cwdFixed without cwdHidden still shows the disabled folder row", () => {
+		expect(menuRows({ ...view, cwdFixed: true, cwdHidden: false }).find((r) => r.key === "folder")).toMatchObject({ disabled: true });
 	});
 
 	it("shows the model and approval values", () => {

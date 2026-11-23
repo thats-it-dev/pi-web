@@ -41,7 +41,7 @@ const noSessions = (page: Page) =>
 test("launch with no route opens a new chat when nothing is recent", async ({ page }) => {
 	await noSessions(page);
 	await page.goto("/");
-	await expect(page.getByRole("heading", { name: "new chat" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "new code session" })).toBeVisible();
 	await expect(page).toHaveURL(/#\/new$/);
 });
 

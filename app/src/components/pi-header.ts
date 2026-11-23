@@ -42,7 +42,7 @@ export class PiHeader extends LitElement {
 	}
 
 	render() {
-		if (this.draft) return this.frame("new chat", 0, `0 / ${formatTokens(this.draft.contextWindow)} (0%) · — t/s`, null);
+		if (this.draft) return this.frame(this.heading || "new chat", 0, `0 / ${formatTokens(this.draft.contextWindow)} (0%) · — t/s`, null);
 		const s = this.store;
 		if (!s) return nothing;
 		const snap = s.snapshot;
