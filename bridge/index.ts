@@ -57,7 +57,7 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 		parameters: Type.Object({
 			cwd: Type.Optional(Type.String({ description: "A Vite app checkout (has a dev script): start its dev server and show it" })),
 			dir: Type.Optional(Type.String({ description: "A folder of static files (an HTML mockup or prototype): serve it and show it" })),
-			file: Type.Optional(Type.String({ description: "One HTML file: serve its folder and show it" })),
+			file: Type.Optional(Type.String({ description: "One HTML file: serve its folder and open that file" })),
 			stop: Type.Optional(Type.Boolean({ description: "Stop this session's preview server" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -74,10 +74,13 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 			return result;
 		},
 	});
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (_event, ctx) => {
 		if (!manager) return;
+		// Kill the servers first, synchronously: pi may exit before a queued stop() (which can sit
+		// behind a 30 s health wait) gets to run. stop() then removes the serve entry.
+		manager.killNow();
 		await manager.stop();
-		lastCtx?.ui.setStatus(STATUS_KEY, undefined);
+		(ctx?.ui ? ctx : lastCtx)?.ui.setStatus(STATUS_KEY, undefined);
 	});
 	if (env.PI_WEB === "1") return; // the hub's own headless children are driven over RPC already
 	let session: BridgeSession | null = null;

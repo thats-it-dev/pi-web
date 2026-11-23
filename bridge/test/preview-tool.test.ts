@@ -17,6 +17,7 @@ function setup(env: NodeJS.ProcessEnv, inject = true) {
 			return { content: [{ type: "text", text: "ok" }] };
 		},
 		stop: async () => void calls.push("stop"),
+		killNow: () => void calls.push("killNow"),
 		statusText: () => "preview :1",
 	};
 	const statuses: Array<[string, string | undefined]> = [];
@@ -50,13 +51,26 @@ test("refuses in a subagent worker without touching the manager", async () => {
 	assert.deepEqual(s.statuses, []);
 });
 
-test("session_shutdown stops the manager and clears the status", async () => {
+test("session_shutdown kills the servers at once, then stops the manager and clears the status", async () => {
 	const s = setup({});
 	await s.tools.get("preview").execute("id", {}, undefined, undefined, s.ctx);
 	s.statuses.length = 0;
 	s.calls.length = 0;
 	for (const h of s.handlers.get("session_shutdown") ?? []) await h({ reason: "quit" }, s.ctx);
-	assert.deepEqual(s.calls, ["stop"]);
+	assert.deepEqual(s.calls, ["killNow", "stop"]);
+	assert.deepEqual(s.statuses, [["preview", undefined]]);
+});
+
+test("session_shutdown clears the status on the ctx it is given, else on the last tool ctx", async () => {
+	const s = setup({});
+	await s.tools.get("preview").execute("id", {}, undefined, undefined, s.ctx);
+	s.statuses.length = 0;
+	const given: Array<[string, string | undefined]> = [];
+	const shutdownCtx = { ...s.ctx, ui: { setStatus: (k: string, t: string | undefined) => void given.push([k, t]) } };
+	for (const h of s.handlers.get("session_shutdown") ?? []) await h({ reason: "quit" }, shutdownCtx);
+	assert.deepEqual(given, [["preview", undefined]]);
+	assert.deepEqual(s.statuses, []);
+	for (const h of s.handlers.get("session_shutdown") ?? []) await h({ reason: "quit" }, undefined);
 	assert.deepEqual(s.statuses, [["preview", undefined]]);
 });
 
