@@ -687,6 +687,11 @@ test("reviewVerdict: the reviewer.md report shapes count, a mid-review line or n
 	assert.equal(reviewVerdict("## Review\nNo defects found."), true);
 	assert.equal(reviewVerdict("## Review\n### Issues\n#### Critical (Must Fix)\n- thing"), false, "severity words without a level or verdict are not the contract");
 	assert.equal(reviewVerdict('{"reviewFindings": ["No blockers."]}'), false, "the JSON report is not the contract");
+	// keeb 2026-11-22: Flash-Next's revived reviews, every one a verdict to the reader and none to the gate.
+	assert.equal(reviewVerdict("## Review\n**Both P1s are closed. Verdict: OK with notes** — nothing the diff breaks; three one-liners left, all optional.\n### Closed\n- **P1 hint line** → fixed"), true, "a verdict without Merge, after a lead-in sentence");
+	assert.equal(reviewVerdict("## Review\n**Clean. Merge verdict: OK** — the two lines are exactly what the notes asked for."), true, "a lead-in word before the verdict");
+	assert.equal(reviewVerdict("## Review\n**Verdict first: BLOCK** — two behaviors the spec names have no test."), true);
+	assert.equal(reviewVerdict("## Review\nThe verdict depends on the caller: see below."), false, "prose about a verdict is not one");
 });
 
 test("pending reviews count only when the finished run's reply holds a verdict", () => {
@@ -930,6 +935,10 @@ test("reviewBlocked: a BLOCK merge verdict, or a P0/P1 finding without a verdict
 	assert.equal(reviewBlocked("## Review\n- **P2:** a note"), false);
 	assert.equal(reviewBlocked("No issues found."), false);
 	assert.equal(reviewBlocked("Let me look at one more file"), false, "no verdict at all");
+	// keeb 2026-11-22 shapes: the lead-in and the missing "Merge" change nothing about what the verdict says.
+	assert.equal(reviewBlocked("## Review\n**Verdict first: BLOCK** — two P1 test gaps.\n- **P1 — hint line** never asserted"), true);
+	assert.equal(reviewBlocked("## Review\n**Both P1s are closed. Verdict: OK with notes** — three one-liners left.\n- **P1 hint line** → `e2e/x.spec.ts:57`"), false, "OK with notes, even with P1 labels in the closed list");
+	assert.equal(reviewBlocked("## Review\n**Clean. Merge verdict: OK** — only assertions added."), false);
 });
 
 test("a review that ended BLOCK never counts for the gate or as the next base, and lastBlockedReview names its tree", () => {
@@ -1214,4 +1223,83 @@ test("reviewHeader briefs the kit rules when the diff touches a UI file, and onl
 test("the screen comparison counts a kit pattern built by hand as a difference", () => {
 	const owed = screenCompareContent(undefined, []).at(-1) as { text: string };
 	assert.match(owed.text, /The kit counts too: a dialog that is not the kit sheet .* a checkbox where a switch belongs, a row whose label is not on the left edge or whose control is not on the right, .* go back to the worker like any other difference\./);
+});
+
+// --- a resumed reviewer run counts (keeb 2026-11-22: two resumes of the reviewer never opened the PR gate) ---
+
+import { configuredAgentModel, pinResidentModel, reviewRun } from "../rules.ts";
+
+test("asyncRunId reads the revived run id from a resume result too", () => {
+	assert.equal(asyncRunId("Revived async subagent from cc9f4fa1-512a-4c15-af79-d46c5f28d737.\nRevived run: 9c6caaf0-e517-4e2d-a64d-ab940e80dac3\nAgent: reviewer"), "9c6caaf0-e517-4e2d-a64d-ab940e80dac3");
+	assert.equal(asyncRunId("Revived run: 9c6caaf0"), undefined, "a short id is not a run id");
+});
+
+test("defaultRunText reads only what the run wrote since it started: a revived run's reply, not the chain before it", () => {
+	const root = mkdtempSync(join(tmpdir(), "guard-runs-"));
+	const session = join(root, "session.jsonl");
+	const line = (role: string, ts: string, text: string) => JSON.stringify({ type: "message", timestamp: ts, message: { role, content: [{ type: "text", text }] } });
+	writeFileSync(
+		session,
+		[line("user", "2026-11-22T23:00:30.000Z", "Task: review"), line("assistant", "2026-11-22T23:10:00.000Z", "## Review\n- Finding: P1 gap\n- Merge verdict: BLOCK"), line("user", "2026-11-22T23:25:35.000Z", "Task: You are reviving"), line("assistant", "2026-11-22T23:34:00.000Z", "## Review\n- Merge verdict: OK")].join("\n") + "\n",
+	);
+	const put = (id: string, body: Record<string, unknown>) => {
+		mkdirSync(join(root, id), { recursive: true });
+		writeFileSync(join(root, id, "status.json"), JSON.stringify({ state: "complete", sessionFile: session, ...body }));
+	};
+	put("first", { startedAt: Date.parse("2026-11-22T23:00:29.000Z") });
+	put("revived", { startedAt: Date.parse("2026-11-22T23:25:33.000Z") });
+	put("undated", {});
+	assert.equal(reviewBlocked(defaultRunText("first", root) ?? ""), true, "the first run's own reply ended BLOCK, whatever came after in the shared file");
+	assert.equal(defaultRunText("revived", root), "## Review\n- Merge verdict: OK");
+	assert.equal(reviewBlocked(defaultRunText("revived", root) ?? ""), false);
+	assert.match(defaultRunText("undated", root) ?? "", /BLOCK[\s\S]*OK/, "without a start time the whole file is read, as before");
+});
+
+test("reviewRun finds the repo of the pending reviewer run a resume names, by full id or the 8-char prefix the model uses", () => {
+	const L = "cc9f4fa1-512a-4c15-af79-d46c5f28d737";
+	const X = "9c6caaf0-e517-4e2d-a64d-ab940e80dac3";
+	const branch = [
+		{ type: "message", message: { role: "toolResult", toolCallId: "w", isError: false, content: [{ type: "text", text: `Async: worker [${X}]` }] } },
+		{ type: "message", message: { role: "toolResult", toolCallId: "r", isError: false, content: [{ type: "text", text: `Async: reviewer [${L}]\n${reviewPendingMark("/home/m/workspace/apps/keeb", "a".repeat(40), L)}` }] } },
+	];
+	assert.deepEqual(reviewRun(branch, L), { dir: "/home/m/workspace/apps/keeb", runId: L });
+	assert.deepEqual(reviewRun(branch, "cc9f4fa1"), { dir: "/home/m/workspace/apps/keeb", runId: L });
+	assert.equal(reviewRun(branch, X), undefined, "a worker run is not a review");
+	assert.equal(reviewRun(branch, "cc9f"), undefined, "too short to name a run");
+	assert.equal(reviewRun(branch, 7), undefined);
+});
+
+test("configuredAgentModel is the agent's override in settings.json, else the subagents default", () => {
+	const settings = { subagents: { agentOverrides: { reviewer: { model: "spark/qwen3.8-flash-next" } }, defaultModel: "spark/qwen3.6-35b-a3b-sglang" } };
+	assert.equal(configuredAgentModel(settings, "reviewer"), "spark/qwen3.8-flash-next");
+	assert.equal(configuredAgentModel(settings, "worker"), "spark/qwen3.6-35b-a3b-sglang");
+	assert.equal(configuredAgentModel({}, "worker"), undefined);
+	assert.equal(configuredAgentModel(undefined, "worker"), undefined);
+});
+
+test("pinResidentModel: a subagent runs on a model llama-swap already has loaded, never on one that swaps the session's out", () => {
+	const settings = { subagents: { agentOverrides: { reviewer: { model: "spark/qwen3.8-flash-next" } }, defaultModel: "spark/qwen3.8-flash-next" } };
+	// The caller's model, when loaded, stays.
+	const keep: Record<string, unknown> = { agent: "reviewer", model: "spark/qwen3.8-27b-pi" };
+	pinResidentModel(keep, settings, ["qwen3.8-27b-pi", "qwen3.6-35b-a3b-sglang"], "spark/qwen3.8-27b-pi");
+	assert.equal(keep.model, "spark/qwen3.8-27b-pi");
+	// The configured model, when loaded, applies as pi-subagents would (the caller's unloaded one is dropped).
+	const configured: Record<string, unknown> = { agent: "reviewer", model: "spark/inkling-2-mini" };
+	pinResidentModel(configured, settings, ["qwen3.8-flash-next"], "spark/flash-auto");
+	assert.equal(configured.model, undefined);
+	// Neither loaded: the session's own model, when loaded (keeb 2026-11-22: Inkling session, Flash-Next reviewer, 8 swaps).
+	const session: Record<string, unknown> = { agent: "reviewer" };
+	pinResidentModel(session, settings, ["inkling-2-mini"], "spark/inkling-2-mini");
+	assert.equal(session.model, "spark/inkling-2-mini");
+	const worker: Record<string, unknown> = { agent: "worker" };
+	pinResidentModel(worker, settings, ["inkling-2-mini"], "spark/inkling-2-mini");
+	assert.equal(worker.model, "spark/inkling-2-mini", "workers follow the same rule");
+	// The session's model is virtual or unloaded: the first loaded model.
+	const first: Record<string, unknown> = { agent: "reviewer" };
+	pinResidentModel(first, settings, ["qwen3.8-27b-pi", "qwen3.6-35b-a3b-sglang"], "spark/pair-auto");
+	assert.equal(first.model, "spark/qwen3.8-27b-pi");
+	// Nothing loaded (or the lookup failed): nothing pinned, pi-subagents decides.
+	const none: Record<string, unknown> = { agent: "reviewer", model: "spark/qwen3.8-27b-pi" };
+	pinResidentModel(none, settings, [], "spark/inkling-2-mini");
+	assert.equal(none.model, undefined);
 });

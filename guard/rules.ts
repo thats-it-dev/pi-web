@@ -14,7 +14,7 @@ export const REASONS = {
 	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
-	review: `Blocked: run the reviewer before opening the PR. A design doc or plan under docs/superpowers gets a review too (the guard briefs the reviewer for it; no verify needed for a docs-only change). Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, list the findings you fixed and rejected in the PR body, then rerun this command.`,
+	review: `Blocked: run the reviewer before opening the PR. A design doc or plan under docs/superpowers gets a review too (the guard briefs the reviewer for it; no verify needed for a docs-only change). Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, then have the changed tree reviewed: a fresh reviewer call, or \`resume\` of the last reviewer run with what changed (the guard scopes both). List the findings you fixed and rejected in the PR body, then rerun this command.`,
 	reviewUnverified: "Blocked: run `npm run verify` in the app first, and call the reviewer once it passes. Edits to code since the last green verify make the review stale; edits to docs and Markdown don't.",
 	reviewWorkflow: 'Blocked: in an app, call the reviewer directly: the `subagent` tool with agent "reviewer" and a task, not inside a workflow, chain or task list. The guard scopes a direct call to the diff.',
 	reviewNothing: "Blocked: nothing changed in the app since the last review, so there is nothing to review. Go on with the next step (commit, then the skill's `pr` command).",
@@ -408,8 +408,13 @@ export function reviewVerdict(text: string): boolean {
 	// line may carry no list dash at all (`**Finding:** None.`, fret 2026-11-14 21:33), or be a heading (`## Merge
 	// verdict: OK`, `#### P1 — ...`: every one of the 35B's five scoped reviews on keeb 2026-11-16, all discarded, and
 	// the PR never opened): all read fine, and a review that counts for the reader must count for the gate.
-	return /^\s*#+\s*Review\b/m.test(text) && /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding|Merge verdict|P[012]\b)\s*(?:\*\*|__)?\s*(?::|—|–|-\s)/m.test(text);
+	return /^\s*#+\s*Review\b/m.test(text) && (/^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding|P[012]\b)\s*(?:\*\*|__)?\s*(?::|—|–|-\s)/m.test(text) || VERDICT_LINE.test(text));
 }
+
+/** The verdict line, with its first word captured: `Merge verdict: OK`, or `Verdict: OK with notes`, or led in by one short
+ *  sentence (`**Clean. Merge verdict: OK**`, `**Both P1s are closed. Verdict: OK with notes**`, `**Verdict first: BLOCK**`:
+ *  Flash-Next's three revived reviews on keeb 2026-11-22, none of which the gate read as a verdict). */
+const VERDICT_LINE = /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:[^\n:*_]{0,60}?[.!]\s+)?(?:Merge\s+)?[Vv]erdict(?:\s+first)?\s*(?:\*\*|__)?\s*(?::|—|–|-\s)(?:\s*(?:\*\*|__))*\s*([A-Za-z]+)/m;
 
 /** A review whose verdict shuts the PR gate: a `Merge verdict` line that says BLOCK, or, without a verdict line, a P0
  *  or P1 finding. Keeb 2026-11-17 18:27: the reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator
@@ -417,7 +422,7 @@ export function reviewVerdict(text: string): boolean {
  *  and the gate, which counted any verdict, let the PR through. */
 export function reviewBlocked(text: string): boolean {
 	if (!reviewVerdict(text)) return false;
-	const verdict = /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*Merge verdict\s*(?:\*\*|__)?\s*(?::|—|–|-\s)(?:\s*(?:\*\*|__))*\s*([A-Za-z]+)/m.exec(text);
+	const verdict = VERDICT_LINE.exec(text);
 	if (verdict) return verdict[1].toUpperCase() === "BLOCK";
 	return /^\s*(?:#+\s*|-\s*)?(?:\*\*|__)?\s*(?:Finding\s*(?:\*\*|__)?\s*(?::|—|–|-\s)\s*(?:\*\*|__)?\s*)?P[01]\b/m.test(text);
 }
@@ -432,16 +437,21 @@ export const REVIEW_NO_VERDICT = "[pi-guard] review ended without a verdict: the
 /** The reviewer's reply text of a finished run, or undefined when it cannot be read: a review the guard can't read never counts. */
 export type RunText = (runId: string) => string | undefined;
 
-/** Joins the text parts of every assistant message in the run's session file (status.json `sessionFile`): never
- *  thinking, never tool results, so a verdict quoted inside a file the reviewer read does not count. */
+/** Joins the text parts of every assistant message the run wrote in its session file (status.json `sessionFile`),
+ *  from the run's `startedAt` on: a resume revives a run under a new id in the same file, so the chain before it is not
+ *  this run's reply. Never thinking, never tool results, so a verdict quoted inside a file the reviewer read does not count. */
 export function defaultRunText(runId: string, root: string = ASYNC_RUNS): string | undefined {
 	try {
-		const file = String((JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8")) as { sessionFile?: unknown }).sessionFile ?? "");
+		const status = JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8")) as { sessionFile?: unknown; startedAt?: unknown };
+		const file = String(status.sessionFile ?? "");
+		const since = typeof status.startedAt === "number" ? status.startedAt : 0;
 		const out: string[] = [];
 		for (const line of readFileSync(file, "utf8").split("\n")) {
 			if (!line.trim()) continue;
-			const e = JSON.parse(line) as Entry;
-			if (e.type === "message" && e.message?.role === "assistant") for (const t of resultText(e.message).split("\n")) if (t.trim()) out.push(t);
+			const e = JSON.parse(line) as Entry & { timestamp?: string };
+			if (e.type !== "message" || e.message?.role !== "assistant") continue;
+			if (since && e.timestamp && Date.parse(e.timestamp) < since) continue;
+			for (const t of resultText(e.message).split("\n")) if (t.trim()) out.push(t);
 		}
 		return out.join("\n");
 	} catch {
@@ -463,8 +473,43 @@ export function defaultRunState(runId: string, root: string = ASYNC_RUNS): Retur
 	}
 }
 
-/** The run id of an async reviewer launch, from pi-subagents' launch result. */
-export const asyncRunId = (resultText: string): string | undefined => /Async: reviewer \[([0-9a-f-]{36})\]/.exec(resultText)?.[1];
+/** The run id of an async reviewer launch, from pi-subagents' launch result, or of the run a resume revived. */
+export const asyncRunId = (resultText: string): string | undefined => /Async: reviewer \[([0-9a-f-]{36})\]/.exec(resultText)?.[1] ?? /Revived run: ([0-9a-f-]{36})/.exec(resultText)?.[1];
+
+/** The repo and full run id of the pending reviewer run that `id` (a full id, or the 8+ character prefix the model
+ *  passes to `resume`) names on the branch, from the pending marks; undefined for a worker's run or an unknown id. */
+export function reviewRun(branch: Iterable<unknown>, id: unknown): { dir: string; runId: string } | undefined {
+	if (typeof id !== "string" || id.length < 8) return undefined;
+	let found: { dir: string; runId: string } | undefined;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "toolResult" || e.message.isError) continue;
+		for (const m of resultText(e.message).matchAll(PENDING)) if (m[3] !== UNKNOWN_RUN && (m[3] === id || m[3].startsWith(id))) found = { dir: m[1], runId: m[3] };
+	}
+	return found;
+}
+
+/** The model pi-subagents gives `agent` from settings.json: the agent's override, else the subagents default. */
+export function configuredAgentModel(settings: unknown, agent: string): string | undefined {
+	const sub = (settings as { subagents?: { agentOverrides?: Record<string, { model?: unknown }>; defaultModel?: unknown } } | undefined)?.subagents;
+	const own = sub?.agentOverrides?.[agent]?.model;
+	const model = typeof own === "string" ? own : sub?.defaultModel;
+	return typeof model === "string" && model ? model : undefined;
+}
+
+/** A subagent runs on a model llama-swap already has loaded (`loaded`: bare ids), never on one that swaps the session's
+ *  group out: the caller's model stays when loaded; else the configured one applies when loaded (the call names none);
+ *  else the session's own model when loaded, else the first loaded one. Nothing loaded (or no answer): nothing pinned.
+ *  Keeb 2026-11-22: an Inkling session with a Flash-Next reviewer swapped models eight times in 95 minutes. */
+export function pinResidentModel(input: Record<string, unknown>, settings: unknown, loaded: string[], sessionModel: string | undefined): void {
+	const bare = (m: string) => m.replace(/^spark\//, "");
+	if (typeof input.model === "string" && loaded.includes(bare(input.model))) return;
+	delete input.model;
+	const configured = typeof input.agent === "string" ? configuredAgentModel(settings, input.agent) : undefined;
+	if (configured && loaded.includes(bare(configured))) return;
+	if (sessionModel && loaded.includes(bare(sessionModel))) input.model = sessionModel;
+	else if (loaded[0]) input.model = `spark/${loaded[0]}`;
+}
 
 const PENDING = /\[pi-guard\] review pending (\S+) at ([0-9a-f]{7,64}) run (\S+)/g;
 const FINISHED = /\[pi-guard\] reviewed (\S+) at ([0-9a-f]{7,64})/g;

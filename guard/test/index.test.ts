@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -263,7 +263,7 @@ test("an async scoped review keeps async and gets a pending mark; a sync one get
 	assert.doesNotMatch(text(r2), /review pending/);
 });
 
-test("scopeReview keeps a resident model and strips any other, and a failed lookup strips", () => {
+test("scopeReview keeps a resident model, replaces an unloaded one with a loaded model, and a failed lookup strips", () => {
 	const { home, dir } = appRepo();
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 4;\n");
 	const branch = ready(dir);
@@ -274,7 +274,7 @@ test("scopeReview keeps a resident model and strips any other, and a failed look
 	assert.equal(keep.model, "spark/qwen3.8-27b-pi");
 	const strip: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-flash-next" };
 	scopeReview(strip, branch, home, home, resident);
-	assert.equal(strip.model, undefined);
+	assert.equal(strip.model, "spark/qwen3.8-27b-pi", "no configured model in this home: the first loaded one");
 	const down: Record<string, unknown> = { agent: "reviewer", task, model: "spark/qwen3.8-27b-pi" };
 	assert.ok(!("block" in (scopeReview(down, branch, home, home, () => { throw new Error("ECONNREFUSED"); }) ?? {})));
 	assert.equal(down.model, undefined);
@@ -735,4 +735,69 @@ test("a scoped review of a UI change carries the kit rules; one that changes no 
 	const input2: Record<string, unknown> = { agent: "reviewer", task: `Review ${d2}` };
 	assert.ok(!("block" in (scopeReview(input2, verified(d2), h2, h2) ?? {})));
 	assert.doesNotMatch(String(input2.task), /Kit rules/);
+});
+
+// --- a resume of a reviewer run is a review of the tree as it is now (keeb 2026-11-22: two resumes, three blocked `pr` calls) ---
+
+test("a resume of a reviewer run is scoped like a fresh review: gated, briefed with the diff, and its revived run gets the pending mark", () => {
+	const { home, dir, git } = appRepo();
+	// Synthetic ids: a real one would resolve against this machine's pi-subagents run dirs.
+	const L = "aaaa1111-0000-4000-8000-000000000001";
+	const X = "bbbb2222-0000-4000-8000-000000000002";
+	const first = snapshot(dir);
+	const launched = [msg("toolResult", { toolCallId: "r1", isError: false, content: [{ type: "text", text: `Async: reviewer [${L}]\n${reviewPendingMark(dir, first, L)}` }] })];
+	const h = load(() => false, { HOME: home });
+	const text = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
+	// Nothing changed since the review that run covers: nothing to resume into.
+	const same: Record<string, unknown> = { action: "resume", id: "aaaa1111", message: "Look again." };
+	assert.deepEqual(h.tool_call({ toolName: "subagent", toolCallId: "r2", input: same }, { cwd: dir, sessionManager: { getBranch: () => [...ready(dir), ...launched] } }), { block: true, reason: REASONS.reviewNothing });
+	// The fix pass edited code: the resume is gated on verify like a fresh call.
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 9;\n");
+	git("add", "-A");
+	git("commit", "-qm", "fix");
+	const edited = [msg("assistant", { content: [{ type: "toolCall", id: "e", name: "edit", arguments: { path: join(dir, "src", "a.ts") } }] })];
+	const unverified: Record<string, unknown> = { action: "resume", id: "aaaa1111", message: "Your P1s are fixed in 9a0e059." };
+	assert.deepEqual(h.tool_call({ toolName: "subagent", toolCallId: "r3", input: unverified }, { cwd: dir, sessionManager: { getBranch: () => [...launched, ...edited] } }), { block: true, reason: REASONS.reviewUnverified });
+	// Verified and looked at: the resume message gets the review scope, nothing else on the call changes.
+	const branch = [...launched, ...edited, ...ready(dir)];
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => branch } };
+	const input: Record<string, unknown> = { action: "resume", id: "aaaa1111", message: "Your P1s are fixed in 9a0e059." };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r4", input }, ctx), undefined);
+	assert.match(String(input.message), /^\[Review scope, set by pi-guard\. Follow it exactly\.\][\s\S]*Diff: \/tmp\/keeb-review\.diff[\s\S]*\[The parent's request\]\nYour P1s are fixed in 9a0e059\.$/);
+	assert.match(String(input.message), /src\/a\.ts/);
+	assert.equal(input.task, undefined);
+	assert.equal(input.cwd, undefined);
+	assert.equal(input.toolBudget, undefined);
+	assert.equal(input.id, "aaaa1111");
+	const r4 = h.tool_result({ toolCallId: "r4", toolName: "subagent", content: [{ type: "text", text: `Revived async subagent from ${L}.\nRevived run: ${X}\nAgent: reviewer` }], isError: false }, ctx);
+	assert.match(text(r4), new RegExp(`\\[pi-guard\\] review pending \\S+ at ${snapshot(dir)} run ${X}`));
+	// A resume of a run that is not a reviewer's goes through untouched.
+	const worker: Record<string, unknown> = { action: "resume", id: "96ab932e", message: "Remove the border." };
+	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r5", input: worker }, ctx), undefined);
+	assert.equal(worker.message, "Remove the border.");
+	assert.equal(h.tool_result({ toolCallId: "r5", toolName: "subagent", content: [{ type: "text", text: "Revived async subagent from 96ab932e-2cba-4b01-ac45-7d286b918a4b.\nRevived run: 11111111-2222-4333-8444-555555555555" }], isError: false }, ctx), undefined);
+});
+
+test("a reviewer or worker launch runs on the session's model when the configured one is not loaded; a loaded configured model is left to pi-subagents", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 6;\n");
+	mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+	writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ defaultModel: "spark/flash-auto", subagents: { agentOverrides: { reviewer: { model: "spark/qwen3.8-flash-next" } }, defaultModel: "spark/qwen3.8-flash-next" } }));
+	const handlers: Record<string, (event: any, ctx: any) => any> = {};
+	let loaded = ["inkling-2-mini"];
+	piGuard({ on: (event, handler) => void (handlers[event] = handler) }, () => false, { HOME: home }, () => loaded);
+	const ctx = (id: string) => ({ cwd: dir, model: { provider: "spark", id }, sessionManager: { getBranch: () => ready(dir) } });
+	const review: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m1", input: review }, ctx("inkling-2-mini")), undefined);
+	assert.equal(review.model, "spark/inkling-2-mini");
+	const work: Record<string, unknown> = { agent: "worker", task: "Build the toggle", cwd: dir };
+	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m2", input: work }, ctx("inkling-2-mini")), undefined);
+	assert.equal(work.model, "spark/inkling-2-mini");
+	loaded = ["qwen3.8-flash-next"];
+	const flash: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m3", input: flash }, ctx("flash-auto")), undefined);
+	assert.equal(flash.model, undefined, "the configured Flash-Next is loaded: pi-subagents applies it");
+	const status: Record<string, unknown> = { action: "status", id: "cc9f4fa1" };
+	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m4", input: status }, ctx("inkling-2-mini")), undefined);
+	assert.equal(status.model, undefined, "a status call names no agent and gets no model");
 });

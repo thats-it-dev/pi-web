@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -329,22 +329,35 @@ export function defaultResident(): string[] {
 	}
 }
 
-export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident): Block | { dir: string; snap: string; async: boolean } | undefined {
+/** The models llama-swap has loaded, bare ids; `[]` when the lookup fails. */
+function loadedModels(resident: Resident): string[] {
+	try {
+		return resident();
+	} catch {
+		return [];
+	}
+}
+
+export function scopeReview(input: Record<string, unknown>, branch: unknown[], cwd: string, home: string, resident: Resident = defaultResident, sessionModel?: string): Block | { dir: string; snap: string; async: boolean } | undefined {
 	if (indirectReviewer(input)) {
 		const json = JSON.stringify(input);
 		const named = workspacePath(json, cwd, home);
 		if (reviewApp(json, cwd, home) || (named && repoRoot(named, home))) return { block: true, reason: REASONS.reviewWorkflow };
 	}
-	if (input.agent !== "reviewer") return undefined;
-	const task = String(input.task ?? "");
+	// A `resume` of a reviewer run is a review of the tree as it is now, gated and briefed like a fresh call: keeb
+	// 2026-11-22, the orchestrator resumed its reviewer after each fix pass, neither resume counted, and `pr` was blocked
+	// three times for a review that had happened.
+	const resumed = input.action === "resume" ? reviewRun(branch, input.id) : undefined;
+	if (input.agent !== "reviewer" && !resumed) return undefined;
+	const task = String((resumed ? input.message : input.task) ?? "");
 	// The call's own cwd names the app as well as the task does: on keeb 2026-11-16 the orchestrator passed
 	// cwd=<app> on every reviewer call and, from the 11th on, a diff path relative to it, and none was scoped.
 	const callCwd = typeof input.cwd === "string" && input.cwd ? input.cwd.replace(/^~(?=\/)/, home) : cwd;
 	// An app first; else any other git repo under ~/workspace the task or the call's cwd names (its root, so a worktree
-	// is reviewed as itself).
-	const app = reviewApp(task, callCwd, home);
-	const named = app ? undefined : workspacePath(task, callCwd, home);
-	const dir = app ?? (named ? repoRoot(named, home) : undefined);
+	// is reviewed as itself). A resume reviews the repo the run it revives was scoped to.
+	const app = resumed ? appDir("", resumed.dir, home) : reviewApp(task, callCwd, home);
+	const named = app || resumed ? undefined : workspacePath(task, callCwd, home);
+	const dir = resumed?.dir ?? app ?? (named ? repoRoot(named, home) : undefined);
 	if (!dir) return undefined;
 	// A docs-only change (a design doc, a plan) needs no verify and no screen: keeb 2026-11-17, flash ran the full
 	// verify to get a plan review past this gate.
@@ -387,20 +400,22 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// review passed it.
 	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
 	const request = lastRequest(branch);
-	input.task = `${reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined })}\n${task}`;
+	const header = reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined });
+	// A resume keeps the run's own cwd, budget and model; only its message is scoped. The revived run is async, and
+	// its result names the new run id (asyncRunId), which the pending mark records.
+	if (resumed) {
+		input.message = `${header}\n${task}`;
+		return { dir, snap, async: true };
+	}
+	input.task = `${header}\n${task}`;
 	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
 	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
 	input.toolBudget = { ...REVIEW_BUDGET };
-	// A model stays only when it is already loaded: a review must never swap the serving group (flash-next and
-	// the agent pair are exclusive in llama-swap), but the final review may name the resident orchestrator model.
-	let loaded: string[] = [];
-	try {
-		loaded = resident();
-	} catch {
-		loaded = [];
-	}
-	if (typeof input.model !== "string" || !loaded.includes(input.model.replace(/^spark\//, ""))) delete input.model;
+	// The review runs on a model that is already loaded: it must never swap the serving group (flash-next, the agent
+	// pair and inkling are exclusive in llama-swap), so when the configured reviewer model is not loaded it runs on the
+	// session's (rules.ts, pinResidentModel).
+	pinResidentModel(input, readSettings(home), loadedModels(resident), sessionModel);
 	for (const k of ["context", "thinking", "tools", "skill", "usageBudget"]) delete input[k];
 	return { dir, snap, async: !!input.async };
 }
@@ -485,15 +500,19 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		if (event.toolName !== "subagent" || !event.input) return undefined;
 		// A resume after a stop tells the worker the stopped run's follow-up is withdrawn (its session file still holds it).
 		noteWithdrawn(event.input, branch());
+		const model = (ctx as { model?: { provider?: string; id?: string } }).model;
+		const sessionModel = model?.provider && model.id ? `${model.provider}/${model.id}` : undefined;
 		let scoped: ReturnType<typeof scopeReview>;
 		try {
-			scoped = scopeReview(event.input, branch(), ctx.cwd, home, resident);
+			scoped = scopeReview(event.input, branch(), ctx.cwd, home, resident, sessionModel);
 		} catch (err) {
 			return { block: true, reason: `Blocked: pi-guard could not prepare the review diff (${(err as Error).message.split("\n")[0]}). Check the app's git state (git status in the app), then call the reviewer again.` };
 		}
 		if (scoped && "block" in scoped) return scoped;
 		if (scoped) reviews.set(event.toolCallId, scoped);
 		else if (event.input.agent === "reviewer") unscoped.add(event.toolCallId);
+		// Every other launch (a worker, a scout) runs on a loaded model too, for the same reason as the review.
+		else if (typeof event.input.agent === "string") pinResidentModel(event.input, readSettings(home), loadedModels(resident), sessionModel);
 		return undefined;
 	});
 
@@ -527,7 +546,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		const text = (event.content ?? []).map((c: { type?: string; text?: string }) => (c.type === "text" ? c.text ?? "" : "")).join("\n");
 		// An async launch result holds no review: it is marked pending by run id, and when the id can't be read the
 		// mark names an unknown run, which never counts (fail closed), rather than passing for a finished review.
-		const runId = asyncRunId(text) ?? (scoped.async ? UNKNOWN_RUN : undefined);
+		const runId = asyncRunId(text) ?? (scoped.async && !reviewVerdict(text) ? UNKNOWN_RUN : undefined);
 		// A sync result is the review itself: without a verdict it gets a note, never the mark, so the PR gate stays shut and
 		// the next review starts from the same base. (An async run's reply is checked when its pending mark is resolved.)
 		if (!runId && !reviewVerdict(text)) return withExtra([{ type: "text", text: REVIEW_NO_VERDICT }]);
