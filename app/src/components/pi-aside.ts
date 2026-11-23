@@ -18,6 +18,7 @@ export class PiAside extends LitElement {
 		mode: { attribute: false },
 		size: { attribute: false },
 		selectedKey: { attribute: false },
+		open: { attribute: false },
 	};
 	declare progress: ProgressStore | null;
 	declare preview: PreviewState | null;
@@ -25,6 +26,7 @@ export class PiAside extends LitElement {
 	declare mode: PreviewMode;
 	declare size: AsideSize;
 	declare selectedKey: string | null;
+	declare open: boolean; // the shell shows the aside (a docked column not hidden, or the open drawer)
 
 	static styles = [
 		sharedStyles,
@@ -46,6 +48,7 @@ export class PiAside extends LitElement {
 		this.mode = "panel";
 		this.size = "default";
 		this.selectedKey = null;
+		this.open = false;
 	}
 
 	private pick(tab: AsideTab): void {
@@ -70,7 +73,7 @@ export class PiAside extends LitElement {
 				? html`<pi-progress-panel class="pane" ?hidden=${tab !== "progress"} .store=${this.progress} .selectedKey=${this.selectedKey}></pi-progress-panel>`
 				: nothing}
 			${hasPreview
-				? html`<pi-preview-panel class="pane" ?hidden=${tab !== "preview"} .preview=${this.preview} .mode=${this.mode} .size=${this.size}></pi-preview-panel>`
+				? html`<pi-preview-panel class="pane" ?hidden=${tab !== "preview"} .preview=${this.preview} .mode=${this.mode} .size=${this.size} .active=${this.open && tab === "preview"}></pi-preview-panel>`
 				: nothing}
 		`;
 	}

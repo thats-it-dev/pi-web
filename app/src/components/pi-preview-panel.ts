@@ -1,11 +1,10 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { EXPAND_ICON, EXTERNAL_LINK_ICON, REFRESH_ICON, X_ICON, sharedStyles } from "@thatsit/kit";
 import type { PreviewState } from "../../../shared/src/preview.ts";
-import { type AsideSize, type PreviewMode, VIEWPORTS, type Viewport, stageFor } from "../lib/preview-ui.ts";
+import { type AsideSize, POLL_MS, type PreviewMode, VIEWPORTS, type Viewport, nextPollDelay, shouldReload, stageFor } from "../lib/preview-ui.ts";
 import { previewCardStyles, renderPreviewCard } from "../render/messages.ts";
 
-const POLL_MS = 15_000;
-const KIND_LABEL = { dev: "dev server", static: "static", pages: "Pages preview" } as const;
+const KIND_LABEL = { dev: "dev server", static: "static", pages: "Pages" } as const;
 
 // The Preview tab: a header strip (url, viewport presets, reload, snap, pop-out), the app in an iframe and a status
 // line with the server's health. On a phone (mode "card") there is no iframe: the card from the reply plus the status.
@@ -15,6 +14,7 @@ export class PiPreviewPanel extends LitElement {
 		preview: { attribute: false },
 		mode: { attribute: false },
 		size: { attribute: false },
+		active: { attribute: false },
 		viewport: { state: true },
 		alive: { state: true },
 		reloadKey: { state: true },
@@ -23,12 +23,15 @@ export class PiPreviewPanel extends LitElement {
 	declare preview: PreviewState | null;
 	declare mode: PreviewMode;
 	declare size: AsideSize;
+	declare active: boolean; // the Preview tab is the one showing and the aside is open: only then the health poll runs
 	declare viewport: Viewport;
 	declare alive: boolean | null; // the server answered the last poll; null before the first answer, and for Pages
 	declare reloadKey: number; // bumped when the same url is announced again: the iframe reloads in place
 	declare stage: { w: number; h: number };
 
-	private poller: ReturnType<typeof setInterval> | undefined;
+	private poller: ReturnType<typeof setTimeout> | undefined;
+	private pollGen = 0; // bumped by stopPoll: an answer from an earlier run schedules nothing
+	private pollDelay = POLL_MS;
 	private observed: Element | null = null;
 	private loadedKey = 0; // the reloadKey the iframe last loaded
 	private resizer = new ResizeObserver((entries) => {
@@ -60,6 +63,7 @@ export class PiPreviewPanel extends LitElement {
 		this.preview = null;
 		this.mode = "panel";
 		this.size = "default";
+		this.active = false;
 		this.viewport = "fit";
 		this.alive = null;
 		this.reloadKey = 0;
@@ -82,15 +86,14 @@ export class PiPreviewPanel extends LitElement {
 	}
 
 	willUpdate(changed: PropertyValues<this>): void {
-		if (!changed.has("preview")) return;
-		const was = changed.get("preview") as PreviewState | null | undefined;
-		const now = this.preview;
-		if (was && now && was.url === now.url) {
-			// The same url announced again (pi restarted it, or reopened it): reload in place rather than re-mount.
-			// at 0 -> a time is the same announcement landing in the messages, not a new one.
-			if (was.at > 0 && now.at > was.at) this.reloadKey++;
-			if (was.kind !== now.kind) this.alive = null;
-		} else this.alive = null;
+		if (changed.has("preview")) {
+			const was = changed.get("preview") as PreviewState | null | undefined;
+			const now = this.preview;
+			// The same url from a new preview call (pi restarted it): reload in place rather than re-mount.
+			// The same call landing in the messages (its at going 0 -> a time) keeps its id: no reload.
+			if (shouldReload(was, now)) this.reloadKey++;
+			if (!was || !now || was.url !== now.url || was.kind !== now.kind) this.alive = null;
+		} else if (!changed.has("active")) return;
 		if (this.isConnected) this.startPoll();
 	}
 
@@ -114,32 +117,37 @@ export class PiPreviewPanel extends LitElement {
 		else this.startPoll();
 	};
 
-	// Polls at once, then every 15s, while the page is visible. Pages previews are not ours to watch.
+	// Polls at once, then every 15s (backing off to 60s while it is down), while the page is visible and the tab is
+	// showing in an open aside. Pages previews are not ours to watch.
 	private startPoll(): void {
 		this.stopPoll();
 		const p = this.preview;
-		if (!p || p.kind === "pages" || document.visibilityState === "hidden") return;
-		this.poll(p.url);
-		this.poller = setInterval(() => this.poll(p.url), POLL_MS);
+		if (!p || p.kind === "pages" || !this.active || document.visibilityState === "hidden") return;
+		this.pollDelay = POLL_MS;
+		this.poll(p.url, this.pollGen);
 	}
 
 	private stopPoll(): void {
-		clearInterval(this.poller);
+		clearTimeout(this.poller);
 		this.poller = undefined;
+		this.pollGen++;
 	}
 
 	// no-cors: the dev server's answer is opaque, but it resolving at all means something is listening.
-	private poll(url: string): void {
+	private poll(url: string, gen: number): void {
 		fetch(url, { method: "HEAD", mode: "no-cors", cache: "no-store" }).then(
-			() => this.answer(url, true),
-			() => this.answer(url, false),
+			() => this.answer(url, gen, true),
+			() => this.answer(url, gen, false),
 		);
 	}
 
-	private answer(url: string, alive: boolean): void {
+	private answer(url: string, gen: number, alive: boolean): void {
 		if (this.preview?.url !== url) return; // an answer for a url no longer shown
 		this.alive = alive;
 		this.requestUpdate(); // the uptime moves on
+		if (gen !== this.pollGen) return; // stopped or restarted since: that run schedules its own
+		this.pollDelay = nextPollDelay(this.pollDelay, alive);
+		this.poller = setTimeout(() => this.poll(url, gen), this.pollDelay);
 	}
 
 	private emit(type: string): void {

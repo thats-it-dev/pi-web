@@ -254,7 +254,7 @@ export class PiSession extends LitElement {
 	// Tell the app which preview the conversation has open (null: none, or stopped), when that changes.
 	private announcePreview(preview: PreviewState | null): void {
 		const was = this.announcedPreview;
-		if (was === preview || (was && preview && was.url === preview.url && was.at === preview.at && was.kind === preview.kind)) return;
+		if (was === preview || (was && preview && was.id === preview.id && was.url === preview.url && was.at === preview.at && was.kind === preview.kind)) return;
 		this.announcedPreview = preview;
 		this.dispatchEvent(new CustomEvent("pi-preview", { detail: { preview }, bubbles: true, composed: true }));
 	}

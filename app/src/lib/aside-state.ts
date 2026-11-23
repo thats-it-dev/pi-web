@@ -11,7 +11,15 @@ export interface AsideInput {
 	tab: AsideTab; // the tab last picked
 	hasProgress: boolean;
 	width: number;
-	lastSeenAt: number; // the newest derived preview already acted on
+	arrived: boolean; // the derived preview just arrived fresh (isFreshArrival): it takes the tab
+}
+
+export const FRESH_MS = 60_000; // a preview this new was just opened by pi, not restored from history
+
+/** A derived preview pi just opened: not seen yet, and live (at 0: its message has not landed) or under a minute old.
+ * One restored from history (reopening a chat) is not: the app records it as seen and leaves the tab alone. */
+export function isFreshArrival(p: PreviewState | null, seen: ReadonlySet<string>, now: number): boolean {
+	return !!p && !seen.has(p.id) && (p.at === 0 || now - p.at < FRESH_MS);
 }
 
 /** The preview to show: a Pages link opened after the latest derived preview wins; otherwise the derived one. */
@@ -20,10 +28,10 @@ export function shownPreview(i: Pick<AsideInput, "derived" | "pages">): PreviewS
 	return i.derived;
 }
 
-/** The tab to show: switches to "preview" when a derived preview newer than lastSeenAt arrives; "progress" when there is no preview. */
+/** The tab to show: "preview" when a fresh derived preview arrives; "progress" when there is no preview. */
 export function nextTab(i: AsideInput): AsideTab {
 	if (!shownPreview(i)) return "progress";
-	if (i.derived && i.derived.at > i.lastSeenAt) return "preview";
+	if (i.arrived && i.derived) return "preview";
 	if (!i.hasProgress) return "preview"; // an empty Progress tab shows nothing: the preview is what there is
 	return i.tab;
 }

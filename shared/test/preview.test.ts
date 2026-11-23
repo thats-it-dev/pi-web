@@ -20,7 +20,7 @@ const good = (n: number, extra: object = {}) =>
 
 test("the latest successful preview result is the state", () => {
 	const c = createConversation([user(), good(1, { timestamp: 10 }), good(2, { timestamp: 20 })]);
-	assert.deepEqual(derivePreview(c), { url: "http://localhost:2/", label: "app 2", kind: "dev", at: 20 });
+	assert.deepEqual(derivePreview(c), { id: "p2", url: "http://localhost:2/", label: "app 2", kind: "dev", at: 20 });
 });
 
 test("a stop result clears it", () => {
@@ -41,7 +41,21 @@ test("a live tool run with a result counts before its toolResult message lands",
 		running: false,
 		result: { content: [], details: { url: "http://localhost:9/", label: "live", kind: "static" } },
 	} as any;
-	assert.deepEqual(derivePreview(c), { url: "http://localhost:9/", label: "live", kind: "static", at: 0 });
+	assert.deepEqual(derivePreview(c), { id: "live", url: "http://localhost:9/", label: "live", kind: "static", at: 0 });
+});
+
+test("same url, new id → a different state id (a restart on the same url)", () => {
+	const restartedTo = { url: "http://localhost:1/", label: "app 1", kind: "dev" };
+	const first = derivePreview(createConversation([user(), good(1, { timestamp: 10 })]));
+	const c = createConversation([user(), good(1, { timestamp: 10 })]);
+	c.tools.again = { name: "preview", running: false, result: { content: [], details: restartedTo } } as any;
+	const live = derivePreview(c);
+	const landed = derivePreview(createConversation([user(), good(1, { timestamp: 10 }), result("again", restartedTo, { timestamp: 30 })]));
+	assert.equal(first?.id, "p1");
+	assert.equal(live?.url, first?.url);
+	assert.equal(live?.id, "again");
+	assert.notEqual(live?.id, first?.id);
+	assert.equal(landed?.id, "again"); // the same call landing in the messages keeps its id
 });
 
 test("nothing → null", () => {

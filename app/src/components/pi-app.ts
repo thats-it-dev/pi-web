@@ -2,7 +2,7 @@ import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { ARROW_LEFT_ICON, type Panel, type TkShell, sharedStyles } from "@thatsit/kit";
 import type { PreviewKind, PreviewState } from "../../../shared/src/preview.ts";
 import { HubApi } from "../lib/api.ts";
-import { type AsideTab, nextTab, shellAttrs, shownPreview, snapSize } from "../lib/aside-state.ts";
+import { type AsideTab, isFreshArrival, nextTab, shellAttrs, shownPreview, snapSize } from "../lib/aside-state.ts";
 import { launchRoute } from "../lib/launch.ts";
 import { ListStore } from "../lib/list-store.ts";
 import { type AsideSize, PHONE_MAX_W, type PreviewMode, TABLET_MAX_W, readTab } from "../lib/preview-ui.ts";
@@ -19,7 +19,6 @@ import type { PiSession } from "./pi-session.ts";
 
 // Above the class: customElements.define below constructs <pi-app> at once if it is already in the page.
 const TAB_KEY = "pi-web:aside-tab";
-const FRESH_MS = 60_000; // a preview this new was just opened by pi, not restored from history
 
 export class PiApp extends LitElement {
 	static properties = {
@@ -33,6 +32,7 @@ export class PiApp extends LitElement {
 		size: { state: true },
 		mode: { state: true },
 		finePointer: { state: true },
+		asideOpen: { state: true },
 	};
 	declare route: Route;
 	declare api: HubApi | null;
@@ -44,8 +44,9 @@ export class PiApp extends LitElement {
 	declare size: AsideSize; // the Preview tab's requested size (the Progress tab always has the default)
 	declare mode: PreviewMode;
 	declare finePointer: boolean;
+	declare asideOpen: boolean; // the shell shows the aside (docked and not hidden, or the open drawer), from tk-panel-change
 
-	private lastSeenAt = 0; // the newest derived preview already switched to, so it switches once
+	private seenIds = new Set<string>(); // derived previews (by call id) already acted on, so each switches the tab once
 	private previewOf: string | null = null; // the session the preview state belongs to
 	private phoneMq = matchMedia(`(max-width: ${PHONE_MAX_W}px)`);
 	private tabletMq = matchMedia(`(max-width: ${TABLET_MAX_W}px)`);
@@ -82,6 +83,7 @@ export class PiApp extends LitElement {
 		this.size = "default";
 		this.mode = this.computeMode();
 		this.finePointer = this.fineMq.matches;
+		this.asideOpen = false;
 	}
 
 	private computeMode(): PreviewMode {
@@ -130,30 +132,31 @@ export class PiApp extends LitElement {
 	}
 
 	// A session leaving the page cannot report it (its event no longer reaches here), so off a session the panel goes.
-	// Another session (or none) starts the preview state afresh: its own preview, no Pages link, nothing seen yet.
+	// Another session (or none) starts the preview state afresh: no preview till its own announces one (so no frame
+	// renders the previous session's), no Pages link, the default size (a "full" from that chat would hide this one).
 	willUpdate(changed: PropertyValues<this>): void {
 		if (changed.has("route") && !isSession(this.route)) this.progress = null;
 		const id = isSession(this.route) ? this.route.id : null;
 		if (id !== this.previewOf) {
 			this.previewOf = id;
-			if (!id) this.preview = null;
+			this.preview = null;
 			this.pages = null;
-			this.lastSeenAt = 0;
+			this.size = "default";
 		}
 		if (changed.has("tab")) writeStored(TAB_KEY, this.tab);
 	}
 
-	// A preview pi opened (newer than any already switched to) brings up the Preview tab, and the aside when it is
-	// fresh. One restored from history only picks the tab: reopening a chat doesn't throw a drawer over it.
+	// A preview pi just opened brings up the Preview tab, and the aside on a tablet or desktop (on a phone the reply's
+	// card and the header dot say it). One restored from history is only marked seen: reopening a chat keeps its tab.
 	private onPreview = (e: Event) => {
 		const preview = (e as CustomEvent<{ preview: PreviewState | null }>).detail.preview;
 		this.preview = preview;
-		if (!preview || preview.at <= this.lastSeenAt) return;
-		if (nextTab(this.asideInput()) === "preview") {
-			this.tab = "preview";
-			if (Date.now() - preview.at < FRESH_MS) void this.showAside();
-		}
-		this.lastSeenAt = preview.at;
+		if (!preview || this.seenIds.has(preview.id)) return;
+		const arrived = isFreshArrival(preview, this.seenIds, Date.now());
+		this.seenIds.add(preview.id);
+		if (!arrived) return;
+		this.tab = nextTab({ ...this.asideInput(), arrived });
+		if (this.mode !== "card") void this.showAside();
 	};
 
 	// From a card in the reply or a Pages link in the Progress tab. On a phone the card's own link opens the page.
@@ -162,7 +165,8 @@ export class PiApp extends LitElement {
 		// A card for a preview that is no longer live has nothing to show here: its link opens the url instead.
 		if (d.kind !== "pages" && this.preview?.url !== d.url) return;
 		e.preventDefault();
-		if (d.kind === "pages") this.pages = { url: d.url, label: d.label, kind: "pages", at: Date.now() };
+		// A dev card shows pi's preview: a Pages link shown over it goes.
+		this.pages = d.kind === "pages" ? { id: `pages:${d.url}`, url: d.url, label: d.label, kind: "pages", at: Date.now() } : null;
 		this.tab = "preview";
 		if (this.mode !== "card" || d.kind === "pages") void this.showAside();
 	};
@@ -201,7 +205,7 @@ export class PiApp extends LitElement {
 	}
 
 	private asideInput() {
-		return { derived: this.preview, pages: this.pages, tab: this.tab, hasProgress: this.progress !== null, width: window.innerWidth, lastSeenAt: this.lastSeenAt };
+		return { derived: this.preview, pages: this.pages, tab: this.tab, hasProgress: this.progress !== null, width: window.innerWidth, arrived: false };
 	}
 
 	private onProgress = (e: Event) => {
@@ -220,6 +224,7 @@ export class PiApp extends LitElement {
 	private onPanelChange = (e: Event) => {
 		const { panel, open, docked } = (e as CustomEvent<{ panel: Panel; open: boolean; docked: boolean }>).detail;
 		if (panel !== "aside") return;
+		this.asideOpen = open;
 		// The open drawer docked (the Preview tab docks from 900px up, or the window widened): its history entry goes.
 		if (docked) {
 			if (open && history.state?.piProgress) history.back(); // onPop finds no drawer open and leaves it
@@ -322,6 +327,7 @@ export class PiApp extends LitElement {
 							.mode=${this.mode}
 							.size=${this.size}
 							.selectedKey=${childKey}
+							.open=${this.asideOpen}
 							@pi-open-child=${this.onOpenChild}
 							@pi-open-plan=${this.onOpenPlan}
 							@pi-aside-tab=${this.onAsideTab}

@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { PreviewState } from "../../../shared/src/preview.ts";
-import { type AsideInput, nextTab, shellAttrs, shownPreview, snapSize } from "./aside-state";
+import { type AsideInput, FRESH_MS, isFreshArrival, nextTab, shellAttrs, shownPreview, snapSize } from "./aside-state";
 
-const dev = (at: number): PreviewState => ({ url: "https://spark.tail.ts.net:8443/", label: "fret", kind: "dev", at });
-const pages = (at: number): PreviewState => ({ url: "https://pr-4.fret.pages.dev/", label: "PR #4", kind: "pages", at });
-const input = (over: Partial<AsideInput>): AsideInput => ({ derived: null, pages: null, tab: "progress", hasProgress: true, width: 1400, lastSeenAt: 0, ...over });
+const dev = (at: number, id = "tc1"): PreviewState => ({ id, url: "https://spark.tail.ts.net:8443/", label: "fret", kind: "dev", at });
+const pages = (at: number): PreviewState => ({ id: "pages", url: "https://pr-4.fret.pages.dev/", label: "PR #4", kind: "pages", at });
+const input = (over: Partial<AsideInput>): AsideInput => ({ derived: null, pages: null, tab: "progress", hasProgress: true, width: 1400, arrived: false, ...over });
+
+describe("isFreshArrival", () => {
+	const now = 10_000_000;
+	it("an unseen preview under a minute old is fresh", () => expect(isFreshArrival(dev(now - 5_000), new Set(), now)).toBe(true));
+	it("a live one (at 0, its message not landed yet) is fresh", () => expect(isFreshArrival(dev(0), new Set(), now)).toBe(true));
+	it("one restored from history (older than a minute) is not", () => expect(isFreshArrival(dev(now - FRESH_MS - 1), new Set(), now)).toBe(false));
+	it("a seen id is not, even when its message lands later", () => expect(isFreshArrival(dev(now, "tc1"), new Set(["tc1"]), now)).toBe(false));
+	it("a restart on the same url is a new id: fresh again", () => expect(isFreshArrival(dev(0, "tc2"), new Set(["tc1"]), now)).toBe(true));
+	it("none is not", () => expect(isFreshArrival(null, new Set(), now)).toBe(false));
+});
 
 describe("shownPreview", () => {
 	it("a Pages link opened after the derived preview wins", () => expect(shownPreview({ derived: dev(100), pages: pages(200) })).toEqual(pages(200)));
@@ -18,12 +28,12 @@ describe("shownPreview", () => {
 
 describe("nextTab", () => {
 	it("no preview: Progress, whatever was picked", () => expect(nextTab(input({ tab: "preview" }))).toBe("progress"));
-	it("a derived preview newer than lastSeenAt flips to Preview", () => expect(nextTab(input({ derived: dev(500), lastSeenAt: 400 }))).toBe("preview"));
-	it("once seen, the picked tab stays", () => {
-		expect(nextTab(input({ derived: dev(500), lastSeenAt: 500, tab: "progress" }))).toBe("progress");
-		expect(nextTab(input({ derived: dev(500), lastSeenAt: 500, tab: "preview" }))).toBe("preview");
+	it("a fresh derived preview flips to Preview", () => expect(nextTab(input({ derived: dev(500), arrived: true }))).toBe("preview"));
+	it("a restored (not fresh) one keeps the picked tab", () => {
+		expect(nextTab(input({ derived: dev(500), tab: "progress" }))).toBe("progress");
+		expect(nextTab(input({ derived: dev(500), tab: "preview" }))).toBe("preview");
 	});
-	it("Progress with nothing in it shows the preview", () => expect(nextTab(input({ derived: dev(500), lastSeenAt: 500, hasProgress: false }))).toBe("preview"));
+	it("Progress with nothing in it shows the preview", () => expect(nextTab(input({ derived: dev(500), hasProgress: false }))).toBe("preview"));
 	it("a Pages override keeps the Preview tab", () => expect(nextTab(input({ pages: pages(9), tab: "preview" }))).toBe("preview"));
 });
 
