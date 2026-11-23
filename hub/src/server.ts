@@ -100,22 +100,24 @@ export function createHubServer(deps: HubDeps): Server {
 			return sendJson(res, 200, body, cors);
 		}
 		if (m === "POST" && p === "/api/sessions") {
-			const body = (await readJson(req)) as { cwd?: unknown; model?: unknown; thinking?: unknown };
+			const body = (await readJson(req)) as { cwd?: unknown; model?: unknown; thinking?: unknown; type?: unknown };
+			const type = body.type === "chat" ? "chat" : "code";
 			// Relative folders are relative to home, not to wherever the hub was started.
 			const raw = typeof body.cwd === "string" && body.cwd.trim() ? body.cwd.trim() : "~";
-			const cwd = resolve(home, raw.replace(/^~(?=\/|$)/, home));
-			if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new HttpError(400, `Not a folder: ${cwd}`);
+			// A chat lives in home whatever the body says; only a code session picks a folder.
+			const cwd = type === "chat" ? home : resolve(home, raw.replace(/^~(?=\/|$)/, home));
+			if (type !== "chat" && (!existsSync(cwd) || !statSync(cwd).isDirectory())) throw new HttpError(400, `Not a folder: ${cwd}`);
 			const wanted = parseModel(body);
 			const cat = await catalog.get();
 			const fallback = resolveChoice(cat, deps.lastModel?.get() ?? null);
 			// No catalog (the probe failed): pi gets what the app sent, and judges it itself.
 			if (!cat.models.length) {
-				const h = await registry.create(cwd, wanted);
+				const h = await registry.create(cwd, wanted, type);
 				return sendJson(res, 200, { sessionId: h.sessionId }, cors);
 			}
 			if (wanted && !cat.models.some((x) => x.provider === wanted.provider && x.id === wanted.modelId)) throw new HttpError(400, `Unknown model: ${wanted.provider}/${wanted.modelId}`);
 			const choice = wanted ? resolveChoice(cat, wanted) : fallback;
-			const h = await registry.create(cwd, choice);
+			const h = await registry.create(cwd, choice, type);
 			// Only a real pick is remembered: sending the default as-is leaves pi's own default free to change.
 			if (choice && !sameChoice(choice, fallback)) {
 				try {
@@ -216,9 +218,9 @@ export function createHubServer(deps: HubDeps): Server {
 		const fresh = registry
 			.all()
 			.filter((h) => h.sessionId && !known.has(h.sessionId))
-			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null, type: "code" as const }));
+			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null }));
 		const onDisk = files.map(({ file: _file, ...s }) => s);
-		return [...fresh, ...onDisk].map((s) => ({ ...s, ...registry.info(s.id) }));
+		return [...fresh, ...onDisk].map((s) => ({ ...s, type: registry.typeOf(s.id, s.parentSession), ...registry.info(s.id) }));
 	}
 
 	async function history(id: string) {
