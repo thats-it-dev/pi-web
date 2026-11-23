@@ -16,7 +16,15 @@ test("freeLocalPort returns a port nothing listens on; isListening sees a server
 	assert.ok(port > 0);
 	assert.equal(await isListening(port), false);
 	const srv = createServer().listen(port, "127.0.0.1");
-	await new Promise((r) => srv.once("listening", r));
-	assert.equal(await isListening(port), true);
-	srv.close();
+	try {
+		await new Promise((r) => srv.once("listening", r));
+		assert.equal(await isListening(port), true);
+	} finally {
+		srv.close();
+	}
+});
+
+test("isListening never throws: invalid ports resolve false", async () => {
+	assert.equal(await isListening(NaN), false);
+	assert.equal(await isListening(70000), false);
 });

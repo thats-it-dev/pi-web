@@ -24,7 +24,17 @@ export function freeLocalPort(): Promise<number> {
 /** Whether something accepts a TCP connection on 127.0.0.1:port (500 ms timeout). */
 export function isListening(port: number): Promise<boolean> {
 	return new Promise((resolve) => {
-		const sock = createConnection({ host: "127.0.0.1", port });
+		if (!Number.isInteger(port) || port <= 0 || port >= 65536) {
+			resolve(false);
+			return;
+		}
+		let sock: ReturnType<typeof createConnection>;
+		try {
+			sock = createConnection({ host: "127.0.0.1", port });
+		} catch {
+			resolve(false);
+			return;
+		}
 		let done = false;
 		const finish = (ok: boolean) => {
 			if (done) return;
