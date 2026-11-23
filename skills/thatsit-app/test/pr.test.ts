@@ -47,6 +47,18 @@ test("openPr reuses an existing open PR", async () => {
 	assert.ok(!f.lines().some((l) => l.startsWith("gh pr create")));
 });
 
+test("openPr with force pushes with --force-with-lease, and never otherwise", async () => {
+	const forced = fakeRun(table({ "git push --force-with-lease -u origin HEAD": {} }));
+	const r = await openPr(appDir(), { ...opts, force: true }, forced.run, { clock: clock(), log: () => {} });
+	assert.deepEqual(r, { pr: PR, number: 5 });
+	assert.ok(forced.lines().includes("git push --force-with-lease -u origin HEAD"));
+	assert.ok(!forced.lines().includes("git push -u origin HEAD"));
+	const plain = fakeRun(table());
+	await openPr(appDir(), { ...opts, force: false }, plain.run, { clock: clock(), log: () => {} });
+	assert.ok(plain.lines().includes("git push -u origin HEAD"));
+	assert.ok(!plain.lines().some((l) => l.includes("--force")));
+});
+
 test("waitPr fails with run pr first when the branch has no open PR", async () => {
 	await assert.rejects(waitPr(appDir(), fakeRun(table()).run, { clock: clock() }), /no open PR for this branch; run pr first/);
 });

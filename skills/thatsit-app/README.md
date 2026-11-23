@@ -14,7 +14,7 @@ A pi skill that turns "build me an app that does X" into a live PWA at `https://
 node scripts/thatsit-app.ts check <name>
 node scripts/thatsit-app.ts new <name> --title "..." --description "..." [--color "#RRGGBB"] [--resume]
 node scripts/thatsit-app.ts ship <dir>
-node scripts/thatsit-app.ts pr <dir> --title "..." --body "..." [--gateway-pr <N>]
+node scripts/thatsit-app.ts pr <dir> --title "..." --body "..." [--gateway-pr <N>] [--force true]
 node scripts/thatsit-app.ts gateway-checkout
 node scripts/thatsit-app.ts gateway-register <app>
 node scripts/thatsit-app.ts gateway-pr <dir> --title "..." --body "..."
@@ -32,6 +32,7 @@ pi reads this section (SKILL.md points here) before it builds an app that needs 
 - `gateway-register <app>` adds `{ "name": "<app>", "pagesSubdomain": "<sub>" }` to `apps.json` (`<sub>` is the app's Pages subdomain without `.pages.dev`, read with `cf pages get`) and commits `Register <app>`. Started on `main`, it first creates the branch `register-<app>`; started on another branch, it commits there. It fails when the app has no Pages project or is already registered. `RESULT` has `dir`, `branch`, `name`, `pagesSubdomain`.
 - `gateway-pr <dir> --title --body` refuses `main`, a dirty tree and any change outside `apps.json` and `apps/<app>/`, runs `npm run typecheck` and `npm test`, pushes, opens (or reuses the open) PR, waits for the GitHub `test` workflow, then for the spark's `spark-preview` commit status (20 minutes in all). `RESULT {"ok":true,"pr":...,"number":N,"preview":"https://spark-713a.tail9274fa.ts.net:<9500+N>"}`.
 - `pr <dir> ... --gateway-pr <N>` adds the line `Gateway: thats-it-dev/spark-gateway#<N>` to the app PR body, so the app preview talks to gateway preview N, and adds `gatewayPreview` to `RESULT`. The app's `app.config.json` must have `"gateway": true`.
+- `pr <dir> ... --force true` pushes with `git push --force-with-lease` instead of a plain push, for a branch that was rebased or amended after its first push (a plain push is rejected as non-fast-forward). The lease still refuses to overwrite commits that arrived on the remote branch since the last fetch. Anything other than `true`/`1`/`yes` or `false`/`0`/`no` is a usage error.
 
 **In the app:** set `"gateway": true` in `app.config.json`. Import `kv` (`get`, `put`, `del`, `list`) and `system` (`models`, `gpu`, `sessions`) from `src/gateway.ts`. When a call throws `OffTailnetError`, render `<tk-tailnet-only>` (it fires `retry`) instead of the app; a `GatewayError` is a real error, show it with `toast`. In e2e, stub every gateway request with `page.route`; never let tests reach the spark.
 

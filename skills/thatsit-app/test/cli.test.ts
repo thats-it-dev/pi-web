@@ -29,6 +29,13 @@ test("parseArgs ship and pr", () => {
 	assert.deepEqual(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B"]), { cmd: "pr", name: "/x/foo", title: "T", body: "B" });
 	assert.equal(parseArgs(["pr", "/x/foo", "--title", "T"]), null);
 	assert.equal(parseArgs(["ship", "/x/foo", "--title", "T"]), null);
+	// --force true asks for a force-with-lease push; off or absent leaves the args as before; anything else is a typo.
+	for (const v of ["true", "1", "yes"]) assert.deepEqual(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--force", v]), { cmd: "pr", name: "/x/foo", title: "T", body: "B", force: true }, v);
+	for (const v of ["false", "0", "no"]) assert.deepEqual(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--force", v]), { cmd: "pr", name: "/x/foo", title: "T", body: "B" }, v);
+	assert.equal(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--force", "maybe"]), null);
+	assert.equal(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--force"]), null, "the flag takes a value");
+	assert.deepEqual(parseArgs(["pr", "/x/foo", "--title", "T", "--body", "B", "--gateway-pr", "3", "--force", "true"]), { cmd: "pr", name: "/x/foo", title: "T", body: "B", gatewayPr: 3, force: true });
+	assert.equal(parseArgs(["gateway-pr", "/x/gw", "--title", "T", "--body", "B", "--force", "true"]), null, "gateway-pr has no --force");
 });
 
 test("parseArgs gateway subcommands and pr --gateway-pr", () => {

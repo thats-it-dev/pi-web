@@ -14,7 +14,7 @@ export type Args =
 	| { cmd: "check"; name: string }
 	| { cmd: "ship"; name: string }
 	| { cmd: "sync-template"; name: string }
-	| { cmd: "pr"; name: string; title: string; body: string; gatewayPr?: number }
+	| { cmd: "pr"; name: string; title: string; body: string; gatewayPr?: number; force?: boolean }
 	| { cmd: "pr-wait"; name: string }
 	| { cmd: "screenshot"; name: string; path?: string; scheme?: Scheme; click?: string; upload?: string; into?: string }
 	| { cmd: "gateway-pr-wait"; name: string }
@@ -50,17 +50,21 @@ export function parseArgs(argv: string[]): Args | null {
 		};
 	}
 	if (cmd === "pr" || cmd === "gateway-pr") {
-		const flags = cmd === "pr" ? ["--title", "--body", "--gateway-pr"] : ["--title", "--body"];
+		const flags = cmd === "pr" ? ["--title", "--body", "--gateway-pr", "--force"] : ["--title", "--body"];
 		const o: Record<string, string> = {};
 		for (let i = 0; i < rest.length; i += 2) {
 			if (!flags.includes(rest[i]) || rest[i + 1] === undefined || rest[i].slice(2) in o) return null;
 			o[rest[i].slice(2)] = rest[i + 1];
 		}
 		if (!o.title || !o.body) return null;
-		if (o["gateway-pr"] === undefined) return { cmd, name, title: o.title, body: o.body };
+		// `--force true` pushes with --force-with-lease (a branch rebased or amended after its first push); the key is
+		// only set when asked for, so `pr` without it parses exactly as before.
+		if (o.force !== undefined && !/^(?:true|1|yes|false|0|no)$/.test(o.force)) return null;
+		const force = /^(?:true|1|yes)$/.test(o.force ?? "") ? { force: true } : {};
+		if (o["gateway-pr"] === undefined) return { cmd, name, title: o.title, body: o.body, ...force };
 		// Accept "12" or "#12"; only 1-499 have a gateway preview.
 		const n = /^#?[1-9]\d*$/.test(o["gateway-pr"]) ? Number(o["gateway-pr"].replace("#", "")) : 0;
-		return n >= 1 && n <= MAX_GATEWAY_PR ? { cmd: "pr", name, title: o.title, body: o.body, gatewayPr: n } : null;
+		return n >= 1 && n <= MAX_GATEWAY_PR ? { cmd: "pr", name, title: o.title, body: o.body, gatewayPr: n, ...force } : null;
 	}
 	if (cmd !== "new") return null;
 	const o: Record<string, string> = {};
@@ -115,7 +119,7 @@ async function main(): Promise<number> {
 			return 0;
 		}
 		if (a.cmd === "pr") {
-			result({ ok: true, ...(await openPr(a.name, { title: a.title, body: a.body, gatewayPr: a.gatewayPr }, realRun)) });
+			result({ ok: true, ...(await openPr(a.name, { title: a.title, body: a.body, gatewayPr: a.gatewayPr, force: a.force }, realRun)) });
 			return 0;
 		}
 		if (a.cmd === "pr-wait") {

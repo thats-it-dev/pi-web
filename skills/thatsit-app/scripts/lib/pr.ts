@@ -10,7 +10,12 @@ export type Comment = { user?: { login?: string }; body?: string };
 
 // --paginate prints one JSON array per page back to back.
 export function parseComments(out: string): Comment[] {
-	return JSON.parse(`[${out.trim().replace(/^\[|\]$/g, "").replace(/\]\s*\[/g, ",")}]`);
+	const raw = `[${out.trim().replace(/^\[|\]$/g, "").replace(/\]\s*\[/g, ",")}]`;
+	try {
+		return JSON.parse(raw) as Comment[];
+	} catch (e) {
+		throw new Error(`could not parse PR comments as JSON: ${e instanceof Error ? e.message : String(e)}`);
+	}
 }
 
 export async function requireAhead(dir: string, run: Run): Promise<void> {
@@ -23,7 +28,14 @@ export async function requireAhead(dir: string, run: Run): Promise<void> {
 // and a merged one means the branch is spent, since its next PR would carry the old history under the old name.
 export async function openPrOf(dir: string, run: Run): Promise<{ url: string; number: number; body: string } | undefined> {
 	const r = await run("gh", ["pr", "view", "--json", "url,state,body"], { cwd: dir });
-	const info = r.code === 0 ? JSON.parse(r.stdout) : undefined;
+	let info: { url: string; state: string; body?: string } | undefined;
+	if (r.code === 0) {
+		try {
+			info = JSON.parse(r.stdout) as { url: string; state: string; body?: string };
+		} catch {
+			info = undefined;
+		}
+	}
 	if (info?.state === "MERGED") {
 		throw new Error(`this branch's PR #${prNumber(info.url)} was already merged; start a new branch from main for this change: git stash or commit, then git switch main && git pull && git switch -c <short-name>, bring the change over (git cherry-pick <commit> or redo it), and rerun pr`);
 	}
@@ -37,8 +49,9 @@ export function prNumber(url: string): number {
 }
 
 // Pushes the branch, then opens a PR unless one is already open. A rerun on a branch that has one (fixing a red run) only pushes.
-export async function pushAndOpen(dir: string, repo: string, o: { title: string; body: string }, run: Run, existing: { url: string; number: number } | undefined): Promise<{ url: string; number: number }> {
-	await must(run, "git", ["push", "-u", "origin", "HEAD"], { cwd: dir });
+export async function pushAndOpen(dir: string, repo: string, o: { title: string; body: string; force?: boolean }, run: Run, existing: { url: string; number: number } | undefined): Promise<{ url: string; number: number }> {
+	const pushArgs = o.force ? ["push", "--force-with-lease", "-u", "origin", "HEAD"] : ["push", "-u", "origin", "HEAD"];
+	await must(run, "git", pushArgs, { cwd: dir });
 	if (existing) return existing;
 	const url = (await must(run, "gh", ["pr", "create", "--repo", repo, "--title", o.title, "--body", o.body], { cwd: dir })).trim().split("\n").pop()!;
 	return { url, number: prNumber(url) };
@@ -58,14 +71,22 @@ export const gatewayLine = (n: number) => `Gateway: ${GATEWAY_REPO}#${n}`;
 
 export async function openPr(
 	dir: string,
-	o: { title: string; body: string; gatewayPr?: number },
+	o: { title: string; body: string; gatewayPr?: number; force?: boolean },
 	run: Run,
 	opts: PrOpts = {},
 ): Promise<{ pr: string; number: number }> {
 	const log = opts.log ?? stderrLog;
 	const { name, repo } = appRepo(dir);
-	if (o.gatewayPr !== undefined && JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway !== true) {
-		throw new Error('--gateway-pr needs "gateway": true in app.config.json; set it, commit, then rerun');
+	if (o.gatewayPr !== undefined) {
+		let gateway = false;
+		try {
+			gateway = JSON.parse(readFileSync(join(dir, "app.config.json"), "utf8")).gateway === true;
+		} catch (e) {
+			throw new Error(`could not read app.config.json: ${e instanceof Error ? e.message : String(e)}`);
+		}
+		if (!gateway) {
+			throw new Error('--gateway-pr needs "gateway": true in app.config.json; set it, commit, then rerun');
+		}
 	}
 	if (o.gatewayPr !== undefined && !hasGatewayFiles(dir)) {
 		throw new Error(`${name} predates gateway support; tell Michael (it needs the current template's gateway files)`);
@@ -82,7 +103,7 @@ export async function openPr(
 		const kept = existing.body.split("\n").filter((l) => !l.startsWith(`Gateway: ${GATEWAY_REPO}#`)).join("\n").trimEnd();
 		await must(run, "gh", ["pr", "edit", String(existing.number), "--repo", repo, "--body", `${kept}\n\n${line}`], { cwd: dir });
 	}
-	const { url: prUrl, number: num } = await pushAndOpen(dir, repo, { title: o.title, body }, run, existing);
+	const { url: prUrl, number: num } = await pushAndOpen(dir, repo, { title: o.title, body, force: o.force }, run, existing);
 	log(`pushed; PR ${prUrl}`);
 	return { pr: prUrl, number: num };
 }
