@@ -91,7 +91,8 @@ export class TkShell extends LitElement {
 			/* the drawer itself takes focus only as a fallback target; its content shows the focus */
 			.drawer:focus { outline: none; }
 			:host([aside-fullscreen]) .details.drawer { width: 100vw; max-width: none; }
-			.handle { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+			/* inside the column's edge: .details clips (overflow: hidden), so anything left of 0 is neither drawn nor hit */
+			.handle { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
 			.drawer.open { transform: none; visibility: visible; transition: transform 0.25s ease, visibility 0s; }
 			.overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 10; opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0s linear 0.25s; }
 			.drawer-open .overlay { opacity: 1; visibility: visible; transition: opacity 0.25s ease, visibility 0s; }
@@ -252,6 +253,8 @@ export class TkShell extends LitElement {
 		this.phoneMq.removeEventListener("change", this.onMode);
 		this.wideMq.removeEventListener("change", this.onMode);
 		this.resizeObserver.disconnect();
+		// A drag's window listeners would outlive the shell otherwise.
+		this.endDrag?.();
 		super.disconnectedCallback();
 	}
 
@@ -285,6 +288,11 @@ export class TkShell extends LitElement {
 		return { state, asideW };
 	}
 
+	// The full size is in effect only while the aside is a docked, open column.
+	private asideFull(s: PanelsState): boolean {
+		return s.aside.docked && s.aside.open && this.asideSize === "full";
+	}
+
 	/** Forgets the dragged width: the aside goes back to the default 300px. */
 	resetAsideWidth(): void {
 		this.storedAsideW = null;
@@ -297,26 +305,38 @@ export class TkShell extends LitElement {
 		}
 	}
 
+	// Ends the drag in progress, if any. Set while dragging so a handle removed mid-drag can still end it.
+	private endDrag: (() => void) | null = null;
+
 	// Pointer capture keeps the drag on the handle even when the pointer runs over an iframe or off the window.
+	// The listeners sit on window, not the handle, so the drag still ends if the handle is removed mid-drag.
 	private onHandleDown = (e: PointerEvent) => {
 		if (e.button !== 0) return;
+		this.endDrag?.();
 		const handle = e.currentTarget as HTMLElement;
-		handle.setPointerCapture(e.pointerId);
+		const id = e.pointerId;
+		handle.setPointerCapture(id);
 		const startX = e.clientX;
 		const startW = this.asideW;
 		let moved = false;
 		this.dragging = true;
 		const move = (ev: PointerEvent) => {
+			if (ev.pointerId !== id) return;
 			const s = this.state;
 			moved = true;
 			this.asideSize = "default";
 			// The handle is on the aside's left edge, so moving left widens it.
 			this.storedAsideW = clampAsideWidth(startW + (startX - ev.clientX), { total: this.width, navDocked: s.nav.docked && s.nav.open });
 		};
+		const onEnd = (ev: PointerEvent) => {
+			if (ev.pointerId === id) end();
+		};
 		const end = () => {
-			handle.removeEventListener("pointermove", move);
-			handle.removeEventListener("pointerup", end);
-			handle.removeEventListener("pointercancel", end);
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", onEnd);
+			window.removeEventListener("pointercancel", onEnd);
+			handle.removeEventListener("lostpointercapture", onEnd);
+			this.endDrag = null;
 			this.dragging = false;
 			// A press without a move (half of a double-click) stores nothing.
 			if (!moved || this.storedAsideW === null) return;
@@ -330,9 +350,11 @@ export class TkShell extends LitElement {
 			}
 			this.dispatchEvent(new CustomEvent("tk-aside-resize", { detail: { width }, bubbles: true, composed: true }));
 		};
-		handle.addEventListener("pointermove", move);
-		handle.addEventListener("pointerup", end);
-		handle.addEventListener("pointercancel", end);
+		this.endDrag = end;
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", onEnd);
+		window.addEventListener("pointercancel", onEnd);
+		handle.addEventListener("lostpointercapture", onEnd);
 	};
 
 	private setHidden(panel: Panel, value: boolean): void {
@@ -395,6 +417,10 @@ export class TkShell extends LitElement {
 		const prev = this.lastState;
 		this.lastState = now;
 		this.pushPanels(now);
+		// The effective full size, for app CSS: aside-size stays "full" while the aside is hidden or a drawer.
+		this.toggleAttribute("aside-full", this.asideFull(now));
+		// The handle went away mid-drag (un-docked, hidden, resizable dropped): its pointerup may never come.
+		if (this.endDrag && !this.renderRoot.querySelector(".handle")) this.endDrag();
 		if (!prev) return;
 		for (const p of PANELS) {
 			if (prev[p].open === now[p].open && prev[p].docked === now[p].docked) continue;
@@ -464,7 +490,7 @@ export class TkShell extends LitElement {
 		const drawer = drawerOf(s);
 		// While a drawer is open the rest of the shell is inert, unless a sheet (wherever it lives) needs input.
 		const blocked = drawer !== null && this.sheets === 0;
-		const cls = ["layout", this.navOpen ? "nav-open" : "", drawer ? "drawer-open" : "", s.nav.docked && s.nav.open ? "" : "nav-closed", asideColumn ? "" : "aside-closed", asideColumn && this.asideSize === "full" ? "aside-full" : "", this.dragging ? "dragging" : ""];
+		const cls = ["layout", this.navOpen ? "nav-open" : "", drawer ? "drawer-open" : "", s.nav.docked && s.nav.open ? "" : "nav-closed", asideColumn ? "" : "aside-closed", this.asideFull(s) ? "aside-full" : "", this.dragging ? "dragging" : ""];
 		const panel = (p: Panel) => {
 			const ps = s[p];
 			const isDrawer = ps.present && !ps.docked;
