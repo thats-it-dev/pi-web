@@ -1,9 +1,10 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
-import { sharedStyles } from "@thatsit/kit";
-import type { SessionSummary } from "../../../shared/src/protocol.ts";
-import { formatTokens, groupSessions, relativeTime, sessionTitle } from "../lib/format.ts";
+import { SQUARE_PEN_ICON, sharedStyles } from "@thatsit/kit";
+import type { SessionSummary, SessionType } from "../../../shared/src/protocol.ts";
+import { filterByType, formatTokens, groupSessions, newSessionLabel, relativeTime, sessionTitle } from "../lib/format.ts";
 import type { ListStore } from "../lib/list-store.ts";
 import { hrefFor } from "../lib/route.ts";
+import { sessionTypeToggle, sessionTypeToggleStyles } from "../render/session-type-toggle.ts";
 
 function stateLabel(s: SessionSummary): string | null {
 	if (s.state === "running") return "running";
@@ -19,24 +20,29 @@ function dotClass(s: SessionSummary): string {
 }
 
 export class PiSidebar extends LitElement {
-	static properties = { list: { attribute: false }, currentId: { attribute: false }, query: { state: true } };
+	static properties = { list: { attribute: false }, currentId: { attribute: false }, query: { state: true }, type: { attribute: false } };
 	declare list: ListStore | null;
 	declare currentId: string | null;
 	declare query: string;
+	declare type: SessionType;
 	private bound: ListStore | null = null;
 
 	static styles = [
 		sharedStyles,
+		sessionTypeToggleStyles,
 		css`
-			:host { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-			.top { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 16px 10px; }
+			:host { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+			.top { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; }
 			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text-primary); }
-			nav { display: flex; gap: 14px; font-family: var(--font-quote); font-weight: 500; font-size: 0.9rem; }
+			.top-end { display: flex; align-items: center; gap: 12px; }
+			.settings { font-family: var(--font-quote); font-weight: 500; font-size: 0.8rem; }
+			.new-session { position: absolute; left: 12px; bottom: calc(12px + var(--safe-bottom)); display: inline-flex; align-items: center; gap: 8px; }
+			.new-session svg { width: 16px; height: 16px; }
 			.search { padding: 0 16px 8px; }
 			.search input { width: 100%; border-color: var(--line); padding: 5px 9px; }
 			.offline { margin: 4px 16px 8px; font-size: 0.8rem; color: var(--accent); }
 			.retry { color: var(--primary); margin-left: 6px; }
-			.groups { overflow-y: auto; flex: 1; padding-bottom: calc(16px + var(--safe-bottom)); overscroll-behavior: contain; }
+			.groups { overflow-y: auto; flex: 1; padding-bottom: calc(64px + var(--safe-bottom)); overscroll-behavior: contain; }
 			h2.label { margin: 0; padding: 12px 16px 4px; font-weight: 400; }
 			.row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 2px; align-items: baseline; padding: 7px 16px 7px 14px; border-left: 2px solid transparent; color: var(--text-primary); }
 			.row:hover { background: var(--panel); }
@@ -53,6 +59,7 @@ export class PiSidebar extends LitElement {
 		this.list = null;
 		this.currentId = null;
 		this.query = "";
+		this.type = "code";
 	}
 
 	private onChange = () => this.requestUpdate();
@@ -73,11 +80,11 @@ export class PiSidebar extends LitElement {
 
 	render() {
 		const list = this.list;
-		const groups = list ? groupSessions(list.sessions, this.query, list.home) : [];
+		const groups = list ? groupSessions(filterByType(list.sessions, this.type), this.query, list.home) : [];
 		return html`
 			<div class="top">
 				<a class="brand" href="#/" aria-label="pi home"><span class="u on">pi</span></a>
-				<nav><a class="u" href="#/new">+ new</a><a class="u" href="#/settings">settings</a></nav>
+				<span class="top-end">${sessionTypeToggle(this.type, (t) => this.dispatchEvent(new CustomEvent("pi-session-type", { detail: { type: t }, bubbles: true, composed: true })))}<a class="u settings" href="#/settings">settings</a></span>
 			</div>
 			<label class="search">
 				<span class="sr-only">Search sessions</span>
@@ -86,8 +93,9 @@ export class PiSidebar extends LitElement {
 			${list?.error ? html`<div class="offline" role="status">${list.error}<button class="retry u" @click=${() => list.refresh()}>retry</button></div>` : nothing}
 			<div class="groups">
 				${groups.map((g) => html`<section><h2 class="label">${g.label}</h2>${g.sessions.map((s) => this.row(s))}</section>`)}
-				${list?.loaded && groups.length === 0 ? html`<p class="none">${this.query ? "No sessions match." : html`No sessions yet. <a href="#/new">Start one</a>.`}</p>` : nothing}
+				${list?.loaded && groups.length === 0 ? html`<p class="none">${this.query ? "No sessions match." : `No ${this.type} sessions yet.`}</p>` : nothing}
 			</div>
+			<button class="btn new-session" @click=${() => (location.hash = hrefFor({ name: "new" }))}>${SQUARE_PEN_ICON}<span>${newSessionLabel(this.type)}</span></button>
 		`;
 	}
 
