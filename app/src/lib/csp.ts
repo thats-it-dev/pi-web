@@ -8,6 +8,8 @@ export const CSP = [
 	"font-src 'self'",
 	"img-src 'self' data: blob:",
 	"connect-src 'self' https://*.ts.net:*",
+	// Previews are tailnet dev servers, Pages previews and thatsit.app sites.
+	"frame-src https://*.ts.net:* https://*.pages.dev https://*.thatsit.app",
 	"manifest-src 'self'",
 	"worker-src 'self'",
 	"base-uri 'none'",
