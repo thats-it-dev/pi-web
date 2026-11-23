@@ -60,6 +60,7 @@ export function summarize(file: string, text: string, mtimeMs: number): FileSumm
 		createdAt: Date.parse(header.timestamp) || mtimeMs,
 		updatedAt: mtimeMs,
 		parentSession: header.parentSession ?? null,
+		type: "code",
 	};
 }
 

@@ -648,7 +648,7 @@ test("shortModel takes the part after the last slash, cut at the first colon", (
 });
 
 test("closedSession titles: name, else first prompt line, else the folder; clipped to 60", () => {
-	const base = { id: "x", file: "/f", cwd: "/work/proj", name: null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: 0, updatedAt: 0, parentSession: null };
+	const base = { id: "x", file: "/f", cwd: "/work/proj", name: null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: 0, updatedAt: 0, parentSession: null, type: "code" as const };
 	assert.equal(closedSession({ ...base, name: "named", firstPrompt: "p" }).title, "named");
 	assert.equal(closedSession({ ...base, firstPrompt: "line one\nline two" }).title, "line one");
 	assert.equal(closedSession(base).title, "proj");

@@ -243,6 +243,8 @@ export interface ForkPoint {
 
 export type LiveState = "idle" | "running" | "needs_you" | "error";
 
+export type SessionType = "code" | "chat";
+
 export interface SessionSummary {
 	id: string;
 	cwd: string;
@@ -257,6 +259,7 @@ export interface SessionSummary {
 	live: boolean;
 	handleKind: HandleKind | null;
 	state: LiveState;
+	type: SessionType;
 }
 
 export type ListMessage =

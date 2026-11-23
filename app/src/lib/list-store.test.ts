@@ -4,7 +4,7 @@ import { ListStore } from "./list-store.ts";
 
 const s = (id: string, over: Partial<SessionSummary> = {}): SessionSummary => ({
 	id, cwd: "/w", name: null, firstPrompt: id, userMessages: 1, model: null, contextTokens: null,
-	createdAt: 0, updatedAt: 0, parentSession: null, live: false, handleKind: null, state: "idle", ...over,
+	createdAt: 0, updatedAt: 0, parentSession: null, live: false, handleKind: null, state: "idle", type: "code", ...over,
 });
 
 beforeEach(() => {

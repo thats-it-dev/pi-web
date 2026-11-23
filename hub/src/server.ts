@@ -216,7 +216,7 @@ export function createHubServer(deps: HubDeps): Server {
 		const fresh = registry
 			.all()
 			.filter((h) => h.sessionId && !known.has(h.sessionId))
-			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null }));
+			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null, type: "code" as const }));
 		const onDisk = files.map(({ file: _file, ...s }) => s);
 		return [...fresh, ...onDisk].map((s) => ({ ...s, ...registry.info(s.id) }));
 	}

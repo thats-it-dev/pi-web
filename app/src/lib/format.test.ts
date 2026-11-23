@@ -5,7 +5,7 @@ import { OUTPUT_LIMIT, abbreviateCwd, blocksText, formatCost, formatElapsed, for
 
 const s = (over: Partial<SessionSummary>): SessionSummary => ({
 	id: "x", cwd: "/home/m", name: null, firstPrompt: null, userMessages: 1, model: null, contextTokens: null,
-	createdAt: 0, updatedAt: 0, parentSession: null, live: false, handleKind: null, state: "idle", ...over,
+	createdAt: 0, updatedAt: 0, parentSession: null, live: false, handleKind: null, state: "idle", type: "code", ...over,
 });
 
 describe("format", () => {
