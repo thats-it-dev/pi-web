@@ -47,9 +47,15 @@ test.describe("resizable aside", () => {
 		await page.reload();
 		await page.waitForFunction(() => customElements.get("tk-shell"));
 		await expect.poll(() => width(page, aside)).toBe(500);
+		// resetAsideWidth() tells the app, so a size it asked for (half, full) goes back to default too.
+		await page.evaluate(() => {
+			(window as any).resizes = [];
+			document.addEventListener("tk-aside-resize", (e) => (window as any).resizes.push((e as CustomEvent).detail));
+		});
 		await page.locator("tk-shell .handle").dblclick();
 		await expect.poll(() => width(page, aside)).toBe(300);
 		expect(await page.evaluate(() => localStorage.getItem("kit-demo:panels:aside-w"))).toBe(null);
+		expect(await page.evaluate(() => (window as any).resizes)).toEqual([{ width: 300 }]);
 	});
 
 	test("half and full sizes", async ({ page }) => {
