@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import superpowersSwitch, { bootstrap, buildManualSkills, forPi, pairMode, PI_NOTES_PAIR, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
+import superpowersSwitch, { bootstrap, buildManualSkills, forPi, initialState, pairMode, PI_NOTES_PAIR, catalog, ENTRY_TYPE, FLOOR_ENTRY, manualOnly, savedState, STATUS_KEY, STATUS_ON, withBootstrap } from "../index.ts";
 
 const entry = (on: boolean) => ({ type: "custom", customType: ENTRY_TYPE, data: { on } });
 
@@ -20,6 +20,54 @@ test("savedState: default on for a code child, off otherwise, an entry always wi
 	assert.equal(savedState([], {}), false);
 	assert.equal(savedState([entry(false)], { PI_WEB_SESSION_TYPE: "code" }), false);
 	assert.equal(savedState([entry(true)], { PI_WEB_SESSION_TYPE: "chat" }), true);
+	assert.equal(savedState([], { PI_WEB_SESSION_TYPE: "code", PI_SUBAGENT_CHILD: "1" }), false, "a subagent child never starts on");
+	assert.equal(savedState([{ type: "message" }], { PI_WEB_SESSION_TYPE: "code" }), false, "an existing session is left alone");
+});
+
+test("initialState: a default only for a brand-new code session, never a child or an existing session", () => {
+	assert.equal(initialState([], { PI_WEB_SESSION_TYPE: "code" }), true);
+	assert.equal(initialState([{ type: "custom", customType: "other" }], { PI_WEB_SESSION_TYPE: "code" }), true);
+	assert.equal(initialState([], { PI_WEB_SESSION_TYPE: "chat" }), null);
+	assert.equal(initialState([], {}), null);
+	assert.equal(initialState([], { PI_WEB_SESSION_TYPE: "code", PI_SUBAGENT_CHILD: "1" }), null);
+	assert.equal(initialState([{ type: "message" }], { PI_WEB_SESSION_TYPE: "code" }), null);
+	assert.equal(initialState([entry(false)], { PI_WEB_SESSION_TYPE: "code" }), null);
+});
+
+function startWith(env: Record<string, string>, branch: unknown[]) {
+	const handlers: Record<string, (e: any, c: any) => any> = {};
+	const saved: unknown[] = [];
+	const status: Record<string, string | undefined> = {};
+	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: () => {}, appendEntry: (t, d) => saved.push([t, d]) });
+	const ctx = { sessionManager: { getBranch: () => branch }, ui: { setStatus: (k: string, t: string | undefined) => (status[k] = t), notify: () => {} } };
+	const keys = ["PI_WEB_SESSION_TYPE", "PI_SUBAGENT_CHILD"];
+	const before = keys.map((k) => process.env[k]);
+	for (const k of keys) delete process.env[k];
+	Object.assign(process.env, env);
+	try {
+		handlers.session_start({ reason: "startup" }, ctx);
+	} finally {
+		keys.forEach((k, i) => (before[i] === undefined ? delete process.env[k] : (process.env[k] = before[i])));
+	}
+	return { saved, status };
+}
+
+test("session start: an existing code session with messages and no switch entry stays off, writes nothing", () => {
+	const { saved, status } = startWith({ PI_WEB_SESSION_TYPE: "code" }, [{ type: "message" }]);
+	assert.equal(status[STATUS_KEY], undefined);
+	assert.deepEqual(saved, []);
+});
+
+test("session start: a brand-new chat session stays off and writes nothing", () => {
+	const { saved, status } = startWith({ PI_WEB_SESSION_TYPE: "chat" }, []);
+	assert.equal(status[STATUS_KEY], undefined);
+	assert.deepEqual(saved, []);
+});
+
+test("session start: a subagent child of a code session stays off and writes nothing", () => {
+	const { saved, status } = startWith({ PI_WEB_SESSION_TYPE: "code", PI_SUBAGENT_CHILD: "1" }, []);
+	assert.equal(status[STATUS_KEY], undefined);
+	assert.deepEqual(saved, []);
 });
 
 test("session start in a code child with an empty branch turns superpowers on", () => {
@@ -37,7 +85,7 @@ test("session start in a code child with an empty branch turns superpowers on", 
 		else process.env.PI_WEB_SESSION_TYPE = before;
 	}
 	assert.equal(status[STATUS_KEY], STATUS_ON);
-	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: "medium" }]]);
+	assert.deepEqual(saved, [[ENTRY_TYPE, { on: true }], [FLOOR_ENTRY, { level: "medium" }]], "the default is written into the session");
 });
 
 test("catalog: name, description and path of each manual skill, not using-superpowers", () => {

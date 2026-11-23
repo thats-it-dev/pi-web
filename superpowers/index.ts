@@ -118,10 +118,27 @@ type PiApi = {
 	appendEntry(customType: string, data?: unknown): void;
 };
 
-/** The chat's switch: the last saved state on the branch; with none, on in a pi-web code session, off elsewhere. */
+/** True when the hub launched this process for a pi-web code session. pi-subagents children inherit the
+ *  parent's env (plus PI_SUBAGENT_CHILD=1): a worker, reviewer or scout never starts with superpowers on. */
+export function codeSession(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.PI_WEB_SESSION_TYPE === "code" && !env.PI_SUBAGENT_CHILD;
+}
+
+const hasEntry = (branch: Iterable<unknown>) => [...branch].some((raw) => (raw as Entry).type === "custom" && (raw as Entry).customType === ENTRY_TYPE);
+const hasMessages = (branch: Iterable<unknown>) => [...branch].some((raw) => (raw as Entry).type === "message");
+
+/** The default a session takes at start, or null when none applies: on for a brand-new pi-web code session (no
+ *  saved switch, no messages yet), never for a subagent child or an existing session (resumes stay as they were). */
+export function initialState(branch: Iterable<unknown>, env: NodeJS.ProcessEnv = process.env): boolean | null {
+	const entries = [...branch];
+	return codeSession(env) && !hasEntry(entries) && !hasMessages(entries) ? true : null;
+}
+
+/** The chat's switch: the last saved state on the branch; with none, initialState's default, else off. */
 export function savedState(branch: Iterable<unknown>, env: NodeJS.ProcessEnv = process.env): boolean {
-	let on = env.PI_WEB_SESSION_TYPE === "code";
-	for (const raw of branch) {
+	const entries = [...branch];
+	let on = initialState(entries, env) ?? false;
+	for (const raw of entries) {
 		const e = raw as Entry;
 		if (e.type === "custom" && e.customType === ENTRY_TYPE) on = (e.data as { on?: unknown } | undefined)?.on === true;
 	}
@@ -192,7 +209,10 @@ export default function superpowersSwitch(pi: PiApi): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		const branch = [...(ctx.sessionManager?.getBranch() ?? [])];
-		on = savedState(branch, process.env);
+		const initial = initialState(branch, process.env);
+		on = initial ?? savedState(branch, process.env);
+		// A brand-new code session: write the default into the session, so a resume, fork or clone keeps it.
+		if (initial !== null) pi.appendEntry(ENTRY_TYPE, { on: initial });
 		// Chats switched on before the floor existed, or left with one after switching off.
 		const want = on ? FLOOR : null;
 		if (savedFloor(branch) !== want) pi.appendEntry(FLOOR_ENTRY, { level: want });
