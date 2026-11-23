@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -24,7 +25,7 @@ function viteApp(name = `app-${++seq}`): string {
 }
 
 /** A Tailscale whose exec works on an in-memory serve table: port -> local target port. */
-function fakeTailscale(serve = new Map<number, number>()) {
+function fakeTailscale(serve = new Map<number, number>(), onAdd?: (port: number, local: number) => void) {
 	const calls: string[] = [];
 	const ts = new Tailscale(async (cmd, args) => {
 		calls.push([cmd, ...args].join(" "));
@@ -42,6 +43,7 @@ function fakeTailscale(serve = new Map<number, number>()) {
 		const port = https ? Number(https.slice("--https=".length)) : NaN;
 		if (args[0] === "serve" && args[1] === "--bg") {
 			serve.set(port, Number(new URL(args[3]).port));
+			onAdd?.(port, Number(new URL(args[3]).port));
 		} else if (args[0] === "serve" && args[2] === "off") {
 			serve.delete(port);
 		}
@@ -84,8 +86,13 @@ function fakeSpawn(opts: { listen?: boolean; logLines?: string[] } = {}) {
 	return { spawnDev, spawned };
 }
 
-function setup(over: Partial<PreviewDeps> = {}, spawnOpts: Parameters<typeof fakeSpawn>[0] = {}, serve?: Map<number, number>) {
-	const tail = fakeTailscale(serve);
+function setup(
+	over: Partial<PreviewDeps> = {},
+	spawnOpts: Parameters<typeof fakeSpawn>[0] = {},
+	serve?: Map<number, number>,
+	onAdd?: (port: number, local: number) => void,
+) {
+	const tail = fakeTailscale(serve, onAdd);
 	const fs = fakeSpawn(spawnOpts);
 	const logDir = join(scratch, `logs-${++seq}`);
 	const deps: PreviewDeps = {
@@ -96,6 +103,7 @@ function setup(over: Partial<PreviewDeps> = {}, spawnOpts: Parameters<typeof fak
 		spawnDev: fs.spawnDev,
 		waitHealthy: (port, timeoutMs) => waitHealthy(port, Math.min(timeoutMs, 3000), 25),
 		logDir,
+		stateDir: join(scratch, `state-${++seq}`),
 		home: scratch,
 		...over,
 	};
@@ -259,16 +267,51 @@ test("a static dir is served with live reload and labelled by its folder", async
 	assert.equal(await isListening(local), false);
 });
 
-test("file picks the folder and the file name", async () => {
-	const { mgr } = setup();
+test("file serves its folder and the url opens that file", async () => {
+	const { mgr, serve } = setup();
 	const dir = join(scratch, `mockfile-${++seq}`);
 	mkdirSync(dir);
-	writeFileSync(join(dir, "mock.html"), "<html><body>m</body></html>");
-	const res = await mgr.run({ file: join(dir, "mock.html") }, scratch, "s1");
+	writeFileSync(join(dir, "my mock.html"), "<html><body>the file m</body></html>");
+	const res = await mgr.run({ file: join(dir, "my mock.html") }, scratch, "s1");
+	assert.equal(res.isError, undefined);
 	const d = res.details as PreviewDetails;
 	assert.equal(d.root, dir);
-	assert.equal(d.label, "mock.html");
+	assert.equal(d.label, "my mock.html");
 	assert.equal(d.kind, "static");
+	assert.equal(d.url, `https://${HOST}:10600/my%20mock.html`);
+	assert.match(res.content[0].text, /^Preview open at https:\/\/\S+:10600\/my%20mock\.html \(/);
+	const local = serve.get(10600)!;
+	const page = await fetch(`http://127.0.0.1:${local}${new URL(d.url).pathname}`);
+	assert.equal(page.status, 200);
+	assert.match(await page.text(), /the file m/);
+	await mgr.stop();
+});
+
+test("file must be a regular file", async () => {
+	const { mgr, calls } = setup();
+	const dir = join(scratch, `notafile-${++seq}`);
+	mkdirSync(dir);
+	const res = await mgr.run({ file: dir }, scratch, "s1");
+	assert.equal(res.isError, true);
+	assert.equal(res.content[0].text, `${dir} is not a file.`);
+	const missing = await mgr.run({ file: join(dir, "nope.html") }, scratch, "s1");
+	assert.equal(missing.isError, true);
+	assert.ok(missing.content[0].text.includes(join(dir, "nope.html")));
+	assert.equal(adds(calls).length, 0);
+});
+
+test("a leading ~ in cwd, dir and file is the home folder", async () => {
+	const { mgr } = setup();
+	const name = `tilde-${++seq}`;
+	const app = viteApp(name);
+	const res = await mgr.run({ cwd: `~/${name}` }, "/somewhere/else", "s1");
+	assert.equal(res.isError, undefined, res.content[0].text);
+	assert.equal((res.details as PreviewDetails).root, app);
+	writeFileSync(join(app, "page.html"), "<body>p</body>");
+	const file = await mgr.run({ file: `~/${name}/page.html` }, "/somewhere/else", "s1");
+	assert.equal((file.details as PreviewDetails).root, app);
+	const dir = await mgr.run({ dir: "~" }, "/somewhere/else", "s1");
+	assert.equal((dir.details as PreviewDetails).root, scratch);
 	await mgr.stop();
 });
 
@@ -316,4 +359,158 @@ test("health timeout kills the server and reports the log tail", async () => {
 	assert.ok(!text.includes("log line 10\n"), text);
 	assert.equal(adds(calls).length, 0);
 	assert.equal(mgr.current(), null);
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+test("two sessions starting at once end on different ports, each entry targeting its own server", async () => {
+	const serve = new Map<number, number>();
+	let release!: () => void;
+	const gate = new Promise<void>((r) => (release = r));
+	// A's health wait only ends after B has picked, started and added its port.
+	const a = setup({ waitHealthy: async (port) => (await gate, waitHealthy(port, 3000, 25)) }, {}, serve);
+	const b = setup({}, {}, serve);
+	const pa = a.mgr.run({ cwd: viteApp() }, scratch, "sA");
+	while (a.spawned.length === 0) await tick();
+	const rb = await b.mgr.run({ cwd: viteApp() }, scratch, "sB");
+	release();
+	const ra = await pa;
+	assert.equal(ra.isError, undefined, ra.content[0].text);
+	assert.equal(rb.isError, undefined, rb.content[0].text);
+	const pA = (ra.details as PreviewDetails).port;
+	const pB = (rb.details as PreviewDetails).port;
+	assert.notEqual(pA, pB);
+	assert.equal(serve.get(pA), a.spawned[0].port);
+	assert.equal(serve.get(pB), b.spawned[0].port);
+	await a.mgr.stop();
+	await b.mgr.stop();
+});
+
+test("a port overwritten right after our add is re-picked once", async () => {
+	const serve = new Map<number, number>();
+	const other = await freeLocalPort();
+	let hijacked = false;
+	// Another session's add lands on 10600 just after ours.
+	const onAdd = (port: number) => {
+		if (port === 10600 && !hijacked) {
+			hijacked = true;
+			serve.set(10600, other);
+		}
+	};
+	const { mgr, spawned } = setup({}, {}, serve, onAdd);
+	const res = await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	assert.equal(res.isError, undefined, res.content[0].text);
+	assert.equal((res.details as PreviewDetails).port, 10601);
+	assert.equal(serve.get(10601), spawned[0].port);
+	assert.equal(serve.get(10600), other);
+	await mgr.stop();
+});
+
+test("losing the port twice closes our server and is an error", async () => {
+	const serve = new Map<number, number>();
+	const other = await freeLocalPort();
+	const onAdd = (port: number) => void serve.set(port, other);
+	const { mgr, spawned } = setup({}, {}, serve, onAdd);
+	const res = await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	assert.equal(res.isError, true);
+	assert.match(res.content[0].text, /Could not claim a preview port in 10600-10649/);
+	assert.equal(spawned[0].killed, true);
+	assert.equal(mgr.current(), null);
+});
+
+function deadPid(): number {
+	for (let pid = 2 ** 22 - 1; pid > 1000; pid--) {
+		try {
+			process.kill(pid, 0);
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code === "ESRCH") return pid;
+		}
+	}
+	throw new Error("no dead pid found");
+}
+
+function sleeper(): ChildProcess {
+	const child = spawn("sleep", ["100"], { detached: true, stdio: "ignore" });
+	after(() => {
+		try {
+			process.kill(-child.pid!, "SIGKILL");
+		} catch {
+			// gone
+		}
+	});
+	return child;
+}
+
+function exitedWithin(child: ChildProcess, ms: number): Promise<boolean> {
+	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+	return new Promise((r) => {
+		const t = setTimeout(() => r(false), ms);
+		child.once("exit", () => (clearTimeout(t), r(true)));
+	});
+}
+
+test("an expose kills the dev servers of dead pi processes and leaves live owners alone", async () => {
+	const stateDir = join(scratch, `state-orphans-${++seq}`);
+	const dead = deadPid();
+	const deadDir = join(stateDir, String(dead));
+	const liveDir = join(stateDir, String(process.ppid));
+	const ownDir = join(stateDir, String(process.pid));
+	for (const d of [deadDir, liveDir, ownDir]) mkdirSync(d, { recursive: true });
+	const orphan = sleeper();
+	const liveChild = sleeper();
+	const ownChild = sleeper();
+	writeFileSync(join(deadDir, "pgid-5173"), String(orphan.pid));
+	writeFileSync(join(deadDir, "preview-10600.log"), "old log");
+	writeFileSync(join(liveDir, "pgid-5174"), String(liveChild.pid));
+	writeFileSync(join(ownDir, "pgid-5175"), String(ownChild.pid));
+	const { mgr } = setup({ stateDir });
+	const res = await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	assert.equal(res.isError, undefined, res.content[0].text);
+	assert.equal(await exitedWithin(orphan, 3000), true, "orphan killed");
+	assert.equal(orphan.signalCode, "SIGTERM");
+	assert.equal(existsSync(deadDir), false);
+	assert.equal(existsSync(join(liveDir, "pgid-5174")), true);
+	assert.equal(existsSync(join(ownDir, "pgid-5175")), true);
+	assert.equal(await exitedWithin(liveChild, 200), false, "live owner's server untouched");
+	assert.equal(await exitedWithin(ownChild, 50), false, "own server untouched");
+	await mgr.stop();
+});
+
+test("killNow closes a static server synchronously; stop then removes the entry", async () => {
+	const { mgr, serve } = setup();
+	const dir = join(scratch, `kill-${++seq}`);
+	mkdirSync(dir);
+	writeFileSync(join(dir, "index.html"), "<body>k</body>");
+	await mgr.run({ dir }, scratch, "s1");
+	const local = serve.get(10600)!;
+	assert.equal(await isListening(local), true);
+	mgr.killNow();
+	assert.equal(mgr.current(), null);
+	assert.equal(await isListening(local), false);
+	await mgr.stop();
+	assert.equal(serve.size, 0);
+});
+
+test("killNow kills a running dev server and its pgid file, and one still in its health wait", async () => {
+	const { mgr, spawned, deps, serve } = setup();
+	await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	writeFileSync(join(deps.logDir, `pgid-${spawned[0].port}`), "1001");
+	mgr.killNow();
+	assert.equal(spawned[0].killed, true);
+	assert.equal(existsSync(join(deps.logDir, `pgid-${spawned[0].port}`)), false);
+	await mgr.stop();
+	assert.equal(serve.size, 0);
+
+	let release!: () => void;
+	const gate = new Promise<void>((r) => (release = r));
+	const slow = setup({ waitHealthy: async (port) => (await gate, waitHealthy(port, 3000, 25)) });
+	const pending = slow.mgr.run({ cwd: viteApp() }, scratch, "s2");
+	while (slow.spawned.length === 0) await tick();
+	slow.mgr.killNow();
+	assert.equal(slow.spawned[0].killed, true);
+	release();
+	const res = await pending;
+	assert.equal(res.isError, true);
+	assert.equal(adds(slow.calls).length, 0);
+	assert.equal(slow.mgr.current(), null);
 });
