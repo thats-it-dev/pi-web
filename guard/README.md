@@ -249,3 +249,4 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   eight full prefills on the 27b, about 18 of its 55 orchestrator minutes, and the server log shows the miss but
   not its cause.
 
+- When UI files changed and no `preview` was opened for the app this session, the guard appends a `[pi-guard] no live preview ...` note to a screenshot or `pr` result. Once per session; it never blocks.
