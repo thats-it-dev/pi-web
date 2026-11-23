@@ -196,17 +196,22 @@ describe("pr section", () => {
 		it("panel mode hands the link to the panel and cancels navigation when taken", () => {
 			const { f, opts } = mount(view, { mode: "panel", openPreview: vi.fn(() => true) });
 			expect(clickLink(f, "https://p.example").defaultPrevented).toBe(true);
-			expect(opts.openPreview).toHaveBeenCalledWith("https://p.example", "preview");
+			expect(opts.openPreview).toHaveBeenCalledWith("https://p.example", "PR #7 preview");
 		});
 		it("lets the anchor navigate when the panel declines", () => {
 			const { f, opts } = mount(view, { mode: "panel", openPreview: vi.fn(() => false) });
 			expect(clickLink(f, "https://p.example").defaultPrevented).toBe(false);
 			expect(opts.openPreview).toHaveBeenCalledTimes(1);
 		});
-		it("gateway preview uses its own label", () => {
+		it("the panel label names the PR; gateway preview has its own", () => {
 			const { f, opts } = mount(view, { mode: "panel" });
 			expect(clickLink(f, "https://g.example").defaultPrevented).toBe(true);
-			expect(opts.openPreview).toHaveBeenCalledWith("https://g.example", "gateway preview");
+			expect(opts.openPreview).toHaveBeenCalledWith("https://g.example", "PR #7 gateway preview");
+		});
+		it("a PR without a number is just PR", () => {
+			const { f, opts } = mount(pr({ ci: "passed", preview: "https://p.example", number: null }), { mode: "panel" });
+			clickLink(f, "https://p.example");
+			expect(opts.openPreview).toHaveBeenCalledWith("https://p.example", "PR preview");
 		});
 		it("card mode never calls openPreview", () => {
 			const { f, opts } = mount(view, { mode: "card" });

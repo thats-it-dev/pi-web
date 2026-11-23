@@ -82,9 +82,11 @@ function prSection(view: ProgressView, opts: ProgressOpts) {
 	const p = view.pr;
 	if (!p) return nothing;
 	const link = (href: string, label: string) => html`<a class="link" href=${href} target="_blank" rel="noopener"><span class="txt">${label}</span></a>`;
+	// The panel's label names the PR ("PR #12 preview"), not the bare link text: its status line adds "Pages".
+	const pr = p.number != null ? `PR #${p.number}` : "PR";
 	const previewLink = (href: string, label: string) => {
 		const onClick = (e: Event) => {
-			if (opts.mode !== "card" && opts.openPreview(href, label)) e.preventDefault();
+			if (opts.mode !== "card" && opts.openPreview(href, `${pr} ${label}`)) e.preventDefault();
 		};
 		return html`<a class="link" href=${href} target="_blank" rel="noopener" @click=${onClick}><span class="txt">${label}</span></a>`;
 	};
