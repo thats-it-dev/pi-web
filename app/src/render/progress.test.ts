@@ -24,7 +24,7 @@ function flatten(v: unknown, fns: Array<() => void>): string {
 	return String(v);
 }
 function mount(view: ProgressView, over: Partial<Parameters<typeof renderProgress>[1]> = {}) {
-	const opts = { now: 100_000, selectedKey: null, openChild: vi.fn(), openPlan: vi.fn(), ...over };
+	const opts = { now: 100_000, selectedKey: null, openChild: vi.fn(), openPlan: vi.fn(), openPreview: vi.fn(() => true), mode: "card" as const, ...over };
 	const fns: Array<() => void> = [];
 	const html = flatten(renderProgress(view, opts), fns);
 	const text = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
@@ -184,6 +184,35 @@ describe("pr section", () => {
 		expect(f.text).toContain("preview");
 		expect(f.text).toContain("gateway preview");
 		expect(mount(pr({ ci: "passed", preview: "https://p.example" })).f.text).not.toContain("gateway");
+	});
+	describe("preview links", () => {
+		const view = pr({ ci: "passed", preview: "https://p.example", gatewayPreview: "https://g.example" });
+		const clickLink = (f: Flat, href: string) => {
+			const m = new RegExp(`href=${href.replace(/\./g, "\\.")}[^>]*@click=fn:(\\d+)`).exec(f.html);
+			const ev = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+			(f.fns[Number(m![1])] as unknown as (e: unknown) => void)(ev);
+			return ev;
+		};
+		it("panel mode hands the link to the panel and cancels navigation when taken", () => {
+			const { f, opts } = mount(view, { mode: "panel", openPreview: vi.fn(() => true) });
+			expect(clickLink(f, "https://p.example").defaultPrevented).toBe(true);
+			expect(opts.openPreview).toHaveBeenCalledWith("https://p.example", "preview");
+		});
+		it("lets the anchor navigate when the panel declines", () => {
+			const { f, opts } = mount(view, { mode: "panel", openPreview: vi.fn(() => false) });
+			expect(clickLink(f, "https://p.example").defaultPrevented).toBe(false);
+			expect(opts.openPreview).toHaveBeenCalledTimes(1);
+		});
+		it("gateway preview uses its own label", () => {
+			const { f, opts } = mount(view, { mode: "panel" });
+			expect(clickLink(f, "https://g.example").defaultPrevented).toBe(true);
+			expect(opts.openPreview).toHaveBeenCalledWith("https://g.example", "gateway preview");
+		});
+		it("card mode never calls openPreview", () => {
+			const { f, opts } = mount(view, { mode: "card" });
+			expect(clickLink(f, "https://p.example").defaultPrevented).toBe(false);
+			expect(opts.openPreview).not.toHaveBeenCalled();
+		});
 	});
 	it("running, failed and lost", () => {
 		expect(mount(pr({ ci: "running" })).f.text).toContain("CI running…");

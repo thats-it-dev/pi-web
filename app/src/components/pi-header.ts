@@ -66,7 +66,7 @@ export class PiHeader extends LitElement {
 	}
 
 	private frame(heading: string, pct: number | null, nums: string, status: string | null) {
-		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label="Progress">
+		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label=${this.previewLive ? "Progress, preview open" : "Progress"} aside-badge=${this.previewLive ? "•" : ""}>
 			<h1 slot="title">${heading}</h1>
 			${newChatButton()}
 			<button class="l2" aria-label="Session stats" @click=${() => this.emit("pi-open-sheet", "stats")}>

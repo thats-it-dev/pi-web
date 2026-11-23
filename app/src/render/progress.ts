@@ -1,5 +1,6 @@
 import { type TemplateResult, css, html, nothing } from "lit";
 import type { ChildState, SubagentChild, Todo } from "../../../shared/src/progress.ts";
+import type { PreviewMode } from "../lib/preview-ui.ts";
 import { formatElapsed } from "../lib/format.ts";
 import type { ProgressView } from "../lib/progress-store.ts";
 
@@ -8,6 +9,8 @@ export interface ProgressOpts {
 	selectedKey: string | null;
 	openChild: (key: string) => void;
 	openPlan: (path: string) => void;
+	mode: PreviewMode; // "card": preview links are plain new-tab links
+	openPreview: (url: string, label: string) => boolean; // true when the panel took the link
 }
 
 const MAX_TODOS = 8;
@@ -75,14 +78,20 @@ function todoSection(view: ProgressView) {
 	</section>`;
 }
 
-function prSection(view: ProgressView) {
+function prSection(view: ProgressView, opts: ProgressOpts) {
 	const p = view.pr;
 	if (!p) return nothing;
 	const link = (href: string, label: string) => html`<a class="link" href=${href} target="_blank" rel="noopener"><span class="txt">${label}</span></a>`;
+	const previewLink = (href: string, label: string) => {
+		const onClick = (e: Event) => {
+			if (opts.mode !== "card" && opts.openPreview(href, label)) e.preventDefault();
+		};
+		return html`<a class="link" href=${href} target="_blank" rel="noopener" @click=${onClick}><span class="txt">${label}</span></a>`;
+	};
 	return html`<section class="pr">
 		<h2 class="label">pr</h2>
 		${link(p.url, p.number == null ? (p.title ?? p.url) : `#${p.number}${p.title ? ` · ${p.title}` : ""}`)}
-		${p.ci === "passed" ? html`${p.preview ? link(p.preview, "preview") : nothing}${p.gatewayPreview ? link(p.gatewayPreview, "gateway preview") : nothing}` : nothing}
+		${p.ci === "passed" ? html`${p.preview ? previewLink(p.preview, "preview") : nothing}${p.gatewayPreview ? previewLink(p.gatewayPreview, "gateway preview") : nothing}` : nothing}
 		${p.ci === "running" ? html`<div class="note">CI running…</div>` : nothing}
 		${p.ci === "failed" ? html`<div class="note warn">CI failed${p.reason ? `: ${p.reason}` : ""}</div>` : nothing}
 		${p.ci === "lost" ? html`<div class="note">CI result lost</div>` : nothing}
@@ -144,7 +153,7 @@ function runSection(view: ProgressView, now: number) {
 export function renderProgress(view: ProgressView, opts: ProgressOpts): TemplateResult {
 	return html`<div class="progress">
 		<div class="activity ${view.activity}" role="status">${ACTIVITY[view.activity]}</div>
-		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${prSection(view)}${subagentSection(view, opts)}${runSection(view, opts.now)}
+		${goalSection(view)}${planSection(view, opts)}${todoSection(view)}${prSection(view, opts)}${subagentSection(view, opts)}${runSection(view, opts.now)}
 	</div>`;
 }
 
