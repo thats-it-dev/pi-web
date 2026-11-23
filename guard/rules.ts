@@ -1,7 +1,7 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 export type Block = { block: true; reason: string };
 
@@ -361,6 +361,36 @@ function repoOf(command: string, env: Env): string | undefined {
 }
 
 const OPENS_PR = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
+export const opensPr = (command: string): boolean => OPENS_PR.test(command);
+
+/** Appended to a screenshot or `pr` result when the app's UI changed and no live preview was opened this session. */
+export const PREVIEW_NOTE_MARK = "[pi-guard] no live preview ";
+export const previewNote = (dir: string): string =>
+	`${PREVIEW_NOTE_MARK}for ${dir} this session. Michael can look at the app live in pi-web's Preview panel: call preview({ cwd: "${dir}" }) now, tell him in one line, and end your turn; open the PR after he has looked or waved it off, unless the change isn't visual.`;
+
+/** Whether the branch has a finished, successful `preview` call whose cwd/dir/file resolves under `dir`. */
+export function previewOpened(branch: Iterable<unknown>, dir: string, cwd: string, home: string): boolean {
+	const calls = new Map<string, string>();
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const part of m.content as ToolCallPart[]) {
+				if (part.type !== "toolCall" || part.name !== "preview" || !part.id) continue;
+				const a = part.arguments ?? {};
+				const named = [a.cwd, a.dir, a.file].find((v) => typeof v === "string" && v) as string | undefined;
+				const expanded = named ? (named === "~" || named.startsWith("~/") ? home + named.slice(1) : named) : cwd;
+				calls.set(part.id, resolve(cwd, expanded));
+			}
+		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
+			const path = calls.get(m.toolCallId);
+			const url = (m as { details?: { url?: unknown } }).details?.url;
+			if (path && typeof url === "string" && (path === dir || path.startsWith(`${dir}/`))) return true;
+		}
+	}
+	return false;
+}
 const PUSHES = /\bgit(?:\s+-[Cc]\s+(?:[^\s"']|"[^"]*"|'[^']*')+|\s+-\S+)*\s+push\b/;
 // Any other git repo under ~/workspace gets an app's review gate at its own publish point, a push or `gh pr create`,
 // without the skill's scripts. Why: the website session of 2026-11-19 pushed a 77-file branch and opened its PR with

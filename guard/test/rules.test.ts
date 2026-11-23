@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1302,4 +1302,33 @@ test("pinResidentModel: a subagent runs on a model llama-swap already has loaded
 	const none: Record<string, unknown> = { agent: "reviewer", model: "spark/qwen3.8-27b-pi" };
 	pinResidentModel(none, settings, [], "spark/inkling-2-mini");
 	assert.equal(none.model, undefined);
+});
+
+const previewBranch = (args: Record<string, unknown>, result: Record<string, unknown>) => [
+	{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "preview", arguments: args }] } },
+	{ type: "message", message: { role: "toolResult", toolCallId: "p1", toolName: "preview", ...result } },
+];
+
+test("previewOpened finds a successful preview call for the app and not for another", () => {
+	const branch = previewBranch({ cwd: "~/workspace/apps/fret" }, { isError: false, details: { url: "https://x:10600", kind: "dev" } });
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/fret`, home, home), true);
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/keeb`, home, home), false);
+	assert.equal(previewOpened([], `${home}/workspace/apps/fret`, home, home), false);
+	const rel = previewBranch({ dir: "src" }, { isError: false, details: { url: "u" } });
+	assert.equal(previewOpened(rel, `${home}/workspace/apps/fret`, `${home}/workspace/apps/fret`, home), true, "relative to cwd");
+	const file = previewBranch({ file: `${home}/workspace/apps/fret/dist/index.html` }, { details: { url: "u" } });
+	assert.equal(previewOpened(file, `${home}/workspace/apps/fret`, home, home), true, "a file under the app");
+});
+
+test("an errored or stopped preview does not count", () => {
+	const dir = `${home}/workspace/apps/fret`;
+	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: true, details: { url: "u" } }), dir, home, home), false);
+	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: false, details: { stopped: true } }), dir, home, home), false);
+	assert.equal(previewOpened(previewBranch({ stop: true }, { isError: false, details: { url: "u" } }), dir, dir, home), true, "no path named: the session cwd");
+});
+
+test("previewNote names the dir and the tool call", () => {
+	const n = previewNote("/h/workspace/apps/fret");
+	assert.ok(n.startsWith(PREVIEW_NOTE_MARK));
+	assert.match(n, /preview\(\{ cwd: "\/h\/workspace\/apps\/fret" \}\)/);
 });

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { previewNote, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -390,7 +390,7 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const r = h.tool_call({ toolName: "bash", toolCallId: "pr", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.deepEqual(r, { block: true, reason: REASONS.screen }, "no picture yet");
 	const out = h.tool_result(result, ctx);
-	assert.equal(out.content.length, 7, "result, screen, spec, picture label, picture, comparison, mark");
+	assert.equal(out.content.length, 8, "result, screen, spec, picture label, picture, comparison, mark, preview note");
 	assert.deepEqual(out.content[1], { type: "image", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"), mimeType: "image/png" });
 	assert.match(out.content[2].text, /^docs\/spec\.md, what the screen must match:\n\n# Spec\n- Nut is drawn on the right edge\./);
 	assert.equal(out.content[3].text, 'Michael sent this picture with: "Make it look like this"');
@@ -801,3 +801,60 @@ test("a reviewer or worker launch runs on the session's model when the configure
 	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m4", input: status }, ctx("inkling-2-mini")), undefined);
 	assert.equal(status.model, undefined, "a status call names no agent and gets no model");
 });
+
+{
+	const shotCmd = (dir: string) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts screenshot ${dir}`;
+	const prCmd = (dir: string) => `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b`;
+	const opened = (dir: string) => [
+		msg("assistant", { content: [{ type: "toolCall", id: "p1", name: "preview", arguments: { cwd: dir } }] }),
+		msg("toolResult", { toolCallId: "p1", toolName: "preview", isError: false, details: { url: "https://x" } }),
+	];
+	// A tree the PR gates let through: verified, looked at, reviewed as it is.
+	const gated = (dir: string) => [...ready(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snapshot(dir)) }] })];
+	const ctxOf = (home: string, entries: unknown[]) => ({ cwd: home, sessionManager: { getBranch: () => entries } });
+	const result = (id: string, command: string) => ({ toolName: "bash", toolCallId: id, input: { command }, isError: false, content: [{ type: "text", text: "ok" }] });
+	const notes = (out: any, dir: string) => out?.content?.filter((c: any) => c.text === previewNote(dir)).length ?? 0;
+
+	test("the screenshot result carries the preview note once, when UI changed and no preview was opened", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home });
+		const ctx = ctxOf(home, []);
+		h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command: shotCmd(dir) } }, ctx);
+		assert.equal(notes(h.tool_result(result("s1", shotCmd(dir)), ctx), dir), 1);
+		h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command: shotCmd(dir) } }, ctx);
+		assert.equal(notes(h.tool_result(result("s2", shotCmd(dir)), ctx), dir), 0, "once");
+	});
+
+	test("a pr with UI changes and no preview gets the note; with a preview call in the branch it does not", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home });
+		const ctx = ctxOf(home, gated(dir));
+		assert.equal(h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx), undefined, "the gates let it through");
+		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 1);
+		const h2 = load(() => false, { HOME: home });
+		const ctx2 = ctxOf(home, [...gated(dir), ...opened(dir)]);
+		h2.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx2);
+		assert.equal(notes(h2.tool_result(result("r1", prCmd(dir)), ctx2), dir), 0);
+	});
+
+	test("a docs-only pr gets no preview note", () => {
+		const { home, dir } = appRepo();
+		mkdirSync(join(dir, "docs"), { recursive: true });
+		writeFileSync(join(dir, "docs", "spec.md"), "# Spec\n");
+		const h = load(() => false, { HOME: home });
+		const ctx = ctxOf(home, gated(dir));
+		h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx);
+		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 0);
+	});
+
+	test("no preview note in a subagent child", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home, PI_SUBAGENT_CHILD: "1" });
+		const ctx = ctxOf(home, []);
+		h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command: shotCmd(dir) } }, ctx);
+		assert.equal(notes(h.tool_result(result("s1", shotCmd(dir)), ctx), dir), 0);
+	});
+}
