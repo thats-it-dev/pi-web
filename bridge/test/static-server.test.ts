@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -39,6 +39,31 @@ test("the version endpoint changes when a file changes", async () => {
 		utimesSync(join(root, "a.css"), later, later);
 		const v2 = ((await (await fetch(url)).json()) as { version: number }).version;
 		assert.ok(v2 > v1);
+	} finally {
+		await s.close();
+	}
+});
+
+test("dot segments and symlinks out of the root are 404", async () => {
+	const outside = mkdtempSync(join(tmpdir(), "preview-outside-"));
+	after(() => rmSync(outside, { recursive: true, force: true }));
+	writeFileSync(join(outside, "secret.html"), "<body>outside</body>");
+	mkdirSync(join(outside, "folder"));
+	writeFileSync(join(outside, "folder", "index.html"), "<body>outside folder</body>");
+	writeFileSync(join(root, ".secret"), "token");
+	mkdirSync(join(root, ".git"));
+	writeFileSync(join(root, ".git", "config"), "[core]");
+	symlinkSync(join(outside, "secret.html"), join(root, "link.html"));
+	symlinkSync(join(outside, "folder"), join(root, "linkdir"));
+	const s = await startStaticServer(root);
+	try {
+		const base = `http://127.0.0.1:${s.port}`;
+		assert.equal((await fetch(`${base}/.secret`)).status, 404);
+		assert.equal((await fetch(`${base}/.git/config`)).status, 404);
+		assert.equal((await fetch(`${base}/sub/%2e%2e/.secret`)).status, 404);
+		assert.equal((await fetch(`${base}/link.html`)).status, 404);
+		assert.equal((await fetch(`${base}/linkdir/`)).status, 404);
+		assert.equal((await fetch(`${base}/a.css`)).status, 200);
 	} finally {
 		await s.close();
 	}

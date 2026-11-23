@@ -1,5 +1,5 @@
 import { createServer, type ServerResponse } from "node:http";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { extname, join, resolve, sep } from "node:path";
 
 export interface StaticServer {
@@ -57,8 +57,14 @@ function notFound(res: ServerResponse): void {
 	res.end("Not found");
 }
 
+/** True when `file` is `base` or inside it. */
+function within(base: string, file: string): boolean {
+	return file === base || file.startsWith(base.endsWith(sep) ? base : base + sep);
+}
+
 export function startStaticServer(root: string): Promise<StaticServer> {
 	const base = resolve(root);
+	let realBase: Promise<string> | undefined;
 	const server = createServer(async (req, res) => {
 		try {
 			const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -67,14 +73,20 @@ export function startStaticServer(root: string): Promise<StaticServer> {
 				res.end(JSON.stringify({ version: await maxMtime(base) }));
 				return;
 			}
-			let file = resolve(base, `.${decodeURIComponent(pathname)}`);
-			if (file !== base && !file.startsWith(base + sep)) return notFound(res);
+			const decoded = decodeURIComponent(pathname);
+			// No dotfiles or dot folders (.git, .env, ..): mockups never need them.
+			if (decoded.split("/").some((seg) => seg.startsWith("."))) return notFound(res);
+			let file = resolve(base, `.${decoded}`);
+			if (!within(base, file)) return notFound(res);
 			let st = await stat(file);
 			if (st.isDirectory()) {
 				file = join(file, "index.html");
 				st = await stat(file);
 			}
 			if (!st.isFile()) return notFound(res);
+			// A symlink inside the root must not reach a file outside it.
+			realBase ??= realpath(base);
+			if (!within(await realBase, await realpath(file))) return notFound(res);
 			const ext = extname(file).slice(1).toLowerCase();
 			const type = MIME[ext] ?? "application/octet-stream";
 			let body: Buffer | string = await readFile(file);
