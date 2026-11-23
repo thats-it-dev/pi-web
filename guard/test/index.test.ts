@@ -390,7 +390,7 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const r = h.tool_call({ toolName: "bash", toolCallId: "pr", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.deepEqual(r, { block: true, reason: REASONS.screen }, "no picture yet");
 	const out = h.tool_result(result, ctx);
-	assert.equal(out.content.length, 8, "result, screen, spec, picture label, picture, comparison, mark, preview note");
+	assert.equal(out.content.length, 7, "result, screen, spec, picture label, picture, comparison, mark");
 	assert.deepEqual(out.content[1], { type: "image", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"), mimeType: "image/png" });
 	assert.match(out.content[2].text, /^docs\/spec\.md, what the screen must match:\n\n# Spec\n- Nut is drawn on the right edge\./);
 	assert.equal(out.content[3].text, 'Michael sent this picture with: "Make it look like this"');
@@ -813,17 +813,45 @@ test("a reviewer or worker launch runs on the session's model when the configure
 	const gated = (dir: string) => [...ready(dir), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snapshot(dir)) }] })];
 	const ctxOf = (home: string, entries: unknown[]) => ({ cwd: home, sessionManager: { getBranch: () => entries } });
 	const result = (id: string, command: string) => ({ toolName: "bash", toolCallId: id, input: { command }, isError: false, content: [{ type: "text", text: "ok" }] });
-	const notes = (out: any, dir: string) => out?.content?.filter((c: any) => c.text === previewNote(dir)).length ?? 0;
+	const notes = (out: any, dir: string, when: "review" | "pr" = "pr") => out?.content?.filter((c: any) => c.text === previewNote(dir, when)).length ?? 0;
 
-	test("the screenshot result carries the preview note once, when UI changed and no preview was opened", () => {
+	const reviewCall = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
+	const reviewResult = (id: string) => ({ toolCallId: id, toolName: "subagent", isError: false, content: [{ type: "text", text: "## Review\n- Checked: a.ts\n- Merge verdict: OK" }] });
+
+	test("the scoped reviewer result carries the preview note once, when UI changed and no preview was opened; a screenshot never does", () => {
 		const { home, dir } = appRepo();
 		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
 		const h = load(() => false, { HOME: home });
-		const ctx = ctxOf(home, []);
+		const ctx = ctxOf(home, ready(dir));
 		h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command: shotCmd(dir) } }, ctx);
-		assert.equal(notes(h.tool_result(result("s1", shotCmd(dir)), ctx), dir), 1);
-		h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command: shotCmd(dir) } }, ctx);
-		assert.equal(notes(h.tool_result(result("s2", shotCmd(dir)), ctx), dir), 0, "once");
+		assert.equal(notes(h.tool_result(result("s1", shotCmd(dir)), ctx), dir, "review"), 0, "not on the screenshot");
+		assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "v1", input: { ...reviewCall } }, ctx), undefined);
+		assert.equal(notes(h.tool_result(reviewResult("v1"), ctx), dir, "review"), 1);
+		h.tool_call({ toolName: "subagent", toolCallId: "v2", input: { ...reviewCall } }, ctx);
+		assert.equal(notes(h.tool_result(reviewResult("v2"), ctx), dir, "review"), 0, "once");
+	});
+
+	test("a reviewer call then a pr in one session: the note rides on the reviewer result only", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home });
+		const before = ctxOf(home, ready(dir));
+		assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "v1", input: { ...reviewCall } }, before), undefined);
+		assert.equal(notes(h.tool_result(reviewResult("v1"), before), dir, "review"), 1);
+		// The review's mark is on the branch now, so the PR gates let the pr through.
+		const ctx = ctxOf(home, gated(dir));
+		assert.equal(h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx), undefined, "the gates let it through");
+		const out = h.tool_result(result("r1", prCmd(dir)), ctx);
+		assert.equal(notes(out, dir, "pr") + notes(out, dir, "review"), 0);
+	});
+
+	test("a reviewer result gets no preview note when a preview was opened for the app", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home });
+		const ctx = ctxOf(home, [...ready(dir), ...opened(dir)]);
+		h.tool_call({ toolName: "subagent", toolCallId: "v1", input: { ...reviewCall } }, ctx);
+		assert.equal(notes(h.tool_result(reviewResult("v1"), ctx), dir, "review"), 0);
 	});
 
 	test("a pr with UI changes and no preview gets the note; with a preview call in the branch it does not", () => {
@@ -853,8 +881,11 @@ test("a reviewer or worker launch runs on the session's model when the configure
 		const { home, dir } = appRepo();
 		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
 		const h = load(() => false, { HOME: home, PI_SUBAGENT_CHILD: "1" });
-		const ctx = ctxOf(home, []);
-		h.tool_call({ toolName: "bash", toolCallId: "s1", input: { command: shotCmd(dir) } }, ctx);
-		assert.equal(notes(h.tool_result(result("s1", shotCmd(dir)), ctx), dir), 0);
+		const before = ctxOf(home, ready(dir));
+		assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "v1", input: { ...reviewCall } }, before), undefined);
+		assert.equal(notes(h.tool_result(reviewResult("v1"), before), dir, "review"), 0);
+		const ctx = ctxOf(home, gated(dir));
+		assert.equal(h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx), undefined);
+		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 0);
 	});
 }

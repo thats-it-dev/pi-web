@@ -1324,11 +1324,48 @@ test("an errored or stopped preview does not count", () => {
 	const dir = `${home}/workspace/apps/fret`;
 	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: true, details: { url: "u" } }), dir, home, home), false);
 	assert.equal(previewOpened(previewBranch({ cwd: dir }, { isError: false, details: { stopped: true } }), dir, home, home), false);
-	assert.equal(previewOpened(previewBranch({ stop: true }, { isError: false, details: { url: "u" } }), dir, dir, home), true, "no path named: the session cwd");
 });
 
-test("previewNote names the dir and the tool call", () => {
-	const n = previewNote("/h/workspace/apps/fret");
-	assert.ok(n.startsWith(PREVIEW_NOTE_MARK));
-	assert.match(n, /preview\(\{ cwd: "\/h\/workspace\/apps\/fret" \}\)/);
+test("previewOpened: a preview call that names no path counts for the session cwd", () => {
+	const dir = `${home}/workspace/apps/fret`;
+	const branch = previewBranch({}, { isError: false, details: { url: "u" } });
+	assert.equal(previewOpened(branch, dir, dir, home), true);
+	assert.equal(previewOpened(branch, `${home}/workspace/apps/keeb`, dir, home), false);
 });
+
+test("previewNote names the dir and the tool call, asks a question after the review and keeps pr-wait after a pr", () => {
+	const review = previewNote("/h/workspace/apps/fret", "review");
+	const pr = previewNote("/h/workspace/apps/fret", "pr");
+	for (const n of [review, pr]) {
+		assert.ok(n.startsWith(PREVIEW_NOTE_MARK));
+		assert.match(n, /preview\(\{ cwd: "\/h\/workspace\/apps\/fret" \}\)/);
+	}
+	assert.match(review, /ask him in one line whether it looks right, then end your turn/);
+	assert.match(pr, /the PR is open, but Michael hasn't seen it live/);
+	assert.match(pr, /start pr-wait with the bg_bash tool/);
+	assert.match(pr, /together with the PR link/);
+});
+
+{
+	// The plan-4 review's case: an app edit, a live preview opened, a short reply with no question.
+	const fret = `${home}/workspace/apps/fret`;
+	const user = { role: "user", content: "make the fret dots a touch bigger" };
+	const edit = { role: "assistant", content: [{ type: "toolCall", id: "e1", name: "edit", arguments: { path: `${fret}/src/app.css` } }] };
+	const edited = { role: "toolResult", toolCallId: "e1", toolName: "edit", content: [{ type: "text", text: "ok" }] };
+	const call = { role: "assistant", content: [{ type: "toolCall", id: "p1", name: "preview", arguments: { cwd: "~/workspace/apps/fret" } }] };
+	const opened = (extra: Record<string, unknown>) => ({ role: "toolResult", toolCallId: "p1", toolName: "preview", content: [{ type: "text", text: "Preview open at https://x" }], ...extra });
+	const reply = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "The live preview is open; have a look." }] };
+	const nudges = (run: any[]) => [shouldNudge(run), shouldNudgePr(run, appsNeedingPr(run, home, () => true))];
+
+	test("a run that opened a live preview is waiting on Michael: no stall nudge, no PR nudge", () => {
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ details: { url: "https://x" } }), reply]), [false, false]);
+	});
+
+	test("without the preview, or with an errored one, both nudges still fire", () => {
+		const ran = { role: "assistant", content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "npm test" } }] };
+		const passed = { role: "toolResult", toolCallId: "b1", toolName: "bash", content: [{ type: "text", text: "ok" }] };
+		assert.deepEqual(nudges([user, edit, edited, ran, passed, reply]), [true, true]);
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: true, details: { url: "https://x" } }), reply]), [true, true]);
+		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: false, details: {} }), reply]), [true, true], "no url, no preview");
+	});
+}
