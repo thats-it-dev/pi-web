@@ -1135,7 +1135,8 @@ export function shouldNudgeTodos(messages: Msg[], open: Todo[]): boolean {
 	let start = messages.length;
 	while (start > 0 && messages[start - 1].role !== "user") start--;
 	const run = messages.slice(start);
-	if (waitingOnBackground(run)) return false;
+	// A preview the run opened is Michael's turn to look; "keep working on it" would push pi past it.
+	if (waitingOnBackground(run) || previewOpenedThisRun(run)) return false;
 	const last = run.at(-1);
 	if (!last || last.role !== "assistant" || last.stopReason !== "stop") return false;
 	if (asksUser(textOf(last))) return false;

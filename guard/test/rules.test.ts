@@ -1368,4 +1368,13 @@ test("previewNote names the dir and the tool call, asks a question after the rev
 		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: true, details: { url: "https://x" } }), reply]), [true, true]);
 		assert.deepEqual(nudges([user, edit, edited, call, opened({ isError: false, details: {} }), reply]), [true, true], "no url, no preview");
 	});
+
+	test("a run that opened a live preview gets no to-do nudge either; without the preview it does", () => {
+		const said = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "The preview is open in the Preview tab. Have a look." }] };
+		const open = [{ id: 1, subject: "Bigger fret dots", status: "pending" }];
+		assert.equal(shouldNudgeTodos([user, edit, edited, call, opened({ details: { url: "https://x" } }), said], open), false);
+		const ran = { role: "assistant", content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "npm test" } }] };
+		const passed = { role: "toolResult", toolCallId: "b1", toolName: "bash", content: [{ type: "text", text: "ok" }] };
+		assert.equal(shouldNudgeTodos([user, edit, edited, ran, passed, said], open), true);
+	});
 }
