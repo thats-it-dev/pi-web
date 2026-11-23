@@ -256,8 +256,13 @@ export class PreviewManager {
 		} catch {
 			// already gone
 		}
+		// Only remove the entry while it still points at our server: once our server died, another
+		// session's reconcile may have reassigned the port, and that exposure is not ours to tear down.
 		try {
-			await this.deps.tailscale.remove(cur.details.port);
+			const ts = this.deps.tailscale;
+			const ours = `http://127.0.0.1:${cur.localPort}`;
+			const entry = (await ts.entries()).find((e) => e.port === cur.details.port);
+			if (entry && entry.target.replace(/\/$/, "") === ours) await ts.remove(cur.details.port);
 		} catch {
 			// a stale entry is reconciled on the next start
 		}

@@ -84,8 +84,8 @@ function fakeSpawn(opts: { listen?: boolean; logLines?: string[] } = {}) {
 	return { spawnDev, spawned };
 }
 
-function setup(over: Partial<PreviewDeps> = {}, spawnOpts: Parameters<typeof fakeSpawn>[0] = {}) {
-	const tail = fakeTailscale();
+function setup(over: Partial<PreviewDeps> = {}, spawnOpts: Parameters<typeof fakeSpawn>[0] = {}, serve?: Map<number, number>) {
+	const tail = fakeTailscale(serve);
 	const fs = fakeSpawn(spawnOpts);
 	const logDir = join(scratch, `logs-${++seq}`);
 	const deps: PreviewDeps = {
@@ -182,6 +182,43 @@ test("a dead dev server is noticed and restarted; its serve entry is reconciled"
 	assert.equal(serve.get(10600), spawned[1].port);
 	assert.equal(await isListening(spawned[1].port), true);
 	await mgr.stop();
+});
+
+test("reconcile clears a dead entry left by another session before picking the port", async () => {
+	const deadLocal = await freeLocalPort();
+	assert.equal(await isListening(deadLocal), false);
+	const { mgr, calls, spawned, serve } = setup({}, {}, new Map([[10600, deadLocal]]));
+	assert.equal(mgr.current(), null);
+	const res = await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	assert.equal(res.isError, undefined);
+	assert.equal((res.details as PreviewDetails).port, 10600);
+	const removeAt = calls.indexOf("tailscale serve --https=10600 off");
+	const addAt = calls.indexOf(`tailscale serve --bg --https=10600 http://127.0.0.1:${spawned[0].port}`);
+	assert.ok(removeAt >= 0, "reconcile issued remove(10600)");
+	assert.ok(addAt > removeAt, "add(10600) after remove(10600)");
+	assert.equal(serve.get(10600), spawned[0].port);
+	await mgr.stop();
+});
+
+test("stopping a dead preview leaves a port another session has since taken", async () => {
+	const { mgr, calls, spawned, serve } = setup();
+	await mgr.run({ cwd: viteApp() }, scratch, "s1");
+	await new Promise<void>((r) => {
+		spawned[0].server.close(() => r());
+		spawned[0].server.closeAllConnections();
+	});
+	// Another session's reconcile cleared the dead entry and re-added 10600 for its own live server.
+	const other = createServer((_req, res) => res.end("other"));
+	await new Promise<void>((r) => other.listen(0, "127.0.0.1", () => r()));
+	after(() => other.close());
+	const otherPort = (other.address() as { port: number }).port;
+	serve.set(10600, otherPort);
+	const before = calls.length;
+	const res = await mgr.run({ stop: true }, scratch, "s1");
+	assert.deepEqual(res.details, { stopped: true });
+	assert.equal(mgr.current(), null);
+	assert.ok(!calls.slice(before).includes("tailscale serve --https=10600 off"), calls.slice(before).join("\n"));
+	assert.equal(serve.get(10600), otherPort);
 });
 
 test("no dev script is an error and starts nothing", async () => {
