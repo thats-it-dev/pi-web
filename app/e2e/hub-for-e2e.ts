@@ -104,6 +104,30 @@ writeFileSync(
 		.join("\n") + "\n",
 );
 
+// Sessions that opened a dev preview (and one that then stopped it). The result timestamps are fresh, so the panel auto-opens.
+const previewDetails = { url: "http://localhost:5173/", label: "fret", kind: "dev", port: 10600, root: "/x" };
+function previewSession(id: string, stopped: boolean) {
+	const now = Date.now();
+	const call = (n: number, parentId: string) => ({ type: "message", id: `a${n}`, parentId, timestamp: at, message: { role: "assistant", content: [{ type: "toolCall", id: `tc${n}`, name: "preview", arguments: { cwd: "/x" } }], timestamp: now } });
+	const result = (n: number, details: unknown, text: string) => ({
+		type: "message",
+		id: `r${n}`,
+		parentId: `a${n}`,
+		timestamp: at,
+		message: { role: "toolResult", toolCallId: `tc${n}`, toolName: "preview", content: [{ type: "text", text }], details, isError: false, timestamp: now },
+	});
+	const entries: object[] = [
+		{ type: "session", version: 3, id, timestamp: at, cwd: WORKDIR },
+		{ type: "message", id: "u1", parentId: null, timestamp: at, message: { role: "user", content: [{ type: "text", text: "show me the app" }], timestamp: 1 } },
+		call(1, "u1"),
+		result(1, previewDetails, "Preview open at http://localhost:5173/ (fret, dev server on port 10600)"),
+	];
+	if (stopped) entries.push(call(2, "r1"), result(2, { stopped: true }, "Preview stopped"));
+	writeFileSync(join(seedDir, `${id}.jsonl`), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+}
+previewSession("e2e-preview", false);
+previewSession("e2e-preview-stopped", true);
+
 const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);
 writeFileSync(join(dataDir, "config.json"), JSON.stringify({ port: PORT, hostname: "localhost:5173", allowedLogin: "dev@local", dev: true, piBin: pi.piBin }));
