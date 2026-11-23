@@ -25,7 +25,7 @@ export interface PiLike {
 export interface CtxLike {
 	cwd: string;
 	hasUI: boolean;
-	ui: { notify(message: string, type?: "info" | "warning" | "error"): void };
+	ui: { notify(message: string, type?: "info" | "warning" | "error"): void; setStatus(key: string, text: string | undefined): void };
 	model: ModelLike | undefined;
 	sessionManager: { getSessionId(): string; getSessionFile(): string | undefined; getLeafId(): string | null; getEntries(): EntryLike[] };
 	modelRegistry: { getAvailable(): ModelLike[]; find(provider: string, modelId: string): ModelLike | undefined };

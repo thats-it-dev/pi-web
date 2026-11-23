@@ -5,9 +5,11 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { VERSION, buildSessionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage, ThinkingLevel } from "../shared/src/protocol.ts";
+import { homedir } from "node:os";
 import { Type } from "typebox";
 import { socketPath } from "./client.ts";
 import { BridgeSession, type CtxLike, type PiLike } from "./session.ts";
+import { PreviewManager, STATUS_KEY, defaultDeps } from "./preview.ts";
 import { type ShowImageParams, showImage } from "./show-image.ts";
 import { FORWARDED_EVENTS } from "./wire.ts";
 
@@ -18,11 +20,20 @@ type PiApi = PiLike & {
 		label: string;
 		description: string;
 		parameters: unknown;
-		execute(id: string, params: ShowImageParams, signal: unknown, onUpdate: unknown, ctx: CtxLike): Promise<unknown>;
+		execute(id: string, params: any, signal: unknown, onUpdate: unknown, ctx: CtxLike): Promise<unknown>;
 	}): void;
 };
 
-export default function piWebBridge(pi: PiApi): void {
+export interface BridgeOptions {
+	preview?: PreviewManager;
+	env?: NodeJS.ProcessEnv;
+}
+
+export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
+	const env = opts.env ?? process.env;
+	// Lazy: loading the extension must not touch tailscale or the filesystem.
+	let manager: PreviewManager | undefined = opts.preview;
+	let lastCtx: CtxLike | undefined;
 	// Registered before the PI_WEB check: the hub's own headless children need the tool too.
 	pi.registerTool({
 		name: "show_image",
@@ -35,10 +46,40 @@ export default function piWebBridge(pi: PiApi): void {
 			see: Type.Optional(Type.Boolean({ description: "default true; false keeps the image out of your context" })),
 		}),
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			return showImage(params, ctx.cwd);
+			return showImage(params as ShowImageParams, ctx.cwd);
 		},
 	});
-	if (process.env.PI_WEB === "1") return; // the hub's own headless children are driven over RPC already
+	pi.registerTool({
+		name: "preview",
+		label: "Preview",
+		description:
+			"Show Michael a live, clickable preview in pi-web's Preview panel (and in his phone's browser). Call it with cwd after the first visual change to an app and before any PR, then tell him to look and end your turn; the page live-reloads as you edit. Call it with dir or file for an HTML mockup or prototype (no arguments returns a scratch folder to write the mockup in). Tailnet only; one preview per session; it stops when the session ends.",
+		parameters: Type.Object({
+			cwd: Type.Optional(Type.String({ description: "A Vite app checkout (has a dev script): start its dev server and show it" })),
+			dir: Type.Optional(Type.String({ description: "A folder of static files (an HTML mockup or prototype): serve it and show it" })),
+			file: Type.Optional(Type.String({ description: "One HTML file: serve its folder and show it" })),
+			stop: Type.Optional(Type.Boolean({ description: "Stop this session's preview server" })),
+		}),
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			if (env.PI_SUBAGENT_CHILD) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: "preview is not available in a subagent worker: ask the orchestrator to open the preview." }],
+				};
+			}
+			lastCtx = ctx;
+			manager ??= new PreviewManager(defaultDeps(homedir()));
+			const result = await manager.run(params, ctx.cwd, ctx.sessionManager.getSessionId());
+			ctx.ui.setStatus(STATUS_KEY, manager.statusText());
+			return result;
+		},
+	});
+	pi.on("session_shutdown", async () => {
+		if (!manager) return;
+		await manager.stop();
+		lastCtx?.ui.setStatus(STATUS_KEY, undefined);
+	});
+	if (env.PI_WEB === "1") return; // the hub's own headless children are driven over RPC already
 	let session: BridgeSession | null = null;
 	// No sockets in the factory: some pi invocations load extensions without a session.
 	pi.on("session_start", (_event, ctx) => {
