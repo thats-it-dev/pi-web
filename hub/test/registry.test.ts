@@ -7,9 +7,10 @@ import { BUSY_NOTICE, ELSEWHERE_NOTICE, FREE_NOTICE, Registry, type RegistryOpti
 import { FakeHandle } from "./support/fake-handle.ts";
 
 function setup(opts: Partial<RegistryOptions> = {}) {
-	const files: Record<string, { cwd: string; file: string }> = {
-		"disk-1": { cwd: "/w", file: "/s/disk-1.jsonl" },
-		"disk-2": { cwd: "/w", file: "/s/disk-2.jsonl" },
+	const files: Record<string, { cwd: string; file: string; parentSession: string | null }> = {
+		"disk-1": { cwd: "/w", file: "/s/disk-1.jsonl", parentSession: null },
+		"disk-2": { cwd: "/w", file: "/s/disk-2.jsonl", parentSession: null },
+		"disk-child": { cwd: "/w", file: "/s/disk-child.jsonl", parentSession: "disk-1" },
 	};
 	const started: FakeHandle[] = [];
 	const starts: Array<Parameters<RegistryOptions["factory"]["startRpc"]>[0]> = [];
@@ -414,6 +415,26 @@ test("session_changed carries the parent's type to the new id", async () => {
 	const c = (await registry.create("/w")) as FakeHandle;
 	c.fire({ type: "session_changed", from: c.sessionId, to: "moved-2" });
 	assert.equal(registry.typeOf("moved-2"), "code");
+});
+
+test("ensure resumes a child of a chat session as chat, as the listing shows it", async () => {
+	const { registry, starts, typeMap } = setup();
+	typeMap.set("disk-1", "chat");
+	await registry.ensure("disk-child");
+	assert.equal(starts[0].type, "chat");
+	assert.equal(registry.typeOf("disk-child", "disk-1"), "chat");
+});
+
+test("a terminal's /resume from a chat session leaves the target's type alone", async () => {
+	const { registry, typeMap } = setup();
+	typeMap.set("disk-2", "chat");
+	const b = bridge("disk-2");
+	registry.attachBridge(b);
+	b.sessionId = "disk-1";
+	b.fire({ type: "session_changed", from: "disk-2", to: "disk-1" });
+	assert.equal(registry.get("disk-1"), b, "the bridge moved");
+	assert.equal(typeMap.has("disk-1"), false, "the store is unchanged");
+	assert.deepEqual([...typeMap], [["disk-2", "chat"]]);
 });
 
 test("typeOf falls back to the parent session's type", async () => {

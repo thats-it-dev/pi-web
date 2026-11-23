@@ -18,7 +18,7 @@ export interface HandleFactory {
 }
 
 export interface SessionLookup {
-	find(id: string): Promise<{ cwd: string; file: string } | null>;
+	find(id: string): Promise<{ cwd: string; file: string; parentSession: string | null } | null>;
 }
 
 export interface RegistryOptions {
@@ -89,7 +89,7 @@ export class Registry {
 		const p = (async () => {
 			const found = await this.opts.lookup.find(id);
 			if (!found) throw new HttpError(404, "Session not found");
-			return this.launch({ cwd: found.cwd, sessionFile: found.file, type: this.types.get(id) });
+			return this.launch({ cwd: found.cwd, sessionFile: found.file, type: this.typeOf(id, found.parentSession) });
 		})();
 		this.starting.set(id, p);
 		try {
@@ -235,7 +235,9 @@ export class Registry {
 						this.claim(h);
 						break;
 					}
-					if (this.types.get(e.from) === "chat") this.types.set(e.to, "chat");
+					// Only a hub child's new_session/fork/clone carries chat over; a terminal's /resume or /fork
+					// (a bridge) moves onto a session that already has its own type.
+					if (h.kind === "rpc" && this.types.get(e.from) === "chat") this.types.set(e.to, "chat");
 					if (this.handles.get(e.from) === h) this.handles.delete(e.from);
 					this.handles.set(e.to, h);
 					this.emitState(e.from);
