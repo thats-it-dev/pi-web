@@ -17,6 +17,10 @@ import "./pi-settings.ts";
 import "./pi-sidebar.ts";
 import type { PiSession } from "./pi-session.ts";
 
+// Above the class: customElements.define below constructs <pi-app> at once if it is already in the page.
+const TAB_KEY = "pi-web:aside-tab";
+const FRESH_MS = 60_000; // a preview this new was just opened by pi, not restored from history
+
 export class PiApp extends LitElement {
 	static properties = {
 		route: { state: true },
@@ -341,9 +345,6 @@ export class PiApp extends LitElement {
 	}
 }
 customElements.define("pi-app", PiApp);
-
-const TAB_KEY = "pi-web:aside-tab";
-const FRESH_MS = 60_000; // a preview this new was just opened by pi, not restored from history
 
 function readStored(key: string): string | null {
 	try {
