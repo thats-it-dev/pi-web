@@ -7,12 +7,13 @@ import { headerStatus } from "../lib/status.ts";
 import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiHeader extends LitElement {
-	static properties = { store: { attribute: false }, draft: { attribute: false }, version: { attribute: false }, heading: { attribute: false }, tucked: { type: Boolean } };
+	static properties = { store: { attribute: false }, draft: { attribute: false }, version: { attribute: false }, heading: { attribute: false }, tucked: { type: Boolean }, previewLive: { attribute: false } };
 	declare store: SessionStore | null;
 	declare draft: { contextWindow: number } | null; // an unsent chat: no session yet, just the chosen model's window
 	declare version: number;
 	declare heading: string;
 	declare tucked: boolean;
+	declare previewLive: boolean; // the session has a preview open (the aside button gets a dot)
 
 	static styles = [
 		sharedStyles,
@@ -35,6 +36,7 @@ export class PiHeader extends LitElement {
 		this.version = 0;
 		this.heading = "";
 		this.tucked = false;
+		this.previewLive = false;
 	}
 
 	private emit(type: string, detail?: unknown): void {

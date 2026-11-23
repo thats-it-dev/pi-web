@@ -204,6 +204,13 @@ export const markdownStyles = css`
 	}
 `;
 
+// The preview card: in the reply and in the Preview tab on a phone.
+export const previewCardStyles = css`
+	.preview-card { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
+	.preview-card .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; color: var(--text-secondary); }
+	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
+`;
+
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -217,9 +224,7 @@ export const messageStyles = css`
 	.shot { margin: 0; display: grid; gap: 4px; min-width: 0; justify-items: start; }
 	.shot pi-image { justify-self: stretch; max-width: 100%; max-height: 70vh; } /* the column's width, not the image's: small screenshots scale up */
 	.shot figcaption { color: var(--text-secondary); line-height: 1.4; overflow-wrap: anywhere; }
-	.preview-card { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
-	.preview-card .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; color: var(--text-secondary); }
-	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
+	${previewCardStyles}
 	.shot-tool { font-size: 0.82em; color: var(--text-muted); font-family: var(--font-mono); overflow-wrap: anywhere; }
 	.assistant { display: grid; gap: 8px; min-width: 0; }
 	${markdownStyles}
