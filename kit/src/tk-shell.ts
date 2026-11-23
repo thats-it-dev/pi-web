@@ -302,12 +302,15 @@ export class TkShell extends LitElement {
 	resetAsideWidth(): void {
 		this.storedAsideW = null;
 		this.asideSize = "default";
-		if (!this.storeKey) return;
-		try {
-			localStorage.removeItem(`${this.storeKey}:aside-w`);
-		} catch {
-			// storage unavailable: the reset still applies for this page
+		if (this.storeKey) {
+			try {
+				localStorage.removeItem(`${this.storeKey}:aside-w`);
+			} catch {
+				// storage unavailable: the reset still applies for this page
+			}
 		}
+		// Apps that track the requested size hear about the reset as they do about a drag.
+		this.dispatchEvent(new CustomEvent("tk-aside-resize", { detail: { width: ASIDE_DEFAULT_W }, bubbles: true, composed: true }));
 	}
 
 	// Ends the drag in progress, if any. Set while dragging so a handle removed mid-drag can still end it.

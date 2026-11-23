@@ -159,6 +159,9 @@ export class PiApp extends LitElement {
 	// From a card in the reply or a Pages link in the Progress tab. On a phone the card's own link opens the page.
 	private onOpenPreview = (e: Event) => {
 		const d = (e as CustomEvent<{ url: string; label: string; kind: PreviewKind }>).detail;
+		// A card for a preview that is no longer live has nothing to show here: its link opens the url instead.
+		if (d.kind !== "pages" && this.preview?.url !== d.url) return;
+		e.preventDefault();
 		if (d.kind === "pages") this.pages = { url: d.url, label: d.label, kind: "pages", at: Date.now() };
 		this.tab = "preview";
 		if (this.mode !== "card" || d.kind === "pages") void this.showAside();

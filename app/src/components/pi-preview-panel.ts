@@ -46,7 +46,7 @@ export class PiPreviewPanel extends LitElement {
 			.hdr .name { font-weight: 600; white-space: nowrap; }
 			.hdr code { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-secondary); }
 			.hdr .seg button { padding: 3px 10px; font-size: 0.8rem; }
-			.stage { position: relative; flex: 1; min-height: 0; background: var(--panel); overflow: hidden; display: grid; place-items: start center; }
+			.stage { position: relative; flex: 1; min-height: 0; background: var(--panel); overflow: hidden; display: grid; place-items: start center; justify-content: center; }
 			iframe { border: 0; background: #fff; transform-origin: top center; }
 			.status { display: flex; gap: 8px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); font-size: 0.72rem; color: var(--text-secondary); }
 			.dot { background: var(--line); }
@@ -69,7 +69,8 @@ export class PiPreviewPanel extends LitElement {
 	connectedCallback(): void {
 		super.connectedCallback();
 		document.addEventListener("visibilitychange", this.onVisibility);
-		this.startPoll();
+		// The first poll comes from the first willUpdate (preview is always in it); this restarts a re-attached panel.
+		if (this.hasUpdated) this.startPoll();
 	}
 
 	disconnectedCallback(): void {
@@ -85,8 +86,9 @@ export class PiPreviewPanel extends LitElement {
 		const was = changed.get("preview") as PreviewState | null | undefined;
 		const now = this.preview;
 		if (was && now && was.url === now.url) {
-			// The same url again (pi restarted it, or reopened it): reload in place rather than re-mount.
-			if (was.at !== now.at || was.kind !== now.kind) this.reloadKey++;
+			// The same url announced again (pi restarted it, or reopened it): reload in place rather than re-mount.
+			// at 0 -> a time is the same announcement landing in the messages, not a new one.
+			if (was.at > 0 && now.at > was.at) this.reloadKey++;
 			if (was.kind !== now.kind) this.alive = null;
 		} else this.alive = null;
 		if (this.isConnected) this.startPoll();

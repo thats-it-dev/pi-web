@@ -151,8 +151,10 @@ function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolR
 		if (d && !d.stopped && typeof d.url === "string" && d.kind) {
 			const card = { url: d.url, label: d.label ?? "", kind: d.kind };
 			return renderPreviewCard(card, (c, el) => {
-				el.dispatchEvent(new CustomEvent("pi-open-preview", { detail: c, bubbles: true, composed: true }));
-				return previewMode(window.innerWidth) !== "card";
+				// The app cancels the event when it has the preview to show; otherwise (stopped, or a phone) the link opens it.
+				const ev = new CustomEvent("pi-open-preview", { detail: c, bubbles: true, composed: true, cancelable: true });
+				el.dispatchEvent(ev);
+				return previewMode(window.innerWidth) !== "card" && ev.defaultPrevented;
 			});
 		}
 	}
