@@ -7,7 +7,7 @@ import { type PreviewState, derivePreview } from "../../../shared/src/preview.ts
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
-import { takeHandoff } from "../lib/draft.ts";
+import { superpowersCommand, takeHandoff } from "../lib/draft.ts";
 import { DropTarget, dragHasFiles } from "../lib/drop.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
@@ -348,6 +348,9 @@ export class PiSession extends LitElement {
 		const msg = s?.snapshot ? takeHandoff(s.id) : null;
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
+		const status = s.snapshot.statuses?.superpowers;
+		const on = superpowersCommand(msg.superpowers, status === undefined ? undefined : superpowersOn(s.snapshot), this.sessionType);
+		if (on !== null) await this.run({ type: "set_superpowers", on });
 		await this.send(msg.text, msg.images, msg.files, "send");
 	}
 

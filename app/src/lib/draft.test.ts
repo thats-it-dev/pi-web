@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { freshDraft, getDraft, handOff, resetDraft, retypeDraft, takeHandoff, updateDraft } from "./draft.ts";
+import { type Handoff, freshDraft, getDraft, handOff, resetDraft, retypeDraft, superpowersCommand, takeHandoff, updateDraft } from "./draft.ts";
 
 beforeEach(() => {
 	resetDraft("code");
@@ -24,8 +24,8 @@ describe("draft chat", () => {
 		retypeDraft("code");
 		expect(getDraft()).toMatchObject({ text: "x", cwd: "~", superpowers: true });
 	});
-	it("takeHandoff returns the message once", () => {
-		const msg = { text: "hi", images: [], files: [], approval: null };
+	it("takeHandoff returns the message once, superpowers included", () => {
+		const msg: Handoff = { text: "hi", images: [], files: [], approval: null, superpowers: false };
 		handOff("s1", msg);
 		expect(takeHandoff("s2")).toBeNull();
 		expect(takeHandoff("s1")).toEqual(msg);
@@ -36,4 +36,13 @@ describe("draft chat", () => {
 		resetDraft("chat");
 		expect(getDraft()).toEqual({ text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 	});
+});
+
+describe("superpowersCommand", () => {
+	it("code draft off, status on: send off", () => expect(superpowersCommand(false, true, "code")).toBe(false));
+	it("chat draft on, status absent (chat default off): send on", () => expect(superpowersCommand(true, undefined, "chat")).toBe(true));
+	it("code draft on, status on: nothing", () => expect(superpowersCommand(true, true, "code")).toBeNull());
+	it("chat draft off, status absent: nothing", () => expect(superpowersCommand(false, undefined, "chat")).toBeNull());
+	it("code draft off, status absent (code default on): send off", () => expect(superpowersCommand(false, undefined, "code")).toBe(false));
+	it("a reported status wins over the type default", () => expect(superpowersCommand(true, false, "code")).toBe(true));
 });

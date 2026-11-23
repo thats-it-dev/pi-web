@@ -16,6 +16,15 @@ export interface Handoff {
 	images: ImageInput[];
 	files: FileInput[];
 	approval: ApprovalMode | null;
+	superpowers: boolean; // what the draft's switch said; applied once pi is up
+}
+
+// The superpowers switch to send after the hand-off, or null when pi already
+// matches. `status` is what the session reports (undefined until the extension
+// has said); without it pi runs on the type's default (on for code).
+export function superpowersCommand(want: boolean, status: boolean | undefined, type: SessionType): boolean | null {
+	const current = status ?? type === "code";
+	return want === current ? null : want;
 }
 
 // A new chat starts in the home folder; code sessions have superpowers on, chats off.
