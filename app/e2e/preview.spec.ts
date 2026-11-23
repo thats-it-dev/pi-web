@@ -2,6 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 
 const PREVIEW = "e2e-preview";
 const STOPPED = "e2e-preview-stopped";
+const PROGRESS = "e2e-preview-progress"; // a to-do list too, and an hour-old preview
 const ASIDE = 'tk-shell aside[aria-label="Progress"]';
 
 // The aside opens by itself only for a preview under a minute old, so no test relies on that: wait for the session's
@@ -40,7 +41,7 @@ test.describe("desktop", () => {
 		await page.goto(`/#/s/${PREVIEW}`);
 		await expect(page.locator("pi-messages").getByRole("link", { name: "Open preview" })).toBeVisible(); // the preview is known
 		await page.locator("tk-shell").evaluate((s: any) => s.hide("aside"));
-		await page.getByRole("link", { name: "Open preview" }).click();
+		await page.locator("pi-messages").getByRole("link", { name: "Open preview" }).click();
 		await expect(page.locator("pi-preview-panel iframe")).toBeVisible();
 		await expect(page.locator('pi-preview-panel a[aria-label="Open in a new tab"]')).toHaveAttribute("target", "_blank");
 	});
@@ -62,6 +63,56 @@ test.describe("desktop", () => {
 		await back.click();
 		await expect.poll(width).toBe(Math.round((vw - 280) / 2));
 	});
+
+	// iPad landscape: the Preview tab docks the aside; the Progress tab is a drawer again, with its history entry.
+	test("at 1100px the Preview tab docks the aside and Progress is a drawer again", async ({ page }) => {
+		await page.setViewportSize({ width: 1100, height: 800 });
+		await page.goto(`/#/s/${PROGRESS}`);
+		const shell = page.locator("tk-shell");
+		const aside = page.locator(ASIDE);
+		const nav = page.locator('tk-shell aside[aria-label="Sessions"]');
+		const button = page.locator("pi-header").getByRole("button", { name: /Progress, preview open/ });
+		await expect(button).toBeVisible();
+		await expect(page.locator("pi-messages").getByRole("link", { name: "Open preview" })).toBeVisible();
+		// An hour-old preview, reopened: no takeover. The aside stays a closed drawer on the Progress tab.
+		await expect(shell).not.toHaveAttribute("dock-aside", "");
+		await expect(button).toHaveAttribute("aria-expanded", "false");
+		const before = await page.evaluate(() => history.length);
+
+		await button.click();
+		await expect(aside).toHaveClass(/drawer/);
+		await page.locator("pi-aside").getByRole("button", { name: "Preview" }).click();
+		await expect(shell).toHaveAttribute("dock-aside", "");
+		await expect(aside).not.toHaveClass(/drawer/);
+		await expect.poll(async () => Math.round((await aside.boundingBox())!.width)).toBe(300);
+		await expect.poll(async () => Math.round((await page.locator("tk-shell main").boundingBox())!.width)).toBeGreaterThanOrEqual(360);
+		// 280 + 300 + 360 fit in 1100, so the kit keeps the nav docked (it un-docks only when they don't): no overflow either way.
+		const navBox = await nav.boundingBox();
+		const navDocked = !/drawer/.test((await nav.getAttribute("class")) ?? "") && (navBox?.width ?? 0) > 0;
+		if (navDocked) expect(Math.round(navBox!.width) + 300 + 360).toBeLessThanOrEqual(1100);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1100);
+		await expect(page.locator("pi-preview-panel iframe")).toBeVisible();
+		// Docking took the drawer's history entry back off.
+		await expect.poll(() => page.evaluate(() => history.state?.piProgress ?? null)).toBeNull();
+
+		await page.locator("pi-aside").getByRole("button", { name: "Progress" }).click();
+		await expect(shell).not.toHaveAttribute("dock-aside", "");
+		await expect(aside).toHaveClass(/drawer/);
+		await expect(aside).toHaveClass(/open/);
+		await expect(page.locator("pi-progress-panel")).toBeVisible();
+		// The chat is inert behind an open drawer, so Escape closes it; then the header button toggles it as before.
+		await page.keyboard.press("Escape");
+		await expect(button).toHaveAttribute("aria-expanded", "false");
+		await button.click();
+		await expect(button).toHaveAttribute("aria-expanded", "true");
+		await page.keyboard.press("Escape");
+		await expect(button).toHaveAttribute("aria-expanded", "false");
+		// No stray history entry: we are on the chat's own entry, and Back leaves the chat.
+		await expect.poll(() => page.evaluate(() => history.state?.piProgress ?? null)).toBeNull();
+		expect(await page.evaluate(() => history.length)).toBeLessThanOrEqual(before + 1); // a forward entry may remain
+		await page.goBack();
+		expect(page.url()).not.toContain(PROGRESS);
+	});
 });
 
 test.describe("phone", () => {
@@ -72,7 +123,11 @@ test.describe("phone", () => {
 		const open = page.locator("pi-messages").getByRole("link", { name: "Open preview" });
 		await expect(open).toHaveAttribute("target", "_blank");
 		await expect(page.locator("iframe")).toHaveCount(0);
-		await setAside(page, false); // a fresh preview may have opened the drawer over the reply
+		// A fresh preview never slides the drawer over the reply on a phone: the card and the header dot say it.
+		const button = page.locator("pi-header").getByRole("button", { name: /Progress, preview open/ });
+		await expect(button).toBeVisible();
+		await page.waitForTimeout(500); // the app opens the aside a render after the preview lands: give it the chance
+		await expect(button).toHaveAttribute("aria-expanded", "false");
 		const [popup] = await Promise.all([context.waitForEvent("page"), open.click()]);
 		expect(popup.url()).toBe("http://localhost:5173/");
 	});

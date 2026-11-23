@@ -105,9 +105,10 @@ writeFileSync(
 );
 
 // Sessions that opened a dev preview (and one that then stopped it). The result timestamps are fresh, so the panel auto-opens.
+// One more has a to-do list too (both tabs) and an hour-old preview: reopened from history, it must not take over the aside.
 const previewDetails = { url: "http://localhost:5173/", label: "fret", kind: "dev", port: 10600, root: "/x" };
-function previewSession(id: string, stopped: boolean) {
-	const now = Date.now();
+function previewSession(id: string, stopped: boolean, todo = false) {
+	const now = todo ? Date.now() - 3_600_000 : Date.now();
 	const call = (n: number, parentId: string) => ({ type: "message", id: `a${n}`, parentId, timestamp: at, message: { role: "assistant", content: [{ type: "toolCall", id: `tc${n}`, name: "preview", arguments: { cwd: "/x" } }], timestamp: now } });
 	const result = (n: number, details: unknown, text: string) => ({
 		type: "message",
@@ -119,7 +120,19 @@ function previewSession(id: string, stopped: boolean) {
 	const entries: object[] = [
 		{ type: "session", version: 3, id, timestamp: at, cwd: WORKDIR },
 		{ type: "message", id: "u1", parentId: null, timestamp: at, message: { role: "user", content: [{ type: "text", text: "show me the app" }], timestamp: 1 } },
-		call(1, "u1"),
+		...(todo
+			? [
+					{ type: "message", id: "at", parentId: "u1", timestamp: at, message: { role: "assistant", content: [{ type: "toolCall", id: "tt", name: "todo", arguments: { action: "create", subject: "Build it" } }], timestamp: now } },
+					{
+						type: "message",
+						id: "rt",
+						parentId: "at",
+						timestamp: at,
+						message: { role: "toolResult", toolCallId: "tt", toolName: "todo", content: [{ type: "text", text: "Created #1" }], details: { action: "create", tasks: [{ id: 1, subject: "Build it", status: "in_progress", activeForm: "building it" }], nextId: 2 }, isError: false, timestamp: now },
+					},
+				]
+			: []),
+		call(1, todo ? "rt" : "u1"),
 		result(1, previewDetails, "Preview open at http://localhost:5173/ (fret, dev server on port 10600)"),
 	];
 	if (stopped) entries.push(call(2, "r1"), result(2, { stopped: true }, "Preview stopped"));
@@ -127,6 +140,7 @@ function previewSession(id: string, stopped: boolean) {
 }
 previewSession("e2e-preview", false);
 previewSession("e2e-preview-stopped", true);
+previewSession("e2e-preview-progress", false, true);
 
 const dataDir = join(pi.root, "hub");
 mkdirSync(dataDir);
