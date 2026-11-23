@@ -19,3 +19,7 @@ skills are manual (`/skill:<name>`) until a chat turns them on from the ＋ menu
 
 Checked live over RPC (flash-next, 2026-11-10): off, "which skill first for a new feature?" gets `thatsit-app`;
 after the switch, `brainstorming` with its manual copy's path.
+
+Default state: with no saved `pi-web-superpowers` entry, the switch starts on in a pi-web code session
+(`PI_WEB_SESSION_TYPE=code`, set by the hub) and off everywhere else (chat sessions, terminal pi, subagent workers).
+A saved entry always wins.

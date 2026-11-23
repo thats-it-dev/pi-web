@@ -118,9 +118,9 @@ type PiApi = {
 	appendEntry(customType: string, data?: unknown): void;
 };
 
-/** The chat's switch: the last saved state on the branch, off when none. */
-export function savedState(branch: Iterable<unknown>): boolean {
-	let on = false;
+/** The chat's switch: the last saved state on the branch; with none, on in a pi-web code session, off elsewhere. */
+export function savedState(branch: Iterable<unknown>, env: NodeJS.ProcessEnv = process.env): boolean {
+	let on = env.PI_WEB_SESSION_TYPE === "code";
 	for (const raw of branch) {
 		const e = raw as Entry;
 		if (e.type === "custom" && e.customType === ENTRY_TYPE) on = (e.data as { on?: unknown } | undefined)?.on === true;
@@ -192,7 +192,7 @@ export default function superpowersSwitch(pi: PiApi): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		const branch = [...(ctx.sessionManager?.getBranch() ?? [])];
-		on = savedState(branch);
+		on = savedState(branch, process.env);
 		// Chats switched on before the floor existed, or left with one after switching off.
 		const want = on ? FLOOR : null;
 		if (savedFloor(branch) !== want) pi.appendEntry(FLOOR_ENTRY, { level: want });

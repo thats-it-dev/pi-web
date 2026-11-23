@@ -14,6 +14,32 @@ test("savedState: the last saved switch on the branch, off by default", () => {
 	assert.equal(savedState([entry(true), { type: "message" }, entry(false)]), false);
 });
 
+test("savedState: default on for a code child, off otherwise, an entry always wins", () => {
+	assert.equal(savedState([], { PI_WEB_SESSION_TYPE: "code" }), true);
+	assert.equal(savedState([], { PI_WEB_SESSION_TYPE: "chat" }), false);
+	assert.equal(savedState([], {}), false);
+	assert.equal(savedState([entry(false)], { PI_WEB_SESSION_TYPE: "code" }), false);
+	assert.equal(savedState([entry(true)], { PI_WEB_SESSION_TYPE: "chat" }), true);
+});
+
+test("session start in a code child with an empty branch turns superpowers on", () => {
+	const handlers: Record<string, (e: any, c: any) => any> = {};
+	const saved: unknown[] = [];
+	const status: Record<string, string | undefined> = {};
+	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: () => {}, appendEntry: (t, d) => saved.push([t, d]) });
+	const ctx = { sessionManager: { getBranch: () => [] }, ui: { setStatus: (k: string, t: string | undefined) => (status[k] = t), notify: () => {} } };
+	const before = process.env.PI_WEB_SESSION_TYPE;
+	process.env.PI_WEB_SESSION_TYPE = "code";
+	try {
+		handlers.session_start({ reason: "startup" }, ctx);
+	} finally {
+		if (before === undefined) delete process.env.PI_WEB_SESSION_TYPE;
+		else process.env.PI_WEB_SESSION_TYPE = before;
+	}
+	assert.equal(status[STATUS_KEY], STATUS_ON);
+	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: "medium" }]]);
+});
+
 test("catalog: name, description and path of each manual skill, not using-superpowers", () => {
 	const dir = mkdtempSync(join(tmpdir(), "sp-cat-"));
 	for (const [n, d] of [["brainstorming", "Use before creative work"], ["using-superpowers", "boot"]]) {
