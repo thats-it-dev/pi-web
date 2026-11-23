@@ -52,3 +52,33 @@ test("reconcile removes dead entries in range only", async () => {
 	assert.ok(calls.some((c) => c.join(" ") === "tailscale serve --https=10600 off"));
 	assert.ok(!calls.some((c) => c.includes("--https=9502")));
 });
+
+function fakeServe(web: Record<string, string>) {
+	const calls: string[][] = [];
+	const tcp: Record<string, unknown> = {};
+	const w: Record<string, unknown> = {};
+	for (const [port, proxy] of Object.entries(web)) {
+		tcp[port] = { HTTPS: true };
+		w[`h.ts.net:${port}`] = { Handlers: { "/": { Proxy: proxy } } };
+	}
+	const ts = new Tailscale(async (cmd, args) => {
+		calls.push([cmd, ...args]);
+		return args[0] === "serve" && args[1] === "status" ? JSON.stringify({ TCP: tcp, Web: w }) : "";
+	});
+	return { ts, calls };
+}
+
+test("reconcile keeps a live target on a default port", async () => {
+	const { ts, calls } = fakeServe({ "10600": "http://127.0.0.1" });
+	const removed = await ts.reconcile({ min: 10600, max: 10649 }, async (port) => port === 80);
+	assert.deepEqual(removed, []);
+	assert.ok(!calls.some((c) => c.includes("off")));
+});
+
+test("reconcile removes a malformed target and keeps processing", async () => {
+	const { ts, calls } = fakeServe({ "10600": "not a url", "10601": "http://127.0.0.1:41001", "10602": "http://127.0.0.1:41002" });
+	const removed = await ts.reconcile({ min: 10600, max: 10649 }, async (port) => port === 41001);
+	assert.deepEqual(removed, [10600, 10602]);
+	assert.ok(calls.some((c) => c.join(" ") === "tailscale serve --https=10600 off"));
+	assert.ok(calls.some((c) => c.join(" ") === "tailscale serve --https=10602 off"));
+});

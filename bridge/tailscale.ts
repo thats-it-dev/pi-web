@@ -73,7 +73,13 @@ export class Tailscale {
 		const removed: number[] = [];
 		for (const entry of await this.entries()) {
 			if (entry.port < range.min || entry.port > range.max) continue;
-			const local = Number(new URL(entry.target).port);
+			let local = 0;
+			try {
+				const url = new URL(entry.target);
+				local = Number(url.port || (url.protocol === "https:" ? "443" : "80"));
+			} catch {
+				// unparseable target: treat as dead
+			}
 			if (local && (await listening(local))) continue;
 			await this.remove(entry.port);
 			removed.push(entry.port);
