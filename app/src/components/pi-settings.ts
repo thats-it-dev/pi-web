@@ -5,7 +5,6 @@ import { type ThemePref, getHubUrl, getTheme, normalizeHubUrl, setHubUrl, setThe
 import { PUSH_COPY, type PushStatus, browserPushEnv, disablePush, enablePush, pushStatus } from "../lib/push.ts";
 import type { UpdateStatus } from "../../../shared/src/protocol.ts";
 import { setVpDebug, vpDebugOn } from "../lib/vp-debug.ts";
-import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiSettings extends LitElement {
 	static properties = { url: { state: true }, status: { state: true }, checking: { state: true }, theme: { state: true }, push: { state: true }, pushBusy: { state: true }, pushError: { state: true }, updateInfo: { state: true }, updateBusy: { state: true }, updateNote: { state: true } };
@@ -22,7 +21,6 @@ export class PiSettings extends LitElement {
 
 	static styles = [
 		sharedStyles,
-		newChatStyles,
 		css`
 			:host { display: block; overflow-y: auto; height: 100%; }
 			.wrap { max-width: 560px; margin: 0 auto; padding: 18px 18px 40px; display: grid; gap: 14px; }
@@ -194,7 +192,6 @@ export class PiSettings extends LitElement {
 		return html`
 			<tk-header menu-label="Open sessions">
 				<h1 slot="title">settings</h1>
-				${newChatButton()}
 			</tk-header>
 			<div class="wrap">
 				<a class="back u" href="#/">← chat</a>
