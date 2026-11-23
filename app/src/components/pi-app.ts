@@ -29,6 +29,7 @@ export class PiApp extends LitElement {
 		preview: { state: true },
 		pages: { state: true },
 		tab: { state: true },
+		engaged: { state: true },
 		size: { state: true },
 		mode: { state: true },
 		finePointer: { state: true },
@@ -41,6 +42,7 @@ export class PiApp extends LitElement {
 	declare preview: PreviewState | null; // the open session's preview, derived from its conversation
 	declare pages: PreviewState | null; // a Pages link opened from the Progress tab, shown over an older preview
 	declare tab: AsideTab; // the aside tab last picked, kept per device
+	declare engaged: boolean; // the open session's preview was used here (fresh arrival, tab pick, card or Pages click)
 	declare size: AsideSize; // the Preview tab's requested size (the Progress tab always has the default)
 	declare mode: PreviewMode;
 	declare finePointer: boolean;
@@ -80,6 +82,7 @@ export class PiApp extends LitElement {
 		this.preview = null;
 		this.pages = null;
 		this.tab = readTab(readStored(TAB_KEY));
+		this.engaged = false;
 		this.size = "default";
 		this.mode = this.computeMode();
 		this.finePointer = this.fineMq.matches;
@@ -142,6 +145,7 @@ export class PiApp extends LitElement {
 			this.preview = null;
 			this.pages = null;
 			this.size = "default";
+			this.engaged = false; // the stored tab and the dock wait till this session's preview is used
 		}
 		if (changed.has("tab")) writeStored(TAB_KEY, this.tab);
 	}
@@ -155,6 +159,7 @@ export class PiApp extends LitElement {
 		const arrived = isFreshArrival(preview, this.seenIds, Date.now());
 		this.seenIds.add(preview.id);
 		if (!arrived) return;
+		this.engaged = true;
 		this.tab = nextTab({ ...this.asideInput(), arrived });
 		if (this.mode !== "card") void this.showAside();
 	};
@@ -165,6 +170,7 @@ export class PiApp extends LitElement {
 		// A card for a preview that is no longer live has nothing to show here: its link opens the url instead.
 		if (d.kind !== "pages" && this.preview?.url !== d.url) return;
 		e.preventDefault();
+		this.engaged = true;
 		// A dev card shows pi's preview: a Pages link shown over it goes.
 		this.pages = d.kind === "pages" ? { id: `pages:${d.url}`, url: d.url, label: d.label, kind: "pages", at: Date.now() } : null;
 		this.tab = "preview";
@@ -173,6 +179,7 @@ export class PiApp extends LitElement {
 
 	private onAsideTab = (e: Event) => {
 		this.tab = (e as CustomEvent<{ tab: AsideTab }>).detail.tab;
+		this.engaged = true;
 		// Between 900 and 1199px the tab decides docked or drawer: keep the aside in view either way.
 		void this.showAside();
 	};
@@ -205,7 +212,7 @@ export class PiApp extends LitElement {
 	}
 
 	private asideInput() {
-		return { derived: this.preview, pages: this.pages, tab: this.tab, hasProgress: this.progress !== null, width: window.innerWidth, arrived: false };
+		return { derived: this.preview, pages: this.pages, tab: this.tab, hasProgress: this.progress !== null, width: window.innerWidth, arrived: false, engaged: this.engaged };
 	}
 
 	private onProgress = (e: Event) => {
@@ -306,7 +313,7 @@ export class PiApp extends LitElement {
 		const input = this.asideInput();
 		const shown = shownPreview(input);
 		const tab = nextTab(input);
-		const a = shellAttrs({ tab, preview: shown, mode: this.mode, finePointer: this.finePointer, size: this.size });
+		const a = shellAttrs({ tab, preview: shown, mode: this.mode, finePointer: this.finePointer, size: this.size, engaged: this.engaged });
 		return html`
 			<tk-shell
 				nav-label="Sessions"

@@ -12,6 +12,7 @@ export interface AsideInput {
 	hasProgress: boolean;
 	width: number;
 	arrived: boolean; // the derived preview just arrived fresh (isFreshArrival): it takes the tab
+	engaged: boolean; // this session's preview was used here: a fresh arrival, a tab pick, a card or Pages click
 }
 
 export const FRESH_MS = 60_000; // a preview this new was just opened by pi, not restored from history
@@ -28,16 +29,20 @@ export function shownPreview(i: Pick<AsideInput, "derived" | "pages">): PreviewS
 	return i.derived;
 }
 
-/** The tab to show: "preview" when a fresh derived preview arrives; "progress" when there is no preview. */
+/** The tab to show: "preview" when a fresh derived preview arrives; "progress" when there is no preview.
+ * The picked tab (kept per device) applies only once the session is engaged: reopening an older chat with a past
+ * preview shows its Progress, not the Preview it was last left on in some other chat. */
 export function nextTab(i: AsideInput): AsideTab {
 	if (!shownPreview(i)) return "progress";
 	if (i.arrived && i.derived) return "preview";
 	if (!i.hasProgress) return "preview"; // an empty Progress tab shows nothing: the preview is what there is
-	return i.tab;
+	return i.engaged ? i.tab : "progress";
 }
 
 /** The shell attributes for this state. */
-export function shellAttrs(i: { tab: AsideTab; preview: PreviewState | null; mode: PreviewMode; finePointer: boolean; size: AsideSize }): {
+/** The aside docks for the Preview tab only once the session is engaged: a stopped preview restored from history
+ * never takes over the page by itself. */
+export function shellAttrs(i: { tab: AsideTab; preview: PreviewState | null; mode: PreviewMode; finePointer: boolean; size: AsideSize; engaged: boolean }): {
 	resizable: boolean;
 	dockAside: boolean;
 	asideFullscreen: boolean;
@@ -46,7 +51,7 @@ export function shellAttrs(i: { tab: AsideTab; preview: PreviewState | null; mod
 	const previewing = i.tab === "preview" && i.preview !== null;
 	return {
 		resizable: i.finePointer && i.mode === "panel",
-		dockAside: previewing && i.mode === "panel",
+		dockAside: i.engaged && previewing && i.mode === "panel",
 		asideFullscreen: previewing && i.mode === "fullscreen",
 		asideSize: i.tab === "preview" ? i.size : "default",
 	};

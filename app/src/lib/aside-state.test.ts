@@ -4,7 +4,7 @@ import { type AsideInput, FRESH_MS, isFreshArrival, nextTab, shellAttrs, shownPr
 
 const dev = (at: number, id = "tc1"): PreviewState => ({ id, url: "https://spark.tail.ts.net:8443/", label: "fret", kind: "dev", at });
 const pages = (at: number): PreviewState => ({ id: "pages", url: "https://pr-4.fret.pages.dev/", label: "PR #4", kind: "pages", at });
-const input = (over: Partial<AsideInput>): AsideInput => ({ derived: null, pages: null, tab: "progress", hasProgress: true, width: 1400, arrived: false, ...over });
+const input = (over: Partial<AsideInput>): AsideInput => ({ derived: null, pages: null, tab: "progress", hasProgress: true, width: 1400, arrived: false, engaged: true, ...over });
 
 describe("isFreshArrival", () => {
 	const now = 10_000_000;
@@ -35,10 +35,16 @@ describe("nextTab", () => {
 	});
 	it("Progress with nothing in it shows the preview", () => expect(nextTab(input({ derived: dev(500), hasProgress: false }))).toBe("preview"));
 	it("a Pages override keeps the Preview tab", () => expect(nextTab(input({ pages: pages(9), tab: "preview" }))).toBe("preview"));
+	it("not engaged (a reopened chat): Progress when it has content, whatever tab was last picked", () =>
+		expect(nextTab(input({ derived: dev(500), tab: "preview", engaged: false }))).toBe("progress"));
+	it("not engaged with an empty Progress: the Preview tab", () =>
+		expect(nextTab(input({ derived: dev(500), tab: "progress", hasProgress: false, engaged: false }))).toBe("preview"));
+	it("a fresh arrival takes the tab even before it marks the session engaged", () =>
+		expect(nextTab(input({ derived: dev(500), arrived: true, engaged: false }))).toBe("preview"));
 });
 
 describe("shellAttrs", () => {
-	const base = { tab: "preview" as const, preview: dev(1), finePointer: true, size: "half" as const };
+	const base = { tab: "preview" as const, preview: dev(1), finePointer: true, size: "half" as const, engaged: true };
 	it("panel mode docks the aside and sizes it", () =>
 		expect(shellAttrs({ ...base, mode: "panel" })).toEqual({ resizable: true, dockAside: true, asideFullscreen: false, asideSize: "half" }));
 	it("600-899 is a full-screen drawer, not docked, not resizable", () =>
@@ -47,6 +53,8 @@ describe("shellAttrs", () => {
 	it("resizable only with a fine pointer", () => expect(shellAttrs({ ...base, mode: "panel", finePointer: false }).resizable).toBe(false));
 	it("the Progress tab keeps today's aside: default size, no forced dock", () =>
 		expect(shellAttrs({ ...base, tab: "progress", mode: "panel" })).toEqual({ resizable: true, dockAside: false, asideFullscreen: false, asideSize: "default" }));
+	it("not engaged: the Preview tab does not dock the aside (a reopened chat's empty Progress shows the preview undocked)", () =>
+		expect(shellAttrs({ ...base, mode: "panel", engaged: false }).dockAside).toBe(false));
 	it("no preview: no dock, no fullscreen", () => {
 		expect(shellAttrs({ ...base, preview: null, mode: "panel" }).dockAside).toBe(false);
 		expect(shellAttrs({ ...base, preview: null, mode: "fullscreen" }).asideFullscreen).toBe(false);
