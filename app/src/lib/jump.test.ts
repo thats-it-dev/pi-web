@@ -28,10 +28,11 @@ describe("snippetCore", () => {
 	it("strips ellipses, collapses whitespace, lowercases", () => {
 		expect(snippetCore("…  Hello\n  World …")).toBe("hello world");
 	});
-	it("keeps the middle ~60 characters of a long snippet", () => {
-		const core = snippetCore("x".repeat(50) + "MIDDLE" + "y".repeat(50));
-		expect(core).toHaveLength(60);
-		expect(core).toContain("middle");
+	it("picks the longest plain-word run, skipping markdown", () => {
+		expect(snippetCore("…**bold**, then the quick brown fox jumps; ok…")).toBe("then the quick brown fox jumps");
+	});
+	it("falls back to the whole normalized snippet when no run is long enough", () => {
+		expect(snippetCore("a, b, c")).toBe("a, b, c");
 	});
 });
 
@@ -44,5 +45,19 @@ describe("matchesSnippet", () => {
 	});
 	it("an empty core matches anything", () => {
 		expect(matchesSnippet("anything", "… …")).toBe(true);
+	});
+});
+
+describe("matchesSnippet with markdown", () => {
+	it("matches bold, code, link and bullet against rendered text", () => {
+		const rendered = "Notes the build uses cargo check before every release candidate, see the docs for details";
+		const snippet = "…- **Notes** the build uses `cargo check` before every [release candidate](https://x.dev/a), see the docs…";
+		expect(matchesSnippet(rendered, snippet)).toBe(true);
+	});
+	it("matches when the snippet is mostly formatting", () => {
+		expect(matchesSnippet("alpha beta gamma", "# *alpha* | _beta_ | `gamma`")).toBe(true);
+	});
+	it("does not match a different message", () => {
+		expect(matchesSnippet("an unrelated message about gardening tools", "…- **Notes** the build uses `cargo check` before…")).toBe(false);
 	});
 });

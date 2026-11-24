@@ -13,17 +13,34 @@ export function nextJump(s: JumpState): number | null {
 	return s.at;
 }
 
-const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+const collapse = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
-// The middle ~60 characters of a search snippet, normalized, for matching against a rendered message.
+// Drops markdown syntax so source text (search snippets) and rendered text (DOM) compare equal, then normalizes.
+function plain(src: string): string {
+	return collapse(
+		src
+			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // [text](url) -> text
+			.replace(/https?:\/\/\S+/g, " ")
+			.replace(/^\s*(?:`{3,}|~{3,}).*$/gm, " ") // fence lines
+			.replace(/^[ \t]*(?:#{1,6}|>|[-*+]|\d+[.)])[ \t]+/gm, "") // heading, quote, list markers
+			.replace(/[`|]/g, " ")
+			.replace(/\*+|__+/g, "")
+			.replace(/(^|[^\p{L}\p{N}])_+|_+(?=[^\p{L}\p{N}]|$)/gu, "$1"),
+	);
+}
+
+// The longest run of plain words (>= 20 chars) in a search snippet, else the whole normalized snippet.
 export function snippetCore(snippet: string): string {
-	const s = norm(snippet.replace(/^[\s…]+|[\s…]+$/g, ""));
-	if (s.length <= 60) return s;
-	const start = Math.floor((s.length - 60) / 2);
-	return s.slice(start, start + 60);
+	const s = plain(snippet.replace(/^[\s…]+|[\s…]+$/g, ""));
+	let best = "";
+	for (const run of s.split(/[^\p{L}\p{N} ]+/u)) {
+		const r = run.trim();
+		if (r.length > best.length) best = r;
+	}
+	return best.length >= 20 ? best : s;
 }
 
 export function matchesSnippet(text: string, snippet: string): boolean {
 	const core = snippetCore(snippet);
-	return core === "" || norm(text).includes(core);
+	return core === "" || plain(text).includes(core);
 }

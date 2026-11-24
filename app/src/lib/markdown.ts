@@ -14,8 +14,9 @@ function sameDocHash(href: string): string | null {
 	if (href.startsWith("#/")) return href;
 	try {
 		const origin = globalThis.location?.origin;
-		const u = new URL(href);
-		return origin && u.origin === origin && u.hash.startsWith("#/") ? u.hash : null;
+		if (!origin) return null;
+		const u = new URL(href, origin); // relative links resolve to our own origin
+		return u.origin === origin && u.hash.startsWith("#/") ? u.hash : null;
 	} catch {
 		return null;
 	}
