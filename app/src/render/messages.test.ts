@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { html, nothing } from "lit";
 import type { AgentMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import { formatAttachments } from "../../../shared/src/attachments.ts";
@@ -284,6 +285,16 @@ describe("TL;DR line is hidden", () => {
 	});
 });
 
+// Walk a lit template tree and return the bound value of every `data-ordinal=` slot, in order.
+function ordinalSlots(v: unknown): unknown[] {
+	if (Array.isArray(v)) return v.flatMap(ordinalSlots);
+	if (typeof v === "object" && v !== null && "strings" in v && "values" in v) {
+		const t = v as { strings: readonly string[]; values: unknown[] };
+		return t.strings.flatMap((s, i) => [...(/data-ordinal=$/.test(s) ? [t.values[i]] : []), ...(i < t.values.length ? ordinalSlots(t.values[i]) : [])]);
+	}
+	return [];
+}
+
 describe("message ordinals", () => {
 	const marks = (c: ReturnType<typeof createConversation>) =>
 		[...flat(renderConversation(c)).matchAll(/class="(user|assistant)" data-ordinal=([^>\s]*)/g)].map((m) => `${m[1]}:${m[2]}`);
@@ -302,8 +313,17 @@ describe("message ordinals", () => {
 	it("gives the streaming partial no ordinal", () => {
 		const conv = createConversation([{ role: "user", content: "a", timestamp: 1 }] as never);
 		conv.partial = { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 } as never;
-		const out = marks(conv);
-		expect(out[0]).toBe("user:0");
-		expect(out[1]).not.toMatch(/:\d/);
+		const slots = ordinalSlots(renderConversation(conv));
+		expect(slots).toHaveLength(2);
+		expect(slots[0]).toBe(0);
+		// The binding itself must be lit's `nothing` (attribute removed), not undefined, "" or a number.
+		expect(slots[1]).toBe(nothing);
+	});
+
+	it("the slot check rejects undefined, empty and numeric values", () => {
+		for (const bad of [undefined, "", 0]) {
+			const slots = ordinalSlots(html`<div class="assistant" data-ordinal=${bad}></div>`);
+			expect(slots[0]).not.toBe(nothing);
+		}
 	});
 });
