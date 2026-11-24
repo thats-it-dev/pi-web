@@ -38,6 +38,8 @@ export interface SearchServiceOptions {
 	queryEmbedBudgetMs?: number;
 	/** Cosine below which a vector-only candidate is dropped; SEMANTIC_FLOOR for the transformers model, none otherwise. */
 	semanticFloor?: number;
+	/** Fewest words a semantic-only hit's chunk may have; SEMANTIC_MIN_WORDS for the transformers model, none otherwise. */
+	semanticMinWords?: number;
 }
 
 const TOP = 40;
@@ -49,6 +51,11 @@ const QUERY_EMBED_BUDGET_MS = 1000;
 // Getting the screenshot." sits near the top of that). 0.61 sits in the gap; it keeps every related
 // pair. Only the transformers model uses it: the test hash embedder's cosines mean something else.
 export const SEMANTIC_FLOOR = 0.61;
+// The floor alone does not stop very short chunks: against the same model, "M", "Go", "Status?" and
+// "Checking the screen:" score 0.61-0.73 with queries like "battery" or "watch battery" (live check on
+// 20 real sessions, 2026-11-23), above the floor and above some related sentences. A chunk with fewer
+// words than this is only ever a keyword hit. Transformers model only, like the floor.
+export const SEMANTIC_MIN_WORDS = 5;
 // An embedding error other than "model unavailable" (which the embedder logs itself, once per load
 // attempt, so once per retry window) is logged at most this often, not on every sweep.
 const EMBED_FAIL_LOG_MS = 60 * 60_000;
@@ -68,7 +75,11 @@ export function contentWords(q: string): string[] {
 	return queryWords(q).filter((w) => !STOPWORDS.has(w));
 }
 
-type Vecs = { id: number; sessionId: string; vec: Float32Array }[];
+function wordCount(text: string): number {
+	return text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+}
+
+type Vecs ={ id: number; sessionId: string; vec: Float32Array }[];
 
 export class SearchService {
 	private db: SearchDb;
@@ -85,6 +96,7 @@ export class SearchService {
 	private lastEmbedFailLog = Number.NEGATIVE_INFINITY;
 	private queryEmbedBudgetMs: number;
 	private semanticFloor: number;
+	private semanticMinWords: number;
 	private timer: NodeJS.Timeout | null = null;
 
 	constructor(opts: SearchServiceOptions) {
@@ -95,7 +107,9 @@ export class SearchService {
 		this.embedBatch = Math.max(1, opts.embedBatch ?? 32);
 		this.debounceMs = opts.debounceMs ?? 2000;
 		this.queryEmbedBudgetMs = opts.queryEmbedBudgetMs ?? QUERY_EMBED_BUDGET_MS;
-		this.semanticFloor = opts.semanticFloor ?? (opts.embedder?.name === TRANSFORMERS_EMBEDDER_NAME ? SEMANTIC_FLOOR : Number.NEGATIVE_INFINITY);
+		const real = opts.embedder?.name === TRANSFORMERS_EMBEDDER_NAME;
+		this.semanticFloor = opts.semanticFloor ?? (real ? SEMANTIC_FLOOR : Number.NEGATIVE_INFINITY);
+		this.semanticMinWords = opts.semanticMinWords ?? (real ? SEMANTIC_MIN_WORDS : 0);
 	}
 
 	/** One sweep at a time; a call during a sweep waits for it and then runs once more (shared by all such callers). */
@@ -297,6 +311,7 @@ export class SearchService {
 		const taken = new Set<string>();
 		for (const row of this.db.chunks(fused.map((f) => f.id))) {
 			if (taken.has(row.sessionId) || row.sessionId === exclude || !live.has(row.sessionId)) continue;
+			if (!inKeyword.has(row.id) && wordCount(row.text) < this.semanticMinWords) continue;
 			taken.add(row.sessionId);
 			chosen.push(row);
 			if (chosen.length >= limit) break;

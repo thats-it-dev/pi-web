@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SearchDb } from "../src/search/db.ts";
 import { EmbedderUnavailableError, hashEmbedder, TRANSFORMERS_EMBEDDER_NAME, type Embedder } from "../src/search/embedder.ts";
-import { SEMANTIC_FLOOR, SearchService } from "../src/search/service.ts";
+import { SEMANTIC_FLOOR, SEMANTIC_MIN_WORDS, SearchService } from "../src/search/service.ts";
 
 type Msg = { role: "user" | "assistant"; text: string };
 
@@ -268,6 +268,10 @@ test("query: the semantic floor drops weak vector-only candidates; the transform
 		const ids = async (svc: SearchService) => (await svc.query("restart hub", 8)).hits.map((h) => h.sessionId);
 		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup, semanticFloor: 0.3 })), ["a", "c"]);
 		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup, semanticFloor: 0.9 })), ["a"], "the keyword hit survives a floor above its cosine");
+		const short = new SearchService({ db: f.db, embedder: hashEmbedder(), lookup, semanticFloor: 0.3, semanticMinWords: 4 });
+		assert.deepEqual(await ids(short), ["a"], "a 3-word chunk is not a semantic-only hit");
+		assert.deepEqual((await short.query("everything", 8)).hits.map((h) => h.sessionId), ["c"], "but is still a keyword hit");
+		assert.equal(SEMANTIC_MIN_WORDS, 5);
 		const named: Embedder = { ...hashEmbedder(), name: TRANSFORMERS_EMBEDDER_NAME };
 		assert.ok(SEMANTIC_FLOOR > 0.41);
 		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: named, lookup })), ["a"]);
