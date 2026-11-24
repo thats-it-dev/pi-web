@@ -15,7 +15,7 @@ import type { ListStore } from "../lib/list-store.ts";
 import { renderMarkdown } from "../lib/markdown.ts";
 import { ProgressStore } from "../lib/progress-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
-import { nextJump } from "../lib/jump.ts";
+import { matchesSnippet, nextJump } from "../lib/jump.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
@@ -576,9 +576,23 @@ export class PiSession extends LitElement {
 		this.atBottom = false; // the view stays where the jump put it
 		const id = this.sessionId;
 		const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
+		let snippet: string | null = null;
+		try {
+			const raw = sessionStorage.getItem("pi-web:jump-snippet");
+			sessionStorage.removeItem("pi-web:jump-snippet");
+			const j = raw ? (JSON.parse(raw) as { id?: string; at?: number; snippet?: string }) : null;
+			if (j && j.id === id && j.at === n && typeof j.snippet === "string") snippet = j.snippet;
+		} catch { /* no stored snippet: plain ordinal jump */ }
 		void messages?.updateComplete.then(() => {
 			if (this.sessionId !== id) return;
-			const target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
+			let target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
+			if (snippet !== null) {
+				// The ordinal may be off in a compacted live session: only land where the passage really is.
+				const text = snippet;
+				if (!target || !matchesSnippet(target.textContent ?? "", text)) {
+					target = [...messages.renderRoot.querySelectorAll<HTMLElement>("[data-ordinal]")].find((el) => matchesSnippet(el.textContent ?? "", text)) ?? null;
+				}
+			}
 			if (!target) return;
 			target.scrollIntoView({ block: "center" });
 			target.classList.remove("jump");

@@ -16,9 +16,16 @@ export function highlight(text: string, terms: string[]): TemplateResult {
 	return html`${parts.map((p, i) => (i % 2 === 1 ? html`<mark>${p}</mark>` : p))}`;
 }
 
+// The session view checks this snippet against the message it lands on (see jumpToAt).
+function rememberJump(h: SearchHit): void {
+	try {
+		sessionStorage.setItem("pi-web:jump-snippet", JSON.stringify({ id: h.sessionId, at: h.ordinal, snippet: h.snippet }));
+	} catch { /* storage unavailable: the jump falls back to the ordinal */ }
+}
+
 function row(h: SearchHit, home: string): TemplateResult {
 	const foot = h.semanticOnly ? "topic match" : `${h.role === "user" ? "you" : "pi"} · ${abbreviateCwd(h.cwd, home)}`;
-	return html`<a class="row hit" href=${hrefFor({ name: "session", id: h.sessionId, at: h.ordinal })}>
+	return html`<a class="row hit" href=${hrefFor({ name: "session", id: h.sessionId, at: h.ordinal })} @click=${() => rememberJump(h)}>
 		<span class="ty">${h.type === "chat" ? MESSAGE_CIRCLE_ICON : CODE_ICON}</span>
 		<span class="t">${sessionTitle({ name: h.name, firstPrompt: h.firstPrompt })}</span>
 		<span class="ago">${relativeTime(h.updatedAt)}</span>
