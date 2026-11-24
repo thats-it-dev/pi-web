@@ -1,3 +1,4 @@
+import { renameSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Chunk } from "./chunks.ts";
 
@@ -64,13 +65,39 @@ function toVec(buf: Uint8Array): Float32Array {
 	return new Float32Array(buf.slice(0, n * 4).buffer);
 }
 
+/**
+ * Opens the store; when that fails (a corrupt or foreign file), moves it and its -wal/-shm aside as
+ * <name>.corrupt-<ms> and starts an empty one. The store is derived from the session files, so the
+ * next sweep rebuilds it.
+ */
+export function openSearchDb(file: string, log: (m: string) => void, now: () => number = Date.now): SearchDb {
+	try {
+		return new SearchDb(file);
+	} catch (err) {
+		if (file === ":memory:") throw err;
+		const suffix = `.corrupt-${now()}`;
+		for (const ext of ["", "-wal", "-shm"]) {
+			try {
+				renameSync(file + ext, file + suffix + ext);
+			} catch {}
+		}
+		log(`search: could not open ${file} (${err instanceof Error ? err.message : String(err)}); moved it to ${file}${suffix} and starting a fresh index`);
+		return new SearchDb(file);
+	}
+}
+
 export class SearchDb {
 	private db: DatabaseSync;
 
 	constructor(file: string) {
 		this.db = new DatabaseSync(file);
-		if (file !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL");
-		this.db.exec(SCHEMA);
+		try {
+			if (file !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL");
+			this.db.exec(SCHEMA);
+		} catch (err) {
+			this.db.close();
+			throw err;
+		}
 	}
 
 	files(): Map<string, { sessionId: string; mtimeMs: number; size: number }> {

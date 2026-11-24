@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -66,6 +66,51 @@ test("an unknown op is an error reply; embedder none answers without semantic", 
 	t.after(() => client.close());
 	await assert.rejects((client as unknown as { call(m: object): Promise<unknown> }).call({ op: "hang" }), /unknown op/);
 	assert.deepEqual(await client.query("anything here", 5), { hits: [], semantic: false });
+});
+
+test("a garbage search.db is moved aside and the worker comes up on a fresh one", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "search-client-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const dbFile = join(root, "search.db");
+	writeFileSync(dbFile, "this is not a sqlite database, just some text that is long enough to have a header ".repeat(20));
+	writeFileSync(`${dbFile}-wal`, "junk wal");
+	const logs: string[] = [];
+	const client = new SearchClient({ dbFile, cacheDir: join(root, "models"), embedder: "none", sessionsDir: join(root, "none"), log: (m) => logs.push(m) });
+	t.after(() => client.close());
+	assert.deepEqual(await client.stats(), { files: 0, chunks: 0, embedded: 0, semantic: false });
+	// SQLite itself discards the junk -wal when the failed handle closes, so only the main file is left to move.
+	const moved = readdirSync(root).filter((f) => f.includes(".corrupt-"));
+	assert.equal(moved.length, 1, moved.join(", "));
+	assert.match(moved[0], /^search\.db\.corrupt-\d+$/);
+	assert.ok(logs.some((l) => l.includes("starting a fresh index")), logs.join("\n"));
+});
+
+test("a worker that dies is respawned and the next call succeeds", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "search-client-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const logs: string[] = [];
+	const client = new SearchClient({ dbFile: join(root, "search.db"), cacheDir: join(root, "models"), embedder: "none", sessionsDir: join(root, "none"), log: (m) => logs.push(m), respawnDelaysMs: [0, 200] });
+	t.after(() => client.close());
+	assert.equal((await client.stats()).files, 0);
+
+	const kill = () => (client as unknown as { worker: { terminate(): Promise<number> } }).worker.terminate();
+	const statsSoon = async () => {
+		for (let i = 0; i < 100; i++) {
+			try {
+				return await client.stats();
+			} catch (err) {
+				assert.match((err as Error).message, /closed/, "between workers, calls reject with the usual error");
+				await sleep(20);
+			}
+		}
+		throw new Error("no worker came back");
+	};
+	await kill();
+	assert.equal((await statsSoon()).files, 0);
+	await kill();
+	await assert.rejects(client.stats(), /closed/, "the second respawn in a row waits");
+	assert.equal((await statsSoon()).files, 0);
+	assert.equal(logs.filter((l) => /exited \(1\); restarting in/.test(l)).length, 2, logs.join("\n"));
 });
 
 test("a call not answered within the timeout rejects", async (t) => {

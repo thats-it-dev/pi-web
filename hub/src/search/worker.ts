@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { SessionIndex } from "../sessions.ts";
-import { SearchDb } from "./db.ts";
+import { openSearchDb } from "./db.ts";
 import { type Embedder, hashEmbedder, transformersEmbedder } from "./embedder.ts";
 import { SearchService } from "./service.ts";
 
@@ -36,7 +36,7 @@ const errText = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 mkdirSync(dirname(data.dbFile), { recursive: true });
 mkdirSync(data.cacheDir, { recursive: true });
-const db = new SearchDb(data.dbFile);
+const db = openSearchDb(data.dbFile, log);
 const embedder: Embedder | null = data.embedder === "transformers" ? transformersEmbedder(data.cacheDir, log) : data.embedder === "hash" ? hashEmbedder() : null;
 // The worker's own index: it caches summaries by mtime+size, so the service's lookup per query and sweep is a readdir + stats.
 const index = new SessionIndex(data.sessionsDir);
