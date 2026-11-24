@@ -95,9 +95,15 @@ export class PiSidebar extends LitElement {
 				${groups.map((g) => html`<section><h2 class="label">${g.label}</h2>${g.sessions.map((s) => this.row(s))}</section>`)}
 				${list?.loaded && groups.length === 0 ? html`<p class="none">${this.query ? "No sessions match." : `No ${this.type} sessions yet.`}</p>` : nothing}
 			</div>
-			<button class="btn new-session" @click=${() => (location.hash = hrefFor({ name: "new" }))}>${SQUARE_PEN_ICON}<span>${newSessionLabel(this.type)}</span></button>
+			<button class="btn new-session" @click=${this.newSession}>${SQUARE_PEN_ICON}<span>${newSessionLabel(this.type)}</span></button>
 		`;
 	}
+
+	// The route may not change (already on a new chat), so the app closes a drawer explicitly (a docked panel stays).
+	private newSession = () => {
+		location.hash = hrefFor({ name: "new" });
+		this.dispatchEvent(new CustomEvent("pi-new-session", { bubbles: true, composed: true }));
+	};
 
 	private row(s: SessionSummary) {
 		const cur = s.id === this.currentId;

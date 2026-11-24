@@ -10,13 +10,13 @@ async function openPanel(page: Page, isMobile: boolean) {
 	await expect(page.locator("pi-sidebar")).toBeVisible();
 }
 
-async function menuRow(page: Page, name: RegExp) {
+async function menuRow(page: Page, role: "button" | "switch", name: RegExp) {
 	await expect(page.getByRole("button", { name: /^Model Fake/ })).toBeVisible(); // the menu's rows move when the models arrive
 	await page.getByRole("button", { name: "Chat options" }).click();
-	return page.getByRole(/superpowers/.test(String(name)) ? "switch" : "button", { name });
+	return page.getByRole(role, { name });
 }
 
-const apiSessions = async (page: Page) => ((await (await page.request.get("/api/sessions")).json()) as { sessions: { id: string; type: string; cwd?: string }[] }).sessions;
+const apiSessions = async (page: Page) => (await (await page.request.get("/api/sessions")).json()) as { sessions: { id: string; type: string; cwd: string }[]; home: string };
 
 test("the toggle filters the list and the button label follows", async ({ page, isMobile }) => {
 	await page.goto("/#/new");
@@ -40,18 +40,20 @@ test("the open session stays when the toggle flips", async ({ page, isMobile }) 
 	await openPanel(page, isMobile);
 	const url = page.url();
 	await toggle(page, "Chat sessions").click();
+	await expect(toggle(page, "Chat sessions")).toHaveAttribute("aria-pressed", "true");
 	await toggle(page, "Code sessions").click();
+	await expect(toggle(page, "Code sessions")).toHaveAttribute("aria-pressed", "true");
+	await expect(codeTitle(page).filter({ hasText: "show me the app" }).first()).toBeVisible();
 	await expect(page).toHaveURL(url);
 });
 
-// These start from settings: tapping "new" while already on /#/new changes no hash, so a phone's drawer would stay open.
 test("a new chat lands in home with no folder row", async ({ page, isMobile }) => {
-	await page.goto("/#/settings");
+	await page.goto("/#/new");
 	await openPanel(page, isMobile);
 	await toggle(page, "Chat sessions").click();
 	await newButton(page).click();
 	await expect(page.getByRole("heading", { name: "new chat" })).toBeVisible();
-	await expect(await menuRow(page, /^folder/)).toHaveCount(0);
+	await expect(await menuRow(page, "button", /^folder/)).toHaveCount(0);
 	await expect(page.getByRole("switch", { name: /^superpowers/ })).toHaveAttribute("aria-checked", "false");
 	await page.keyboard.press("Escape");
 	await page.getByLabel("Message").fill("hi");
@@ -59,17 +61,23 @@ test("a new chat lands in home with no folder row", async ({ page, isMobile }) =
 	await expect(page).toHaveURL(/#\/s\//);
 	const id = page.url().split("/s/")[1];
 	await expect(page.locator("pi-messages")).toContainText("Hello world");
-	await expect(await menuRow(page, /^folder/)).toHaveCount(0);
-	await expect.poll(async () => (await apiSessions(page)).find((s) => s.id === id)?.type).toBe("chat");
+	await expect(await menuRow(page, "button", /^folder/)).toHaveCount(0);
+	await expect
+		.poll(async () => {
+			const { sessions, home } = await apiSessions(page);
+			const s = sessions.find((x) => x.id === id);
+			return s ? { type: s.type, inHome: s.cwd === home, notWork: !s.cwd.endsWith("pi-web-e2e-work") } : null;
+		})
+		.toEqual({ type: "chat", inHome: true, notWork: true });
 });
 
 test("a new code session starts with superpowers on", async ({ page, isMobile }) => {
-	await page.goto("/#/settings");
+	await page.goto("/#/new");
 	await openPanel(page, isMobile);
 	await toggle(page, "Code sessions").click();
 	await newButton(page).click();
 	await expect(page.getByRole("heading", { name: "new code session" })).toBeVisible();
-	await expect(await menuRow(page, /^superpowers/)).toHaveAttribute("aria-checked", "true");
+	await expect(await menuRow(page, "switch", /^superpowers/)).toHaveAttribute("aria-checked", "true");
 	await expect(page.getByRole("button", { name: /^folder/ })).toBeVisible();
 });
 
@@ -109,4 +117,15 @@ test("phone: the button never covers the last row", async ({ page, isMobile }) =
 			return row && btn ? row.y + row.height <= btn.y : false;
 		})
 		.toBe(true);
+});
+
+test("phone: tapping new while already on a new chat closes the drawer", async ({ page, isMobile }) => {
+	test.skip(!isMobile, "phone only");
+	await page.goto("/#/new");
+	const menu = page.locator("pi-header").getByRole("button", { name: "Open sessions" });
+	await menu.click();
+	await expect(menu).toHaveAttribute("aria-expanded", "true");
+	await newButton(page).click();
+	await expect(menu).toHaveAttribute("aria-expanded", "false");
+	await expect(page).toHaveURL(/#\/new$/);
 });

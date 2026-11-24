@@ -115,6 +115,7 @@ export class PiApp extends LitElement {
 		this.addEventListener("pi-route-replaced", this.onRouteReplaced);
 		this.addEventListener("pi-progress", this.onProgress);
 		this.addEventListener("pi-session-type", this.onSessionType);
+		this.addEventListener("pi-new-session", this.onNewSession);
 		this.addEventListener("tk-panel-change", this.onPanelChange);
 		this.addEventListener("tk-aside-resize", this.onAsideResize);
 		this.addEventListener("pi-preview", this.onPreview);
@@ -130,6 +131,7 @@ export class PiApp extends LitElement {
 		this.removeEventListener("pi-route-replaced", this.onRouteReplaced);
 		this.removeEventListener("pi-progress", this.onProgress);
 		this.removeEventListener("pi-session-type", this.onSessionType);
+		this.removeEventListener("pi-new-session", this.onNewSession);
 		this.removeEventListener("tk-panel-change", this.onPanelChange);
 		this.removeEventListener("tk-aside-resize", this.onAsideResize);
 		this.removeEventListener("pi-preview", this.onPreview);
@@ -240,6 +242,12 @@ export class PiApp extends LitElement {
 	}
 
 	// The progress drawer sits on a history entry of its own, so Back closes it and leaves the chat where it is.
+	// Tapping "new" on the page that is already a new chat changes no hash, which is what closes the nav drawer.
+	private onNewSession = () => {
+		const shell = this.shell();
+		if (shell?.renderRoot.querySelector(".layout.nav-open")) shell.hide("nav"); // nav-open is the drawer only; a docked nav stays
+	};
+
 	private onPanelChange = (e: Event) => {
 		const { panel, open, docked } = (e as CustomEvent<{ panel: Panel; open: boolean; docked: boolean }>).detail;
 		if (panel !== "aside") return;
