@@ -206,6 +206,10 @@ test("pairMode reads the pair from settings", () => {
 	assert.equal(pairMode({ defaultModel: "flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
 	assert.equal(pairMode({ defaultModel: "spark/pair-auto" }), false);
 	assert.equal(pairMode(undefined), false);
+	// 2026-11-24: `subagents.orchestrate` turns the orchestrator notes on (or off) whatever the models are.
+	assert.equal(pairMode({ defaultModel: "spark/flash-auto", subagents: { defaultModel: "spark/qwen3.8-flash-next", orchestrate: true } }), true);
+	assert.equal(pairMode({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang", orchestrate: false } }), false);
+	assert.equal(pairMode({ subagents: { orchestrate: "yes" } }), false);
 });
 
 test("the pair notes replace the inline-only ones", () => {

@@ -26,3 +26,11 @@ saved `pi-web-superpowers` entry yet) starts on, and the extension writes that i
 state. The default never applies to a subagent child (`PI_SUBAGENT_CHILD` set: pi-subagents workers, reviewers and
 scouts inherit the parent's env) or to an existing session that has messages but no entry: those stay off, as do chat
 sessions and terminal pi. A saved entry always wins.
+
+Orchestrator mode: the pi notes on writing-plans and executing-plans come in two sets. The inline set (the default)
+has the session implement every task itself; the orchestrator set has it scout, brief a `worker` per task, gate on
+verify and the reviewer, and never edit app code (the guard enforces that part). `pairMode` picks the orchestrator set
+when `~/.pi/agent/settings.json` has `subagents.orchestrate: true`, or, with no flag, when the agent pair is the model
+(`pair-auto` or the pi tune with the 35B as subagent default). The flag came on 2026-11-24: the pair was unloaded on
+11-17 for flash-auto and inkling, and in the 14 build sessions after that no worker was dispatched, since every
+session read the inline note. Read at resource discovery, so a new pi session picks a change up; no hub restart.

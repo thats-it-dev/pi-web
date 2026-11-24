@@ -200,6 +200,10 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   path, a hex colour, `font-family`, a `border-radius` value) every time it sees one. Why: the rules say to fetch the
   page before building UI, and 3 of the 18 app sessions from 2026-11-09 to 11-24 that edited UI files did; keeb's
   icons file carries ten pasted Lucide paths and two sessions searched the web for more.
+- The orchestrator rule (never edit app code; `REASONS.orchestrator`) keys on `pairSettings`: `subagents.orchestrate`
+  in `~/.pi/agent/settings.json` when it is a boolean, else the agent pair's models. The superpowers extension reads the
+  same flag for its orchestrator notes. Why: the pair was unloaded on 2026-11-17 and delegation went with it; 0 workers
+  in the 14 build sessions that followed, reviewer calls only.
 - When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
   UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
   `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that
