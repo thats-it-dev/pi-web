@@ -45,3 +45,8 @@ export function matchesSnippet(text: string, snippet: string): boolean {
 	const core = snippetCore(snippet);
 	return core === "" || plain(text).includes(core);
 }
+
+// A link without a stored snippet has only its ordinal; in a compacted live session the ordinals are off, so it must not scroll.
+export function shouldJumpByOrdinal(hasSnippet: boolean, compacted: boolean): boolean {
+	return hasSnippet || !compacted;
+}

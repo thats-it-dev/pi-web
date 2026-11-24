@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS files (
 	size INTEGER NOT NULL,
 	indexed_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chunks (
 	-- AUTOINCREMENT: ids are never reused, so an embedding computed for a chunk that a sweep replaced
 	-- meanwhile can never land on a new chunk that took its id (embedding runs beside sweeps).
@@ -193,6 +194,21 @@ export class SearchDb {
 			for (const r of rows) out.set(Number(r.id), r.h);
 		} catch {}
 		return out;
+	}
+
+	/** Name of the embedder that made the stored vectors, or null when none is recorded. */
+	embedderName(): string | null {
+		const r = this.db.prepare("SELECT value FROM meta WHERE key = 'embedder'").get() as any;
+		return r ? String(r.value) : null;
+	}
+
+	setEmbedderName(name: string): void {
+		this.db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('embedder', ?)").run(name);
+	}
+
+	/** Drops every stored vector (they came from another embedder); the chunks stay and become pending. */
+	clearEmbeddings(): void {
+		this.db.exec("UPDATE chunks SET embedding = NULL");
 	}
 
 	pendingEmbeddings(limit: number): { id: number; text: string }[] {

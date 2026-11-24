@@ -274,8 +274,10 @@ test("query: the semantic floor drops weak vector-only candidates; the transform
 		assert.equal(SEMANTIC_MIN_WORDS, 5);
 		const named: Embedder = { ...hashEmbedder(), name: TRANSFORMERS_EMBEDDER_NAME };
 		assert.ok(SEMANTIC_FLOOR > 0.41);
-		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: named, lookup })), ["a"]);
 		assert.equal((await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup }))).length, 3, "the hash embedder has no floor");
+		const real = new SearchService({ db: f.db, embedder: named, lookup }); // a new embedder name drops the vectors: re-embed
+		await real.embedPending();
+		assert.deepEqual(await ids(real), ["a"]);
 	} finally {
 		f.done();
 	}
@@ -450,7 +452,7 @@ test("a stuck query embedding answers keyword-only within the budget, and a poke
 		await f.sweep(); // the store now has vectors, as after a hub restart
 		let calls = 0;
 		const stuck: Embedder = {
-			name: "stuck",
+			name: hashEmbedder().name, // same name: the store's vectors stay
 			dims: 384,
 			embed: () => {
 				calls++;
@@ -507,5 +509,49 @@ test("a failing embedder logs once per window; an unavailable model is left to t
 		} finally {
 			f.done();
 		}
+	}
+});
+
+test("vectors made by another embedder are dropped and re-embedded", async () => {
+	const f = fixture(hashEmbedder());
+	try {
+		f.write("s1", [{ role: "user", text: "alpha bravo" }, { role: "assistant", text: "charlie delta" }]);
+		await f.sweep();
+		assert.equal(f.db.stats().embedded, 2);
+		assert.equal(f.db.embedderName(), hashEmbedder().name);
+		const logs: string[] = [];
+		new SearchService({ db: f.db, embedder: hashEmbedder(), lookup: async () => f.listing, log: (m) => logs.push(m) });
+		assert.equal(f.db.stats().embedded, 2, "same embedder keeps its vectors");
+		const other: Embedder = { ...hashEmbedder(), name: "other-model" };
+		new SearchService({ db: f.db, embedder: other, lookup: async () => f.listing, log: (m) => logs.push(m) });
+		assert.equal(f.db.pendingEmbeddings(10).length, 2);
+		assert.equal(f.db.embedderName(), "other-model");
+		assert.equal(logs.length, 1);
+	} finally {
+		f.done();
+	}
+});
+
+test("logs: embed backlog summary, and a single-file sweep stays silent", async () => {
+	const logs: string[] = [];
+	const f = fixture(hashEmbedder());
+	try {
+		const svc = new SearchService({ db: f.db, embedder: hashEmbedder(), lookup: async () => f.listing, log: (m) => logs.push(m) });
+		f.write("s1", [{ role: "user", text: "alpha bravo" }]);
+		await svc.sweep();
+		await svc.embedPending();
+		assert.deepEqual(logs, ["search: embedded 1 chunks (1 of 1 have vectors)"], "first backlog logged, one-file sweep silent");
+		logs.length = 0;
+		f.append("s1", { role: "user", text: "golf hotel" });
+		await svc.sweep();
+		await svc.embedPending();
+		assert.equal(logs.length, 0, "a small later embed and a one-file sweep are silent");
+		f.write("b", Array.from({ length: 60 }, (_, i) => ({ role: "user" as const, text: `filler message ${i}` })));
+		await svc.sweep();
+		await svc.embedPending();
+		assert.ok(logs.some((l) => /^search: embedded 6\d chunks \(\d+ of \d+ have vectors\)$/.test(l)), logs.join("|"));
+		assert.ok(!logs.some((l) => l.startsWith("search: indexed")), "one file indexed: silent");
+	} finally {
+		f.done();
 	}
 });

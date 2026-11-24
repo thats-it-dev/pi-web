@@ -98,6 +98,7 @@ export class SearchService {
 	private semanticFloor: number;
 	private semanticMinWords: number;
 	private timer: NodeJS.Timeout | null = null;
+	private firstBacklogLogged = false;
 
 	constructor(opts: SearchServiceOptions) {
 		this.db = opts.db;
@@ -110,6 +111,17 @@ export class SearchService {
 		const real = opts.embedder?.name === TRANSFORMERS_EMBEDDER_NAME;
 		this.semanticFloor = opts.semanticFloor ?? (real ? SEMANTIC_FLOOR : Number.NEGATIVE_INFINITY);
 		this.semanticMinWords = opts.semanticMinWords ?? (real ? SEMANTIC_MIN_WORDS : 0);
+		// Vectors from another embedder are not comparable with this one's: drop them so they are re-made.
+		const name = opts.embedder?.name;
+		if (name && this.db.embedderName() !== name) {
+			const had = this.db.embedderName();
+			if (this.db.stats().embedded) {
+				this.db.clearEmbeddings();
+				this.log(`search: embedder is now ${name}${had ? ` (was ${had})` : ""}; dropping stored vectors to re-embed`);
+			}
+			this.vecs = null;
+			this.db.setEmbedderName(name);
+		}
 	}
 
 	/** One sweep at a time; a call during a sweep waits for it and then runs once more (shared by all such callers). */
@@ -176,7 +188,7 @@ export class SearchService {
 			this.vecs = null;
 			indexed++;
 		}
-		if (indexed || removed) this.log(`search: indexed ${indexed}, removed ${removed}`);
+		if (indexed > 1 || removed > 0) this.log(`search: indexed ${indexed}, removed ${removed}`);
 		// Started, never awaited: a slow or stuck embedder must not hold up this sweep or the next.
 		this.embedPending().catch((err) => this.embedFailed(err));
 		return { indexed, removed };
@@ -201,6 +213,11 @@ export class SearchService {
 				this.embedAgain = false;
 				total += await this.runEmbed(embedder);
 			} while (this.embedAgain);
+			if (total > 50 || (total > 0 && !this.firstBacklogLogged)) {
+				const st = this.db.stats();
+				this.log(`search: embedded ${total} chunks (${st.embedded} of ${st.chunks} have vectors)`);
+			}
+			if (total > 0) this.firstBacklogLogged = true;
 			return total;
 		})().finally(() => {
 			if (this.embedding === run) this.embedding = null;

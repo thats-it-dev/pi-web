@@ -15,7 +15,7 @@ import type { ListStore } from "../lib/list-store.ts";
 import { renderMarkdown } from "../lib/markdown.ts";
 import { ProgressStore } from "../lib/progress-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
-import { matchesSnippet, nextJump } from "../lib/jump.ts";
+import { matchesSnippet, nextJump, shouldJumpByOrdinal } from "../lib/jump.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
@@ -582,8 +582,10 @@ export class PiSession extends LitElement {
 			const j = raw ? (JSON.parse(raw) as { id?: string; at?: number; snippet?: string }) : null;
 			if (j && j.id === id && j.at === n && typeof j.snippet === "string") snippet = j.snippet;
 		} catch { /* no stored snippet: plain ordinal jump */ }
+		const compacted = this.store?.conv.messages.some((m) => m.role === "compactionSummary") ?? false;
+		const byOrdinal = shouldJumpByOrdinal(snippet !== null, compacted);
 		void messages?.updateComplete.then(() => {
-			if (this.sessionId !== id) return;
+			if (this.sessionId !== id || !byOrdinal) return;
 			let target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
 			if (snippet !== null) {
 				// The ordinal may be off in a compacted live session: only land where the passage really is.

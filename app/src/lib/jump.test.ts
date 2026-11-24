@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type JumpState, matchesSnippet, nextJump, snippetCore } from "./jump.ts";
+import { type JumpState, matchesSnippet, nextJump, shouldJumpByOrdinal, snippetCore } from "./jump.ts";
 
 const base: JumpState = { at: 4, jumped: null, sessionId: "a", jumpedSession: null, messages: 10 };
 
@@ -69,5 +69,14 @@ describe("matchesSnippet with attachment markers", () => {
 	});
 	it("still rejects another short message", () => {
 		expect(matchesSnippet("something else", "look at this [file: notes.md]")).toBe(false);
+	});
+});
+
+describe("shouldJumpByOrdinal", () => {
+	it("skips only a no-snippet link in a compacted session", () => {
+		expect(shouldJumpByOrdinal(false, true)).toBe(false);
+		expect(shouldJumpByOrdinal(false, false)).toBe(true);
+		expect(shouldJumpByOrdinal(true, true)).toBe(true);
+		expect(shouldJumpByOrdinal(true, false)).toBe(true);
 	});
 });
