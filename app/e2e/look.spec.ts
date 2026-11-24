@@ -96,6 +96,31 @@ for (const scheme of ["light", "dark"] as const) {
 			await shot(page, "session-sheet", sessionSheetMasks(page));
 		});
 
+		test("search", async ({ page, isMobile }) => {
+			// Fixed hits, so the shot does not follow whatever sessions earlier specs left on the shared hub.
+			const hit = { cwd: "/home/e2e/work", updatedAt: Date.now() - 3 * 86_400_000, semanticOnly: false, terms: ["restart"] };
+			await page.route(/\/api\/search/, (route) =>
+				route.fulfill({
+					json: {
+						semantic: true,
+						hits: [
+							{ ...hit, sessionId: "a", type: "code", name: null, firstPrompt: "how do we restart the hub after a deploy", ordinal: 0, role: "user", snippet: "how do we restart the hub after a deploy" },
+							{ ...hit, sessionId: "a", type: "code", name: "Deploy notes", firstPrompt: "deploys", ordinal: 1, role: "assistant", snippet: "systemctl --user restart pi-web-hub, then reload the terminal pis" },
+							{ ...hit, sessionId: "b", type: "chat", name: null, firstPrompt: "the Pebble battery drained overnight", ordinal: 1, role: "assistant", snippet: "poll less often; the WebSocket only wakes the watch on change", semanticOnly: true, terms: [] },
+						],
+					},
+				}),
+			);
+			await page.goto("/");
+			await expect(page.getByRole("button", { name: /^Model Fake A/ })).toBeVisible();
+			if (isMobile) await page.getByRole("button", { name: "Open sessions" }).click();
+			await page.getByRole("button", { name: "search sessions" }).click();
+			await page.locator("pi-sidebar input[type=search]").fill("restart");
+			await expect(page.getByText("In conversations")).toBeVisible();
+			await expect(page.locator("pi-sidebar .row.hit")).toHaveCount(3);
+			await shot(page, "search");
+		});
+
 		test("toast", async ({ page }) => {
 			await page.goto("/");
 			await expect(page.getByRole("button", { name: /^Model Fake A/ })).toBeVisible();

@@ -174,8 +174,35 @@ mkdirSync(home);
 			.map((e) => JSON.stringify(e))
 			.join("\n") + "\n",
 	);
-	writeFileSync(join(dataDir, "session-types.json"), JSON.stringify({ "e2e-chat": "chat" }));
+	writeFileSync(join(dataDir, "session-types.json"), JSON.stringify({ "e2e-chat": "chat", "e2e-search-b": "chat" }));
 }
-Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir, HOME: home });
+// Two sessions with distinctive text for the search specs: a code one (WORKDIR) and a chat one (~), a few days old.
+{
+	const day = 86_400_000;
+	const seed = (file: string, id: string, cwd: string, ageDays: number, turns: [string, string]) => {
+		const t = (n: number) => new Date(Date.now() - ageDays * day + n * 1000).toISOString();
+		writeFileSync(
+			join(seedDir, file),
+			[
+				{ type: "session", version: 3, id, timestamp: t(0), cwd },
+				{ type: "message", id: "u1", parentId: null, timestamp: t(1), message: { role: "user", content: [{ type: "text", text: turns[0] }], timestamp: 1 } },
+				{ type: "message", id: "a1", parentId: "u1", timestamp: t(2), message: { role: "assistant", content: [{ type: "text", text: turns[1] }], timestamp: 2 } },
+			]
+				.map((e) => JSON.stringify(e))
+				.join("\n") + "\n",
+		);
+	};
+	seed("search-a.jsonl", "e2e-search-a", WORKDIR, 3, ["how do we restart the hub after a deploy", "systemctl --user restart pi-web-hub, then reload the terminal pis"]);
+	seed("search-b.jsonl", "e2e-search-b", home, 4, ["the Pebble battery drained overnight", "poll less often; the WebSocket only wakes the watch on change"]);
+}
+Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir, HOME: home, PI_WEB_SEARCH_EMBEDDER: "hash" });
 process.on("exit", () => pi.cleanup());
 await import("../../hub/src/main.ts");
+// The search index sweeps the seeded sessions in the background; hold the module open until it has them, so the first test doesn't race it.
+for (let i = 0; i < 150; i++) {
+	try {
+		const r = await fetch(`http://127.0.0.1:${PORT}/api/search?q=restart`, { headers: { origin: "http://localhost:5173", host: "localhost:5173" } });
+		if (r.ok && ((await r.json()) as { hits?: unknown[] }).hits?.length) break;
+	} catch {}
+	await new Promise((r) => setTimeout(r, 200));
+}
