@@ -28,6 +28,8 @@ import type { WatchService } from "./watch.ts";
 import type { launchOnPhone } from "./watch-launch.ts";
 import { routeProgress } from "./progress-routes.ts";
 import { routeWatch } from "./watch-routes.ts";
+import type { SearchClient } from "./search/client.ts";
+import { runSearch } from "./search/compose.ts";
 
 export interface HubDeps {
 	cfg: HubConfig;
@@ -47,11 +49,26 @@ export interface HubDeps {
 	lastModel?: LastModelStore; // the last model picked in pi-web; absent means none remembered
 	notesOutbox?: Outbox; // forwards ring notes to ring-profile; absent (ringProfileUrl "") means notes are only stored
 	uploadsDir?: string; // where prompt attachments are saved, one folder per session; default <dataDir>/uploads
+	search?: Pick<SearchClient, "query">; // the search worker's client (search/client.ts); absent means /api/search answers 404
 	now?: () => number;
 }
 
 const SSE_PING_MS = 20_000;
 const FILE_RESULTS = 20;
+
+/** The session list the app shows: files on disk plus live sessions that have no file yet, each with its type and live state. */
+export async function listSummaries(index: SessionIndex, registry: Registry): Promise<SessionSummary[]> {
+	const files = await index.list();
+	const known = new Set(files.map((f) => f.id));
+	const now = Date.now();
+	// A brand-new session has no file until its first message.
+	const fresh = registry
+		.all()
+		.filter((h) => h.sessionId && !known.has(h.sessionId))
+		.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null }));
+	const onDisk = files.map(({ file: _file, ...s }) => s);
+	return [...fresh, ...onDisk].map((s) => ({ ...s, type: registry.typeOf(s.id, s.parentSession), ...registry.info(s.id) }));
+}
 
 export function createHubServer(deps: HubDeps): Server {
 	const home = deps.home ?? homedir();
@@ -90,6 +107,10 @@ export function createHubServer(deps: HubDeps): Server {
 			}
 		}
 		if (m === "GET" && p === "/api/sessions") return sendJson(res, 200, { sessions: await listSessions(), home }, cors);
+		if (m === "GET" && p === "/api/search") {
+			if (!deps.search) throw new HttpError(404, "search is not available");
+			return sendJson(res, 200, await runSearch(deps.search, listSessions, searchParams), cors);
+		}
 		if (m === "GET" && p === "/api/cwds") return sendJson(res, 200, { cwds: knownCwds(await index.list(), home), home }, cors);
 		if (m === "GET" && p === "/api/events") return listStream(req, res, cors);
 		if (m === "GET" && p === "/api/defaults") {
@@ -210,18 +231,7 @@ export function createHubServer(deps: HubDeps): Server {
 		throw new HttpError(404, "Not found");
 	}
 
-	async function listSessions(): Promise<SessionSummary[]> {
-		const files = await index.list();
-		const known = new Set(files.map((f) => f.id));
-		const now = Date.now();
-		// A brand-new session has no file until its first message.
-		const fresh = registry
-			.all()
-			.filter((h) => h.sessionId && !known.has(h.sessionId))
-			.map((h) => ({ id: h.sessionId, cwd: h.cwd, name: h.snapshot().state?.sessionName ?? null, firstPrompt: null, userMessages: 0, model: null, contextTokens: null, createdAt: now, updatedAt: now, parentSession: null }));
-		const onDisk = files.map(({ file: _file, ...s }) => s);
-		return [...fresh, ...onDisk].map((s) => ({ ...s, type: registry.typeOf(s.id, s.parentSession), ...registry.info(s.id) }));
-	}
+	const listSessions = () => listSummaries(index, registry);
 
 	async function history(id: string) {
 		const h = registry.get(id);
