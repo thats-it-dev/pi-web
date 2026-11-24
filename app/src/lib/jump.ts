@@ -19,6 +19,7 @@ const collapse = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 function plain(src: string): string {
 	return collapse(
 		src
+			.replace(/\[file: [^\]]*\]|\[image\]/g, " ") // attachment markers the search index appends to user text
 			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // [text](url) -> text
 			.replace(/https?:\/\/\S+/g, " ")
 			.replace(/^\s*(?:`{3,}|~{3,}).*$/gm, " ") // fence lines

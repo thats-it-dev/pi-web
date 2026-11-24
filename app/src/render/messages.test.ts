@@ -22,7 +22,7 @@ vi.mock("marked", async (importOriginal) => {
 	return { ...real, Marked: CountingMarked };
 });
 
-const { renderConversation, renderPreviewCard } = await import("./messages.ts");
+const { renderConversation, renderPreviewCard, washJump } = await import("./messages.ts");
 const { renderMarkdown } = await import("../lib/markdown.ts");
 
 function longConversation(turns: number): AgentMessage[] {
@@ -325,5 +325,38 @@ describe("message ordinals", () => {
 			const slots = ordinalSlots(html`<div class="assistant" data-ordinal=${bad}></div>`);
 			expect(slots[0]).not.toBe(nothing);
 		}
+	});
+});
+
+describe("washJump", () => {
+	const fakeEl = () => {
+		const classes = new Set<string>();
+		const listeners = new Map<string, (e: Event) => void>();
+		const el = {
+			classList: { add: (c: string) => void classes.add(c), remove: (c: string) => void classes.delete(c) },
+			offsetWidth: 0,
+			addEventListener: (t: string, f: (e: Event) => void) => void listeners.set(t, f),
+			removeEventListener: (t: string) => void listeners.delete(t),
+		};
+		return { el: el as never, classes, listeners };
+	};
+	it("adds .jump and drops it when the fade ends", () => {
+		const { el, classes, listeners } = fakeEl();
+		washJump(el, false);
+		expect(classes.has("jump")).toBe(true);
+		listeners.get("animationend")?.({ animationName: "other" } as never);
+		expect(classes.has("jump")).toBe(true); // another animation ending is not the fade
+		listeners.get("animationend")?.({ animationName: "jump-fade" } as never);
+		expect(classes.has("jump")).toBe(false);
+		expect(listeners.size).toBe(0);
+	});
+	it("under reduced motion drops .jump after 300 ms", () => {
+		const { el, classes } = fakeEl();
+		const timers: Array<[() => void, number]> = [];
+		washJump(el, true, (f, ms) => timers.push([f, ms]));
+		expect(classes.has("jump")).toBe(true);
+		expect(timers.map((t) => t[1])).toEqual([300]);
+		timers[0][0]();
+		expect(classes.has("jump")).toBe(false);
 	});
 });

@@ -61,3 +61,13 @@ describe("matchesSnippet with markdown", () => {
 		expect(matchesSnippet("an unrelated message about gardening tools", "…- **Notes** the build uses `cargo check` before…")).toBe(false);
 	});
 });
+
+describe("matchesSnippet with attachment markers", () => {
+	it("ignores the [file: …] and [image] markers the index appends to a user message", () => {
+		expect(matchesSnippet("look at this", "look at this [file: notes.md] [image]")).toBe(true);
+		expect(matchesSnippet("fix the build", "fix the build [file: a b.ts]")).toBe(true);
+	});
+	it("still rejects another short message", () => {
+		expect(matchesSnippet("something else", "look at this [file: notes.md]")).toBe(false);
+	});
+});

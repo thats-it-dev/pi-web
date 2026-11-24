@@ -48,7 +48,8 @@ export class SearchStore extends EventTarget {
 
 	setQuery(q: string): void {
 		const query = q.trim();
-		if (query === this.query && this.state.status !== "idle") return;
+		// The same text again is a no-op, unless the last try failed: then retyping it retries.
+		if (query === this.query && this.state.status !== "idle" && this.state.status !== "error") return;
 		this.cancel();
 		this.query = query;
 		if (query.length < this.minChars) return this.set({ status: "idle" });

@@ -22,7 +22,7 @@ import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
 import { nextTucked } from "../lib/mobile.ts";
 import { hasProgress } from "../render/progress.ts";
-import { markdownStyles } from "../render/messages.ts";
+import { markdownStyles, washJump } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
 import { parseDialogTitle } from "../lib/dialog-title.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
@@ -573,7 +573,6 @@ export class PiSession extends LitElement {
 		}
 		this.jumped = n;
 		this.jumpedSession = this.sessionId;
-		this.atBottom = false; // the view stays where the jump put it
 		const id = this.sessionId;
 		const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 		let snippet: string | null = null;
@@ -593,11 +592,10 @@ export class PiSession extends LitElement {
 					target = [...messages.renderRoot.querySelectorAll<HTMLElement>("[data-ordinal]")].find((el) => matchesSnippet(el.textContent ?? "", text)) ?? null;
 				}
 			}
-			if (!target) return;
+			if (!target) return; // nowhere to land: the view (following or not) stays as it was
+			this.atBottom = false; // the view stays where the jump put it
 			target.scrollIntoView({ block: "center" });
-			target.classList.remove("jump");
-			void target.offsetWidth; // restart the wash on a repeat jump
-			target.classList.add("jump");
+			washJump(target);
 		});
 		if (!this.childKey) {
 			history.replaceState(null, "", hrefFor({ name: "session", id }));

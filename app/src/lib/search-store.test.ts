@@ -77,6 +77,23 @@ describe("SearchStore", () => {
 		await vi.advanceTimersByTimeAsync(300);
 		expect(search).toHaveBeenCalledTimes(1);
 	});
+	it("retypes the same query after an error to retry", async () => {
+		let fail = true;
+		const search = vi.fn(async (_q: string, _l: number, _s?: AbortSignal) => {
+			if (fail) throw new HubError(0, "down");
+			return resp(1);
+		});
+		const { store } = setup(search);
+		store.setQuery("res");
+		await vi.advanceTimersByTimeAsync(300);
+		expect(store.state).toMatchObject({ status: "error", message: "Can't reach the hub." });
+		fail = false;
+		store.setQuery("res");
+		expect(store.state).toEqual({ status: "searching", query: "res" });
+		await vi.advanceTimersByTimeAsync(300);
+		expect(search).toHaveBeenCalledTimes(2);
+		expect(store.state.status).toBe("done");
+	});
 	it("clear goes idle and aborts", async () => {
 		const signals: AbortSignal[] = [];
 		const { store } = setup((_q, _l, s) => {

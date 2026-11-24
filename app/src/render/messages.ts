@@ -215,6 +215,25 @@ export const previewCardStyles = css`
 	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
 `;
 
+type Washable = Pick<HTMLElement, "classList" | "offsetWidth" | "addEventListener" | "removeEventListener">;
+
+// Wash a jumped-to message amber, then drop the class: lit reuses elements, so a lingering .jump would outlive the
+// fade or move to another message on re-render. Reduced motion has no animation to end, so a short timer drops it.
+export function washJump(el: Washable, reduced = matchMedia("(prefers-reduced-motion: reduce)").matches, later: (f: () => void, ms: number) => unknown = setTimeout): void {
+	const done = () => {
+		el.removeEventListener("animationend", onEnd);
+		el.classList.remove("jump");
+	};
+	const onEnd = (e: Event) => {
+		if ((e as AnimationEvent).animationName === "jump-fade") done();
+	};
+	el.classList.remove("jump");
+	void el.offsetWidth; // restart the wash on a repeat jump
+	el.classList.add("jump");
+	if (reduced) later(done, 300);
+	else el.addEventListener("animationend", onEnd);
+}
+
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
