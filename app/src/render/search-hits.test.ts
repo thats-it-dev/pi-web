@@ -62,6 +62,11 @@ describe("searchHits", () => {
 		expect(flatten(searchHits(done([]), "/h"))).toContain("Nothing in conversations.");
 		expect(flatten(searchHits({ status: "error", query: "q", message: "Search failed." }, "/h"))).toContain("Search failed.");
 	});
+	it("status lines are announced (role=status)", () => {
+		expect(flatten(searchHits({ status: "searching", query: "q" }, "/h"))).toContain('<p class="status" role="status">');
+		expect(flatten(searchHits(done([]), "/h"))).toContain('<p class="status" role="status">Nothing in conversations.');
+		expect(flatten(searchHits({ status: "error", query: "q", message: "Search failed." }, "/h"))).toContain('<p class="status" role="status">Search failed.');
+	});
 	it("styles carry the spec values", () => {
 		const c = searchHitsStyles.cssText;
 		expect(c).toContain("-webkit-line-clamp: 2");

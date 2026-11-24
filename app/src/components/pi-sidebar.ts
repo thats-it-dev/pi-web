@@ -40,7 +40,10 @@ export class PiSidebar extends LitElement {
 		searchHitsStyles,
 		css`
 			:host { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
-			.top { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; }
+			/* min-height: the padding plus the brand's line box (the display font's normal line height, 39.66 px at 1.6rem;
+			   layout floors to 1/64 px, hence 1.54908), so the search field's row is as tall as the row it replaces and the
+			   list below does not move. Measured equal (65.66 px) on desktop and phone. */
+			.top { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; min-height: calc(26px + 1.6rem * 1.54908); }
 			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text-primary); }
 			.top-end { display: flex; align-items: center; gap: 12px; }
 			.settings, .open-search { display: inline-flex; align-items: center; color: var(--text-secondary); }
@@ -52,6 +55,8 @@ export class PiSidebar extends LitElement {
 			.top.searching { justify-content: flex-start; gap: 12px; }
 			.search { flex: 1; min-width: 0; }
 			.search input { width: 100%; border-color: var(--line); padding: 5px 9px; }
+			/* The close button is the one ✕: no native clear button inside the field. */
+			.search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 			.x { display: inline-flex; align-items: center; padding: 0; background: none; border: 0; cursor: pointer; color: var(--text-secondary); }
 			.x:hover { color: var(--text-primary); }
 			.offline { margin: 4px 16px 8px; font-size: 0.8rem; color: var(--accent); }
@@ -97,8 +102,17 @@ export class PiSidebar extends LitElement {
 		this.search?.clear();
 	};
 
+	// Escape closes the field only: preventDefault tells the shell's drawer to stay open. Not mid-composition (IME).
+	private onSearchKey = (e: KeyboardEvent) => {
+		if (e.key !== "Escape" || e.isComposing) return;
+		e.preventDefault();
+		this.closeSearch();
+	};
+
 	updated(changed: PropertyValues<this>): void {
-		if (changed.has("searchOpen") && this.searchOpen) this.renderRoot.querySelector<HTMLInputElement>(".search input")?.focus();
+		if (!changed.has("searchOpen")) return;
+		if (this.searchOpen) this.renderRoot.querySelector<HTMLInputElement>(".search input")?.focus();
+		else if (changed.get("searchOpen") === true) this.renderRoot.querySelector<HTMLButtonElement>(".open-search")?.focus(); // focus goes back where it came from
 	}
 
 	willUpdate(changed: PropertyValues<this>): void {
@@ -127,7 +141,7 @@ export class PiSidebar extends LitElement {
 				? html`<div class="top searching">
 						<label class="search open">
 							<span class="sr-only">Search sessions</span>
-							<input type="search" placeholder="search sessions" .value=${this.query} @input=${this.onInput} @keydown=${(e: KeyboardEvent) => e.key === "Escape" && this.closeSearch()} />
+							<input type="search" placeholder="search sessions" .value=${this.query} @input=${this.onInput} @keydown=${this.onSearchKey} />
 						</label>
 						<button class="x" aria-label="close search" @click=${this.closeSearch}>${X_ICON}</button>
 					</div>`
@@ -138,7 +152,7 @@ export class PiSidebar extends LitElement {
 			${list?.error ? html`<div class="offline" role="status">${list.error}<button class="retry u" @click=${() => list.refresh()}>retry</button></div>` : nothing}
 			<div class="groups">
 				${groups.map((g) => html`<section><h2 class="label">${g.label}</h2>${g.sessions.map((s) => this.row(s))}</section>`)}
-				${list?.loaded && groups.length === 0 ? html`<p class="none">${this.searchOpen && this.query ? "No session titles match." : this.query ? "No sessions match." : `No ${this.type} sessions yet.`}</p>` : nothing}
+				${list?.loaded && groups.length === 0 ? html`<p class="none">${this.searchOpen && this.query ? "No session titles match." : `No ${this.type} sessions yet.`}</p>` : nothing}
 				${list && this.searchOpen && this.search ? searchHits(this.search.state, list.home) : nothing}
 			</div>
 			<button class="btn new-session" aria-label=${newSessionLabel(this.type)} title=${newSessionLabel(this.type)} @click=${this.newSession}>${SQUARE_PEN_ICON}</button>

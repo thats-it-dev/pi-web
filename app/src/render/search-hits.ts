@@ -37,9 +37,9 @@ function row(h: SearchHit, home: string): TemplateResult {
 export function searchHits(state: SearchState, home: string): TemplateResult | typeof nothing {
 	if (state.status === "idle") return nothing;
 	let body: TemplateResult | TemplateResult[];
-	if (state.status === "searching") body = html`<p class="status"><span class="pulse"></span>searching…</p>`;
-	else if (state.status === "error") body = html`<p class="status">${state.message}</p>`;
-	else if (state.hits.length === 0) body = html`<p class="status">Nothing in conversations.</p>`;
+	if (state.status === "searching") body = html`<p class="status" role="status"><span class="pulse"></span>searching…</p>`;
+	else if (state.status === "error") body = html`<p class="status" role="status">${state.message}</p>`;
+	else if (state.hits.length === 0) body = html`<p class="status" role="status">Nothing in conversations.</p>`;
 	else body = state.hits.map((h) => row(h, home));
 	return html`<section class="hits"><h2 class="label">In conversations</h2>${body}</section>`;
 }
