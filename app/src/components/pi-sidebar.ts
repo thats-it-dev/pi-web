@@ -38,7 +38,7 @@ export class PiSidebar extends LitElement {
 			.settings { display: inline-flex; align-items: center; color: var(--text-secondary); }
 			.settings:hover { color: var(--text-primary); }
 			.settings svg { width: 18px; height: 18px; }
-			.new-session { position: absolute; left: 12px; bottom: calc(12px + var(--safe-bottom)); width: 48px; height: 48px; padding: 0; }
+			.new-session { position: absolute; left: 12px; bottom: calc(12px + var(--safe-bottom)); width: 48px; height: 48px; padding: 0; border-radius: 50%; }
 			.new-session svg { width: 24px; height: 24px; }
 			.search { padding: 0 16px 8px; }
 			.search input { width: 100%; border-color: var(--line); padding: 5px 9px; }

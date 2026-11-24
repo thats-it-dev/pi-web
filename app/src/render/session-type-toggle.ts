@@ -10,8 +10,8 @@ export function sessionTypeToggle(type: SessionType, onPick: (t: SessionType) =>
 }
 
 export const sessionTypeToggleStyles = css`
-	.type-toggle { position: relative; display: inline-grid; grid-template-columns: 32px 32px; height: 28px; border: 1px solid var(--border-color); border-radius: var(--radius); overflow: hidden; }
-	.type-toggle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 32px; background: var(--primary); transition: transform 0.22s ease; }
+	.type-toggle { position: relative; display: inline-grid; grid-template-columns: 32px 32px; height: 28px; border: 1px solid var(--border-color); border-radius: 999px; overflow: hidden; }
+	.type-toggle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 32px; border-radius: 999px; background: var(--primary); transition: transform 0.22s ease; }
 	.type-toggle.chat::before { transform: translateX(32px); }
 	.type-toggle button { position: relative; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: var(--text-muted); cursor: pointer; transition: color 0.22s ease; }
 	.type-toggle button[aria-pressed="true"] { color: #000; } /* as the kit's .btn on --primary: --bg is unreadable on amber in light */
