@@ -218,6 +218,9 @@ export const previewCardStyles = css`
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.jump { border-left: 2px solid var(--primary); background: linear-gradient(90deg, color-mix(in srgb, var(--primary) 18%, transparent), transparent 70%); animation: jump-fade 3s ease-out forwards; }
+	@keyframes jump-fade { to { background: transparent; } }
+	@media (prefers-reduced-motion: reduce) { .jump { animation: none; background: transparent; } }
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
 	.files { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; font-family: var(--font); white-space: normal; }
 	.chip.file { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 8px; font-size: 0.78rem; max-width: 100%; }

@@ -15,6 +15,7 @@ import type { ListStore } from "../lib/list-store.ts";
 import { renderMarkdown } from "../lib/markdown.ts";
 import { ProgressStore } from "../lib/progress-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
+import { nextJump } from "../lib/jump.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
@@ -45,6 +46,7 @@ export class PiSession extends LitElement {
 		sessionId: { attribute: false },
 		childKey: { attribute: false },
 		home: { attribute: false },
+		at: { attribute: false },
 		version: { state: true },
 		sheet: { state: true },
 		menuStep: { state: true },
@@ -57,6 +59,7 @@ export class PiSession extends LitElement {
 	declare sessionId: string;
 	declare childKey: string | null; // set: the chat area shows that subagent's transcript, read-only
 	declare home: string;
+	declare at: number | null; // open at this message ordinal (from #/s/<id>/at/<n>)
 	declare version: number;
 	declare sheet: Sheet | null;
 	declare menuStep: MenuStep;
@@ -70,6 +73,8 @@ export class PiSession extends LitElement {
 	private stream: { close(): void } | null = null;
 	private streamId: string | null = null;
 	private atBottom = true;
+	private jumped: number | null = null;
+	private jumpedSession: string | null = null;
 	private lastScrollTop = 0;
 	private autoScrollTop = -1; // where the last stick-to-bottom left the chat
 	private dragFromY: number | null = null;
@@ -541,6 +546,7 @@ export class PiSession extends LitElement {
 	};
 
 	updated(changed: PropertyValues<this>): void {
+		this.jumpToAt();
 		if (this.atBottom) {
 			const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 			void messages?.updateComplete.then(() => {
@@ -552,6 +558,24 @@ export class PiSession extends LitElement {
 			});
 		}
 		this.syncFocus();
+	}
+
+	// Scroll to the message the route asked for and wash it amber, once per (session, at).
+	private jumpToAt(): void {
+		const n = nextJump({ at: this.at ?? null, jumped: this.jumped, sessionId: this.sessionId, jumpedSession: this.jumpedSession, messages: this.store?.conv.messages.length ?? 0 });
+		if (n === null) return;
+		this.jumped = n;
+		this.jumpedSession = this.sessionId;
+		this.atBottom = false; // the view stays where the jump put it
+		const id = this.sessionId;
+		const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
+		void messages?.updateComplete.then(() => {
+			const target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
+			if (!target) return;
+			target.scrollIntoView({ block: "center" });
+			target.classList.add("jump");
+		});
+		if (!this.childKey) history.replaceState(null, "", hrefFor({ name: "session", id }));
 	}
 
 	// Move focus into a sheet when it opens; give it back to the composer when it closes.
