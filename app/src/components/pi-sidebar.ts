@@ -44,6 +44,10 @@ export class PiSidebar extends LitElement {
 			   layout floors to 1/64 px, hence 1.54908), so the search field's row is as tall as the row it replaces and the
 			   list below does not move. Measured equal (65.66 px) on desktop and phone. */
 			.top { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; min-height: calc(26px + 1.6rem * 1.54908); }
+			/* At rest: brand left, the type toggle centred, search + gear right (Michael's call, less crowded on the right). */
+			.top:not(.searching) { display: grid; grid-template-columns: 1fr auto 1fr; }
+			.top-mid { justify-self: center; display: flex; align-items: center; }
+			.top:not(.searching) .top-end { justify-self: end; }
 			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text-primary); }
 			.top-start, .top-end { display: flex; align-items: center; gap: 12px; }
 			.settings, .open-search { display: inline-flex; align-items: center; color: var(--text-secondary); }
@@ -149,8 +153,9 @@ export class PiSidebar extends LitElement {
 						<button class="x" aria-label="close search" @click=${this.closeSearch}>${X_ICON}</button>
 					</div>`
 				: html`<div class="top">
-						<span class="top-start"><a class="brand" href="#/" aria-label="pi home"><span class="u on">pi</span></a><button class="open-search" aria-label="search sessions" title="search sessions" @click=${() => (this.searchOpen = true)}>${SEARCH_ICON}</button></span>
-						<span class="top-end">${sessionTypeToggle(this.type, (t) => this.dispatchEvent(new CustomEvent("pi-session-type", { detail: { type: t }, bubbles: true, composed: true })))}<a class="settings" href="#/settings" aria-label="settings" title="settings">${SETTINGS_ICON}</a></span>
+						<span class="top-start"><a class="brand" href="#/" aria-label="pi home"><span class="u on">pi</span></a></span>
+						<span class="top-mid">${sessionTypeToggle(this.type, (t) => this.dispatchEvent(new CustomEvent("pi-session-type", { detail: { type: t }, bubbles: true, composed: true })))}</span>
+						<span class="top-end"><button class="open-search" aria-label="search sessions" title="search sessions" @click=${() => (this.searchOpen = true)}>${SEARCH_ICON}</button><a class="settings" href="#/settings" aria-label="settings" title="settings">${SETTINGS_ICON}</a></span>
 					</div>`}
 			${list?.error ? html`<div class="offline" role="status">${list.error}<button class="retry u" @click=${() => list.refresh()}>retry</button></div>` : nothing}
 			<div class="groups">
