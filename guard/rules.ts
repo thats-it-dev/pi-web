@@ -1094,6 +1094,95 @@ export function appBrief(dir: string, agentsMd: string | undefined, styleRules: 
 	return parts.length ? `[pi-guard] ${parts.join("\n\n")}` : undefined;
 }
 
+/** One example of the kit's design system page (kit/demo/index.html): an article, or an `<h3>` section of one, with
+ *  the code of its `<pre data-lang><code>` blocks unescaped and its first caption. */
+export type KitPattern = { id: string; title: string; caption: string | undefined; code: { lang: string; text: string }[] };
+
+const unescapeHtml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+const stripTags = (s: string) => s.replace(/<[^>]+>/g, "");
+const slug = (s: string) => s.toLowerCase().replace(/&amp;/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/** The patterns on the design system page, in page order: `<article id>` for the examples before its first `<h3>`,
+ *  `<article id>/<h3 slug>` for each section after one. Sections without a code block are left out. */
+export function kitPatterns(html: string): KitPattern[] {
+	const out: KitPattern[] = [];
+	for (const art of html.matchAll(/<article id="([\w-]+)">([\s\S]*?)<\/article>/g)) {
+		const [, id, body] = art;
+		const h2 = unescapeHtml(stripTags(/<h2>([\s\S]*?)<\/h2>/.exec(body)?.[1] ?? id)).trim();
+		// A section heading starts its line; an `<h3>` inside a demo (a card's title) does not.
+		const parts = body.split(/\n[ \t]*<h3>([\s\S]*?)<\/h3>/);
+		for (let i = 0; i < parts.length; i += 2) {
+			const heading = i === 0 ? undefined : unescapeHtml(stripTags(parts[i - 1])).trim();
+			const section = parts[i];
+			const code = [...section.matchAll(/<pre data-lang="(\w+)">(?:<button[^>]*><\/button>)?<code>([\s\S]*?)<\/code><\/pre>/g)].map((m) => ({ lang: m[1], text: unescapeHtml(m[2]).trim() }));
+			if (!code.length) continue;
+			const cap = /<figcaption>([\s\S]*?)<\/figcaption>/.exec(section)?.[1];
+			out.push({ id: heading ? `${id}/${slug(heading)}` : id, title: heading ? `${h2}: ${heading}` : h2, caption: cap ? unescapeHtml(stripTags(cap)).trim() : undefined, code });
+		}
+	}
+	return out;
+}
+
+// What an edit's text says it is building, mapped to the page's patterns, in page order.
+const ICONISH = /<svg\b|<path\b|_ICON\b|icon-btn|\bICONS\[/i;
+const KIT_PICKS: [string, RegExp][] = [
+	["buttons", new RegExp(`\\.btn\\b|class="btn\\b|${ICONISH.source}`, "i")],
+	["forms", /<label\b|<input\b|<select\b|<textarea\b|class="form\b|\.form\b|\bswitch\b|aria-checked|<dialog\b|tk-sheet|\bsettings\b|\bconfirm/i],
+	["forms/pattern-css", /<label\b|<input\b|<select\b|<textarea\b|class="form\b|\.form\b|\bswitch\b|aria-checked|<dialog\b|tk-sheet|\bsettings\b|\bconfirm/i],
+	["feedback/toasts", /\btoast\(|tk-toasts/],
+	["feedback/status", /class="status|\.status\b|class="dot\b|\.dot\b/],
+	["feedback/notices", /class="notice|\.notice\b/],
+	["feedback/progress", /tk-progress|<progress\b|progressFraction/],
+	["feedback/empty-and-loading-states", /class="empty|\.empty\b|class="loading|\.loading\b/],
+	["overlays/settings-dialog", /<dialog\b|tk-sheet|\bsettings\b|\bmodal\b|\bconfirm/i],
+	["overlays/confirm", /<dialog\b|tk-sheet|\bsettings\b|\bmodal\b|\bconfirm/i],
+	["lists", /class="rows?\b|\.rows?\b|<ul\b|<li\b|class="card\b|\.card\b|\.kv\b/],
+	["lists/cards", /class="rows?\b|\.rows?\b|<ul\b|<li\b|class="card\b|\.card\b|\.kv\b/],
+	["data", /\bd3\b|<canvas\b|tk-(?:stats?|sparkline|timeseries|bars|heatmap)\b|\bcharts?\b|<svg\b[\s\S]*<(?:polyline|rect|line|circle)\b/i],
+	["icons", ICONISH],
+];
+
+/** The ids of the page patterns an edit to `path` with `text` touches. */
+export function kitPatternIds(path: string, text: string): string[] {
+	const t = `${path}\n${text}`;
+	return KIT_PICKS.filter(([, re]) => re.test(t)).map(([id]) => id);
+}
+
+const KIT_DEPARTURES: [RegExp, (m: RegExpMatchArray) => string][] = [
+	[/<dialog\b/i, () => "This edit builds a `<dialog>` by hand: a settings dialog or confirm is `tk-sheet` with the `.form` pattern inside (below)."],
+	[/<path\s[^>]*\bd=/i, () => "Pasted SVG: icons come from the kit (`SETTINGS_ICON`, `TRASH_ICON`, …, `ICONS[name]`, see below); ask for a missing one instead of pasting a path."],
+	[/:\s*(#[0-9a-f]{3,8})\b/i, (m) => `Hex colour ${m[1]}: colours are kit tokens (\`var(--primary)\`, \`var(--text-muted)\`, …), never a value.`],
+	[/\bfont-family\s*:/i, () => "`font-family` in app code: the kit sets type; `var(--font-body)`, `var(--font-display)` or `var(--font-mono)` at most."],
+	[/\bborder-radius\s*:\s*\d/i, () => "`border-radius` with a value: `var(--radius)`; pills belong to the kit's badges, dots and switch."],
+];
+
+/** What an edit builds by hand that the kit provides, one line each; empty when nothing does. */
+export function kitDepartures(text: string): string[] {
+	const out: string[] = [];
+	for (const [re, say] of KIT_DEPARTURES) {
+		const m = re.exec(text);
+		if (m) out.push(say(m));
+	}
+	return out;
+}
+
+export const KIT_PATTERNS_MARK = "[pi-guard] Kit patterns for this change, from https://kit.thatsit.app/ (no fetch needed).";
+
+/** The note appended to a UI edit's result: the departures the edit makes from the kit, then the code of each pattern it
+ *  touches. On 2026-11-09 to 11-24, 3 of 18 app sessions that edited UI files fetched the page the rules name; the
+ *  rest built dialogs, forms and icons from memory, and keeb's icons file carries ten pasted Lucide paths. */
+export function kitPatternNote(patterns: KitPattern[], departures: string[]): string {
+	const head = `${KIT_PATTERNS_MARK} Copy them as they are; app CSS never re-declares a kit class, and the reviewer checks against them.`;
+	const body = patterns.map((p) => `## ${p.title}\n${p.caption ? `${p.caption}\n` : ""}${p.code.map((c) => `\`\`\`${c.lang}\n${c.text}\n\`\`\``).join("\n")}`);
+	return [head, ...departures.map((d) => `- ${d}`), ...body.flatMap((b) => ["", b])].join("\n");
+}
+
+/** `raw` as an absolute path: `~` and `$HOME` expanded, a relative path resolved against `cwd`. */
+export function absPath(raw: string, cwd: string, home: string): string {
+	const expanded = raw.replace(/^(~|\$HOME|\$\{HOME\})(?=\/)/, home);
+	return isAbsolute(expanded) ? expanded : join(cwd, expanded);
+}
+
 /** The brief for a design doc or plan review. On keeb 2026-11-17 (flash, PR #31) the plan review went out with the
  *  code brief: "verify passed", "cite the test per named behavior" on a diff with no code in it, after a needless
  *  `npm run verify` to open the gate. A doc is checked against the code it describes and the spec it implements. */

@@ -191,6 +191,15 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   work away (nuke/discard/scrap/trash/throw away + this/that/it/all/everything), reverting is allowed and committing or
   shipping a dirty tree is blocked. Why: on 2026-11-23 a session ended on "nevermind. nuke this work." with the reply
   aborted; the next session found the files, called them a prior session's WIP, committed them and shipped PR #38.
+- A UI edit or write in an app (`src/`, `index.html`, `public/*.css`) gets the kit patterns it touches on its result:
+  the guard parses `kit/demo/index.html` (the design system page, same file as kit.thatsit.app) into its examples
+  and picks by what the edit's text builds (a dialog or settings → the sheet, settings dialog and confirm; labels,
+  inputs or a switch → the form pattern and its CSS; icon buttons or SVG → buttons and icons; rows or cards → lists;
+  toast/notice/empty/progress → feedback; d3, canvas or chart elements → data). Each pattern goes once per app per
+  session, again after a compaction. The note also names what the edit builds by hand (a `<dialog>`, a pasted SVG
+  path, a hex colour, `font-family`, a `border-radius` value) every time it sees one. Why: the rules say to fetch the
+  page before building UI, and 3 of the 18 app sessions from 2026-11-09 to 11-24 that edited UI files did; keeb's
+  icons file carries ten pasted Lucide paths and two sessions searched the web for more.
 - When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
   UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
   `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that

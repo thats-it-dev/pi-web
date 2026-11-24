@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1530,4 +1530,57 @@ test("a pr with a timeout behind a shut review gate reports the gate, and the ti
 	assert.match(reason, /no timeout/);
 	assert.equal(checkToolCall("bash", { command, timeout: 600 }, env({ reviewed: () => true }))?.reason, REASONS.prTimeout, "open gate: the timeout alone");
 	assert.equal(checkToolCall("bash", { command }, shut)?.reason, REASONS.review, "no timeout: the gate alone");
+});
+
+test("kitPatterns reads the design system page into patterns keyed by article and heading, code unescaped", () => {
+	const html = `<article id="forms"><h2>Forms</h2><p class="lead">grid</p><figure class="ex"><div class="demo">x</div><figcaption>Label <code>left</code>, control right.</figcaption>
+<pre data-lang="html"><button class="icon-btn copy" aria-label="Copy snippet" title="Copy"></button><code>&lt;div class=&quot;form&quot;&gt;&amp;&lt;/div&gt;</code></pre></figure>
+<h3>Pattern CSS</h3><pre data-lang="css"><button class="icon-btn copy"></button><code>.form { display: grid; }</code></pre></article>
+<article id="overlays"><h2>Overlays</h2><p class="lead">no code here</p>
+	<h3>Settings dialog</h3><figure class="ex"><div class="card"><h3>Streak</h3></div><figcaption>The form pattern inside a sheet.</figcaption><pre data-lang="html"><code>&lt;tk-sheet heading=&quot;Settings&quot;&gt;&lt;/tk-sheet&gt;</code></pre></figure></article>`;
+	const p = kitPatterns(html);
+	assert.deepEqual(p.map((x) => x.id), ["forms", "forms/pattern-css", "overlays/settings-dialog"]);
+	assert.deepEqual(p[0], { id: "forms", title: "Forms", caption: "Label left, control right.", code: [{ lang: "html", text: '<div class="form">&</div>' }] });
+	assert.deepEqual(p[1], { id: "forms/pattern-css", title: "Forms: Pattern CSS", caption: undefined, code: [{ lang: "css", text: ".form { display: grid; }" }] });
+	assert.equal(p[2].title, "Overlays: Settings dialog");
+	assert.equal(p[2].code[0].text, '<tk-sheet heading="Settings"></tk-sheet>');
+	// The real page parses, and every pattern the guard hands out is on it with code.
+	const real = kitPatterns(readFileSync(new URL("../../kit/demo/index.html", import.meta.url), "utf8"));
+	for (const id of ["buttons", "forms", "forms/pattern-css", "feedback/toasts", "feedback/status", "feedback/notices", "feedback/progress", "feedback/empty-and-loading-states", "overlays/settings-dialog", "overlays/confirm", "lists", "lists/cards", "data", "icons"]) {
+		assert.ok(real.some((x) => x.id === id && x.code.length), id);
+	}
+	assert.ok(real.find((x) => x.id === "overlays/settings-dialog")!.code[0].text.startsWith('<tk-sheet heading="Settings"'));
+});
+
+test("kitPatternIds picks the patterns an edit touches, in the page's order", () => {
+	assert.deepEqual(kitPatternIds("src/ui/settings-dialog.ts", 'html`<dialog class="settings"><div class="form"><label>Goal</label><input></div></dialog>`'), ["forms", "forms/pattern-css", "overlays/settings-dialog", "overlays/confirm"]);
+	assert.deepEqual(kitPatternIds("src/ui/icons.ts", 'export const EYE = svg`<path d="M2 12s3-7 10-7"/>`'), ["buttons", "icons"]);
+	assert.deepEqual(kitPatternIds("src/ui/boards.ts", 'html`<div class="rows">${rows.map((r) => html`<div class="row"><button class="icon-btn" aria-label="x">${PENCIL_ICON}</button></div>`)}</div>`'), ["buttons", "lists", "lists/cards", "icons"]);
+	assert.deepEqual(kitPatternIds("src/ui/insights.ts", "const chart = d3.select(svg)"), ["data"]);
+	assert.deepEqual(kitPatternIds("src/ui/app-main.ts", 'toast("saved"); html`<div class="empty">nothing yet</div>`'), ["feedback/toasts", "feedback/empty-and-loading-states"]);
+	assert.deepEqual(kitPatternIds("src/lesson/ladder.ts", "export function next(stats: StatMap) { return 1; }"), []);
+	assert.deepEqual(kitPatternIds("src/ui/app-styles.ts", ".row { gap: 4px }"), ["lists", "lists/cards"]);
+});
+
+test("kitDepartures names what an edit builds by hand", () => {
+	const d = kitDepartures('html`<dialog open><svg viewBox="0 0 24 24"><path d="M1 1"/></svg></dialog>` + css`a { color: #ff0000; font-family: Nunito; border-radius: 8px; }`');
+	assert.equal(d.length, 5, d.join("\n"));
+	assert.match(d[0], /`<dialog>` by hand.*`tk-sheet`/);
+	assert.match(d[1], /Pasted SVG.*kit/);
+	assert.match(d[2], /#ff0000/);
+	assert.match(d[3], /font-family/);
+	assert.match(d[4], /border-radius/);
+	assert.deepEqual(kitDepartures('html`<tk-sheet heading="Settings"><div class="form"><a href="#f-level">x</a></div></tk-sheet>` + css`.x { border-radius: var(--radius); color: var(--primary); }`'), []);
+});
+
+test("kitPatternNote carries the departures first, then each pattern's code", () => {
+	const note = kitPatternNote([{ id: "overlays/settings-dialog", title: "Overlays: Settings dialog", caption: "The form pattern inside a sheet.", code: [{ lang: "html", text: "<tk-sheet></tk-sheet>" }] }], ["This edit builds a `<dialog>` by hand."]);
+	assert.match(note, /^\[pi-guard\] Kit patterns for this change, from https:\/\/kit\.thatsit\.app\/ \(no fetch needed\)\. Copy them as they are; app CSS never re-declares a kit class, and the reviewer checks against them\.\n- This edit builds a `<dialog>` by hand\.\n\n## Overlays: Settings dialog\nThe form pattern inside a sheet\.\n```html\n<tk-sheet><\/tk-sheet>\n```$/);
+	assert.match(kitPatternNote([], ["x"]), /^\[pi-guard\] Kit patterns[^\n]*\n- x$/);
+});
+
+test("absPath resolves ~ and relative paths", () => {
+	assert.equal(absPath("~/workspace/apps/keeb/src/a.ts", "/x", home), "/home/m/workspace/apps/keeb/src/a.ts");
+	assert.equal(absPath("src/a.ts", "/home/m/workspace/apps/keeb", home), "/home/m/workspace/apps/keeb/src/a.ts");
+	assert.equal(absPath("/tmp/a.ts", "/x", home), "/tmp/a.ts");
 });

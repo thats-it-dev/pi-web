@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { KIT_PATTERNS_MARK, previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -950,4 +950,35 @@ test("inherited changes: the first call into a dirty app notes the files, and a 
 	assert.equal(h.tool_result({ ...look, toolCallId: "l2", isError: false, content: [{ type: "text", text: "x" }] }, ctx), undefined);
 	entries.push(msg("user", { content: "keep it, that one's mine" }));
 	assert.equal(h.tool_call(commit, ctx), undefined, "Michael kept it");
+});
+
+test("a UI edit in an app gets the kit patterns it touches on its result, each once per app and again after a compaction", () => {
+	const { home, dir } = appRepo();
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: home, sessionManager: { getBranch: () => [] } };
+	const edit = (id: string, path: string, newText: string) => {
+		assert.equal(h.tool_call({ toolName: "edit", toolCallId: id, input: { path, edits: [{ oldText: "a", newText }] } }, ctx), undefined);
+		const r = h.tool_result({ toolName: "edit", toolCallId: id, content: [{ type: "text", text: "ok" }] }, ctx);
+		return (r?.content ?? [{ type: "text", text: "ok" }]).map((c: { text: string }) => c.text).find((t: string) => t.startsWith(KIT_PATTERNS_MARK));
+	};
+	const first = edit("e1", join(dir, "src", "ui", "settings-dialog.ts"), 'html`<dialog open><div class="form"><label for="g">Goal</label><input id="g"></div></dialog>`');
+	assert.ok(first, "the first UI edit carries the patterns");
+	assert.match(first!, /- This edit builds a `<dialog>` by hand/);
+	assert.match(first!, /## Overlays: Settings dialog\n[^\n]*\n```html\n<tk-sheet heading="Settings"/);
+	assert.match(first!, /## Forms: Pattern CSS\n```css\n\.form \{ display: grid;/);
+	assert.doesNotMatch(first!, /## Icons/);
+	// The same patterns again: nothing; a new one: only it. A departure is always said.
+	assert.equal(edit("e2", join(dir, "src", "ui", "settings-dialog.ts"), 'html`<div class="form"><label>x</label><select></select></div>`'), undefined);
+	const icons = edit("e3", join(dir, "src", "ui", "icons.ts"), 'export const EYE = svg`<path d="M2 12s3-7 10-7"/>`');
+	assert.match(icons!, /- Pasted SVG/);
+	assert.match(icons!, /## Icons\n/);
+	assert.doesNotMatch(icons!, /## Forms/);
+	// Logic with no UI in it: nothing. A write of a new UI file counts like an edit.
+	assert.equal(edit("e4", join(dir, "src", "lesson", "ladder.ts"), "export function next(stats: StatMap) { return 1; }"), undefined);
+	assert.equal(h.tool_call({ toolName: "write", toolCallId: "w1", input: { path: join(dir, "src", "ui", "boards.ts"), content: 'html`<div class="rows"><div class="row"></div></div>`' } }, ctx), undefined);
+	const rows = h.tool_result({ toolName: "write", toolCallId: "w1", content: [{ type: "text", text: "ok" }] }, ctx).content.map((c: { text: string }) => c.text).find((t: string) => t.startsWith(KIT_PATTERNS_MARK));
+	assert.match(rows, /## Lists & cards\n/);
+	// After a compaction the summary has lost the patterns: the next edit touching one gets it again.
+	h.session_before_compact({ preparation: { messagesToSummarize: [], turnPrefixMessages: [] } }, ctx);
+	assert.match(edit("e5", join(dir, "src", "ui", "settings-dialog.ts"), 'html`<tk-sheet heading="Settings"><div class="form"></div></tk-sheet>`')!, /## Overlays: Settings dialog/);
 });
