@@ -42,7 +42,7 @@ const TOP = 40;
 // (FTS5 has no stopword list, so "the" would otherwise match nearly every chunk).
 const STOPWORDS = new Set(
 	(
-		"a an and are as at be been but by can could did do does for from had has have he her his how i if in into is it its " +
+		"a an and are as be been but by can could did do does for from had has have he her his how i if in into is it its " +
 		"me my no not of on or our she so than that the their them then there these they this to too us was we were what " +
 		"when where which who why will with would you your"
 	).split(" "),
@@ -53,7 +53,7 @@ export function contentWords(q: string): string[] {
 	return queryWords(q).filter((w) => !STOPWORDS.has(w));
 }
 
-type Vecs = { id: number; vec: Float32Array }[];
+type Vecs = { id: number; sessionId: string; vec: Float32Array }[];
 
 export class SearchService {
 	private db: SearchDb;
@@ -117,6 +117,7 @@ export class SearchService {
 		for (const file of known.keys()) {
 			if (seen.has(file)) continue;
 			this.db.removeFile(file);
+			this.vecs = null;
 			removed++;
 		}
 		// Newest first: their chunks get the lowest new ids, and pendingEmbeddings goes by id.
@@ -129,6 +130,7 @@ export class SearchService {
 			} catch {
 				if (known.has(entry.file)) {
 					this.db.removeFile(entry.file);
+					this.vecs = null;
 					removed++;
 				}
 				continue;
@@ -136,9 +138,9 @@ export class SearchService {
 			// Stored with the stat taken before the read: if the file grew in between, the next sweep re-reads it.
 			const chunked = chunkSession(text);
 			this.db.replaceFile(entry.file, entry.id, entry.cwd, mtimeMs, size, chunked?.chunks ?? []);
+			this.vecs = null;
 			indexed++;
 		}
-		if (indexed || removed) this.vecs = null;
 		if (indexed || removed) this.log(`search: indexed ${indexed}, removed ${removed}`);
 		await this.embedPending();
 		return { indexed, removed };
@@ -168,6 +170,8 @@ export class SearchService {
 			this.vecs = null;
 			count += rows.length;
 			if (rows.length < batch.length) break;
+			// A sweep is waiting (a poke or a direct call): let it re-index now; it resumes the backlog after.
+			if (this.queued) break;
 		}
 		return count;
 	}
@@ -190,15 +194,15 @@ export class SearchService {
 	async query(q: string, limit: number, exclude?: string): Promise<{ hits: RawHit[]; semantic: boolean }> {
 		const words = contentWords(q);
 		if (!words.length || limit <= 0) return { hits: [], semantic: false };
-		const keyword = this.db.keyword(words.join(" "), TOP);
+		const keyword = this.db.keyword(words.join(" "), TOP, exclude);
 		let vector: { id: number; score: number }[] = [];
 		let semantic = false;
 		if (this.embedder && this.vectors().length) {
 			try {
 				const [qv] = await this.embedder.embed([q]);
-				// Unrelated chunks still fill a top 40 in a small corpus; keep only positive similarity.
 				if (qv) {
-					vector = cosineTopK(qv, this.vectors(), TOP).filter((r) => r.score > 0);
+					const rows = exclude === undefined ? this.vectors() : this.vectors().filter((r) => r.sessionId !== exclude);
+					vector = cosineTopK(qv, rows, TOP);
 					semantic = true;
 				}
 			} catch (err) {

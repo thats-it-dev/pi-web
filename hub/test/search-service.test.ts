@@ -22,10 +22,36 @@ function sessionText(sessionId: string, msgs: Msg[]): string {
 	return [JSON.stringify(header), ...msgs.map((m, i) => messageLine(sessionId, i, m))].join("\n") + "\n";
 }
 
-function fixture(embedder: Embedder | null = hashEmbedder(), debounceMs?: number) {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Wraps an embedder, counting calls and the texts it was given; optional delay per call. */
+function counting(inner: Embedder, delayMs = 0) {
+	const seen: string[] = [];
+	let calls = 0;
+	const embedder: Embedder = {
+		name: inner.name,
+		dims: inner.dims,
+		async embed(texts) {
+			calls++;
+			seen.push(...texts);
+			if (delayMs) await sleep(delayMs);
+			return inner.embed(texts);
+		},
+	};
+	return { embedder, seen, calls: () => calls };
+}
+
+interface FixtureOpts {
+	debounceMs?: number;
+	embedBatch?: number;
+	lookupDelayMs?: number;
+}
+
+function fixture(embedder: Embedder | null = hashEmbedder(), opts: FixtureOpts = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "search-service-"));
 	const listing: { id: string; file: string; cwd: string; name: string | null; firstPrompt: string | null; updatedAt: number; parentSession: string | null }[] = [];
 	const counts = new Map<string, number>();
+	const lookups = { calls: 0, inFlight: 0, peak: 0 };
 	const write = (id: string, msgs: Msg[]) => {
 		const file = join(dir, `${id}.jsonl`);
 		writeFileSync(file, sessionText(id, msgs));
@@ -39,201 +65,331 @@ function fixture(embedder: Embedder | null = hashEmbedder(), debounceMs?: number
 		counts.set(id, n + 1);
 	};
 	const db = new SearchDb(":memory:");
+	const lookup = async () => {
+		lookups.calls++;
+		lookups.inFlight++;
+		lookups.peak = Math.max(lookups.peak, lookups.inFlight);
+		try {
+			if (opts.lookupDelayMs) await sleep(opts.lookupDelayMs);
+			return listing.filter((e) => existsSync(e.file));
+		} finally {
+			lookups.inFlight--;
+		}
+	};
 	const service = new SearchService({
 		db,
 		embedder,
-		lookup: async () => listing.filter((e) => existsSync(e.file)),
+		lookup,
 		log: () => {},
-		...(debounceMs !== undefined ? { debounceMs } : {}),
+		...(opts.debounceMs !== undefined ? { debounceMs: opts.debounceMs } : {}),
+		...(opts.embedBatch !== undefined ? { embedBatch: opts.embedBatch } : {}),
 	});
 	const done = () => {
 		db.close();
 		rmSync(dir, { recursive: true, force: true });
 	};
-	return { dir, listing, write, append, db, service, done };
+	return { dir, listing, lookups, write, append, db, service, done };
 }
 
 test("sweep indexes new files, skips unchanged, re-indexes changed, purges vanished", async () => {
 	const f = fixture();
-	f.write("s1", [{ role: "user", text: "alpha bravo" }, { role: "assistant", text: "charlie delta" }]);
-	const f2 = f.write("s2", [{ role: "user", text: "echo foxtrot" }]);
-	assert.deepEqual(await f.service.sweep(), { indexed: 2, removed: 0 });
-	assert.deepEqual(f.service.stats(), { files: 2, chunks: 3, embedded: 3, semantic: true });
+	try {
+		f.write("s1", [{ role: "user", text: "alpha bravo" }, { role: "assistant", text: "charlie delta" }]);
+		const f2 = f.write("s2", [{ role: "user", text: "echo foxtrot" }]);
+		assert.deepEqual(await f.service.sweep(), { indexed: 2, removed: 0 });
+		assert.deepEqual(f.service.stats(), { files: 2, chunks: 3, embedded: 3, semantic: true });
 
-	assert.deepEqual(await f.service.sweep(), { indexed: 0, removed: 0 });
+		assert.deepEqual(await f.service.sweep(), { indexed: 0, removed: 0 });
 
-	f.append("s1", { role: "user", text: "golf hotel" });
-	assert.deepEqual(await f.service.sweep(), { indexed: 1, removed: 0 });
-	assert.equal(f.service.stats().chunks, 4);
-	assert.equal(f.service.stats().embedded, 4);
-	assert.equal((await f.service.query("golf", 5)).hits[0]?.sessionId, "s1");
+		f.append("s1", { role: "user", text: "golf hotel" });
+		assert.deepEqual(await f.service.sweep(), { indexed: 1, removed: 0 });
+		assert.equal(f.service.stats().chunks, 4);
+		assert.equal(f.service.stats().embedded, 4);
+		assert.equal((await f.service.query("golf", 5)).hits[0]?.sessionId, "s1");
 
-	unlinkSync(f2);
-	assert.deepEqual(await f.service.sweep(), { indexed: 0, removed: 1 });
-	assert.deepEqual(f.service.stats(), { files: 1, chunks: 3, embedded: 3, semantic: true });
-	f.done();
+		unlinkSync(f2);
+		assert.deepEqual(await f.service.sweep(), { indexed: 0, removed: 1 });
+		assert.deepEqual(f.service.stats(), { files: 1, chunks: 3, embedded: 3, semantic: true });
+	} finally {
+		f.done();
+	}
+});
+
+test("re-indexing a changed file embeds only its new chunks", async () => {
+	const c = counting(hashEmbedder());
+	const f = fixture(c.embedder);
+	try {
+		f.write("s1", [{ role: "user", text: "alpha bravo" }, { role: "assistant", text: "charlie delta" }]);
+		await f.service.sweep();
+		assert.deepEqual(c.seen, ["alpha bravo", "charlie delta"]);
+		f.append("s1", { role: "user", text: "golf hotel" });
+		await f.service.sweep();
+		assert.deepEqual(c.seen, ["alpha bravo", "charlie delta", "golf hotel"]);
+		assert.equal(f.service.stats().embedded, 3);
+	} finally {
+		f.done();
+	}
 });
 
 test("sweep purges a vanished file", async () => {
 	const f = fixture();
-	const file = f.write("gone", [{ role: "user", text: "zanzibar itinerary" }]);
-	f.write("kept", [{ role: "user", text: "something else entirely" }]);
-	await f.service.sweep();
-	assert.deepEqual((await f.service.query("zanzibar", 5)).hits.map((h) => h.sessionId), ["gone"]);
-	unlinkSync(file);
-	await f.service.sweep();
-	assert.deepEqual((await f.service.query("zanzibar", 5)).hits, []);
-	assert.equal(f.db.files().has(file), false);
-	f.done();
+	try {
+		const file = f.write("gone", [{ role: "user", text: "zanzibar itinerary" }]);
+		f.write("kept", [{ role: "user", text: "something else entirely" }]);
+		await f.service.sweep();
+		assert.deepEqual((await f.service.query("zanzibar", 5)).hits.map((h) => h.sessionId)[0], "gone");
+		unlinkSync(file);
+		await f.service.sweep();
+		assert.equal((await f.service.query("zanzibar", 5)).hits.some((h) => h.sessionId === "gone"), false);
+		assert.equal(f.db.files().has(file), false);
+	} finally {
+		f.done();
+	}
 });
 
 test("query: a session that stops listing is dropped even before the next sweep", async () => {
 	const f = fixture();
-	f.write("s1", [{ role: "user", text: "zanzibar itinerary" }]);
-	await f.service.sweep();
-	f.listing.length = 0;
-	assert.deepEqual((await f.service.query("zanzibar", 5)).hits, []);
-	f.done();
+	try {
+		f.write("s1", [{ role: "user", text: "zanzibar itinerary" }]);
+		await f.service.sweep();
+		f.listing.length = 0;
+		assert.deepEqual((await f.service.query("zanzibar", 5)).hits, []);
+	} finally {
+		f.done();
+	}
 });
 
 test("query: keyword-only works before any embedding (semantic false)", async () => {
 	const f = fixture(null);
-	f.write("s1", [{ role: "user", text: "we restarted the hubs yesterday" }, { role: "assistant", text: "done, all good" }]);
-	await f.service.sweep();
-	assert.equal(f.service.stats().embedded, 0);
-	assert.equal(f.service.stats().semantic, false);
-	const r = await f.service.query("restart hub", 5);
-	assert.equal(r.semantic, false);
-	assert.equal(r.hits.length, 1);
-	const h = r.hits[0];
-	assert.equal(h.sessionId, "s1");
-	assert.equal(h.ordinal, 0);
-	assert.equal(h.role, "user");
-	assert.equal(h.snippet, "we restarted the hubs yesterday");
-	assert.deepEqual(h.terms, ["restarted", "hubs"]);
-	assert.equal(h.semanticOnly, false);
-	assert.ok(h.score > 0);
-	f.done();
+	try {
+		f.write("s1", [{ role: "user", text: "we restarted the hubs yesterday" }, { role: "assistant", text: "done, all good" }]);
+		await f.service.sweep();
+		assert.equal(f.service.stats().embedded, 0);
+		assert.equal(f.service.stats().semantic, false);
+		const r = await f.service.query("restart hub", 5);
+		assert.equal(r.semantic, false);
+		assert.equal(r.hits.length, 1);
+		const h = r.hits[0];
+		assert.equal(h.sessionId, "s1");
+		assert.equal(h.ordinal, 0);
+		assert.equal(h.role, "user");
+		assert.equal(h.snippet, "we restarted the hubs yesterday");
+		assert.deepEqual(h.terms, ["restarted", "hubs"]);
+		assert.equal(h.semanticOnly, false);
+		assert.ok(h.score > 0);
+	} finally {
+		f.done();
+	}
 });
 
 test("query: embedder present but nothing embedded yet is keyword-only", async () => {
 	const f = fixture(null);
-	f.write("s1", [{ role: "user", text: "restart the hub" }]);
-	await f.service.sweep();
-	// a second service over the same store, with an embedder that has not run yet
-	const svc = new SearchService({ db: f.db, embedder: hashEmbedder(), lookup: async () => f.listing, log: () => {} });
-	const r = await svc.query("restart hub", 5);
-	assert.equal(r.semantic, false);
-	assert.equal(r.hits.length, 1);
-	f.done();
+	try {
+		f.write("s1", [{ role: "user", text: "restart the hub" }]);
+		await f.service.sweep();
+		// a second service over the same store, with an embedder that has not run yet
+		const svc = new SearchService({ db: f.db, embedder: hashEmbedder(), lookup: async () => f.listing, log: () => {} });
+		const r = await svc.query("restart hub", 5);
+		assert.equal(r.semantic, false);
+		assert.equal(r.hits.length, 1);
+	} finally {
+		f.done();
+	}
 });
 
 test("query: fused ranking groups per session and marks semanticOnly", async () => {
 	const f = fixture();
-	f.write("a", [
-		{ role: "user", text: "please restart the hub" },
-		{ role: "assistant", text: "I will restart the hub now" },
-		{ role: "user", text: "the hub restart worked" },
-	]);
-	f.write("c", [{ role: "user", text: "restart everything today" }]);
-	f.write("z", [{ role: "user", text: "quokka marmalade sandwiches" }]);
-	await f.service.sweep();
-	const r = await f.service.query("restart hub", 8);
-	assert.equal(r.semantic, true);
-	const ids = r.hits.map((h) => h.sessionId);
-	assert.deepEqual(ids.slice(0, 2), ["a", "c"]); // one hit per session, best first
-	assert.equal(new Set(ids).size, ids.length);
-	assert.equal(ids.includes("z"), false); // nothing in common with the query
-	const a = r.hits[0];
-	const c = r.hits[1];
-	assert.equal(a.semanticOnly, false);
-	assert.equal(c.semanticOnly, true);
-	assert.deepEqual(c.terms, ["restart"]);
-	assert.ok(a.score > c.score);
+	try {
+		f.write("a", [
+			{ role: "user", text: "please restart the hub" },
+			{ role: "assistant", text: "I will restart the hub now" },
+			{ role: "user", text: "the hub restart worked" },
+		]);
+		f.write("c", [{ role: "user", text: "restart everything today" }]);
+		f.write("z", [{ role: "user", text: "quokka marmalade sandwiches" }]);
+		await f.service.sweep();
+		const r = await f.service.query("restart hub", 8);
+		assert.equal(r.semantic, true);
+		const ids = r.hits.map((h) => h.sessionId);
+		assert.deepEqual(ids.slice(0, 2), ["a", "c"]); // one hit per session, best first
+		assert.equal(new Set(ids).size, ids.length);
+		const a = r.hits[0];
+		const c = r.hits[1];
+		assert.equal(a.semanticOnly, false);
+		assert.equal(c.semanticOnly, true);
+		assert.deepEqual(c.terms, ["restart"]);
+		assert.ok(a.score > c.score);
+		// a plain vector top 40 can include unrelated chunks; they rank last and are semantic-only
+		const z = r.hits.find((h) => h.sessionId === "z");
+		if (z) {
+			assert.equal(ids.indexOf("z"), 2);
+			assert.equal(z.semanticOnly, true);
+		}
 
-	assert.equal((await f.service.query("restart hub", 1)).hits.length, 1);
-	f.done();
+		assert.equal((await f.service.query("restart hub", 1)).hits.length, 1);
+	} finally {
+		f.done();
+	}
 });
 
 test("query: punctuation and stopwords give no hits", async () => {
 	const f = fixture();
-	f.write("s1", [{ role: "user", text: "the hub is the thing ?? yes" }]);
-	await f.service.sweep();
-	for (const q of ["??", "the", "  ", "\"", "*", "the of and", "AND OR NOT"]) {
-		const r = await f.service.query(q, 5);
-		assert.deepEqual(r.hits, [], q);
+	try {
+		f.write("s1", [{ role: "user", text: "the hub is the thing ?? yes" }]);
+		await f.service.sweep();
+		for (const q of ["??", "the", "  ", "\"", "*", "the of and", "AND OR NOT"]) {
+			const r = await f.service.query(q, 5);
+			assert.deepEqual(r.hits, [], q);
+		}
+	} finally {
+		f.done();
 	}
-	f.done();
 });
 
 test("query: exclude drops the current session", async () => {
 	const f = fixture();
-	f.write("cur", [{ role: "user", text: "restart the hub" }]);
-	f.write("old", [{ role: "user", text: "restart the hub last week" }]);
-	await f.service.sweep();
-	assert.deepEqual(new Set((await f.service.query("restart hub", 5)).hits.map((h) => h.sessionId)), new Set(["cur", "old"]));
-	assert.deepEqual((await f.service.query("restart hub", 5, "cur")).hits.map((h) => h.sessionId), ["old"]);
-	f.done();
+	try {
+		f.write("cur", [{ role: "user", text: "restart the hub" }]);
+		f.write("old", [{ role: "user", text: "restart the hub last week" }]);
+		await f.service.sweep();
+		assert.deepEqual(new Set((await f.service.query("restart hub", 5)).hits.map((h) => h.sessionId)), new Set(["cur", "old"]));
+		assert.deepEqual((await f.service.query("restart hub", 5, "cur")).hits.map((h) => h.sessionId), ["old"]);
+	} finally {
+		f.done();
+	}
+});
+
+test("query: an excluded long session cannot crowd out the others", async () => {
+	for (const embedder of [null, hashEmbedder()]) {
+		const f = fixture(embedder);
+		try {
+			f.write("long", Array.from({ length: 50 }, (_, i) => ({ role: "user" as const, text: `restart hub attempt ${i}` })));
+			f.write("short", [{ role: "user", text: "restart the hub once" }]);
+			await f.service.sweep();
+			const r = await f.service.query("restart hub", 5, "long");
+			assert.equal(r.hits[0]?.sessionId, "short");
+			assert.equal(r.hits.some((h) => h.sessionId === "long"), false);
+		} finally {
+			f.done();
+		}
+	}
 });
 
 test("concurrent sweeps do not overlap and a call during a sweep runs once more", async () => {
-	const f = fixture();
-	f.write("s1", [{ role: "user", text: "alpha" }]);
-	const first = f.service.sweep();
-	f.write("s2", [{ role: "user", text: "bravo" }]);
-	const second = f.service.sweep();
-	const third = f.service.sweep();
-	const [r1, r2, r3] = await Promise.all([first, second, third]);
-	assert.equal(r1.indexed + r2.indexed, 2);
-	assert.deepEqual(r2, r3); // the queued follow-up is shared
-	assert.equal(f.service.stats().files, 2);
-	f.done();
+	const f = fixture(hashEmbedder(), { lookupDelayMs: 10 });
+	try {
+		f.write("s1", [{ role: "user", text: "alpha" }]);
+		const first = f.service.sweep();
+		f.write("s2", [{ role: "user", text: "bravo" }]);
+		const second = f.service.sweep();
+		const third = f.service.sweep();
+		const [r1, r2, r3] = await Promise.all([first, second, third]);
+		assert.equal(r1.indexed + r2.indexed, 2);
+		assert.deepEqual(r2, r3); // the queued follow-up is shared
+		assert.equal(f.lookups.calls, 2);
+		assert.equal(f.lookups.peak, 1);
+		assert.equal(f.service.stats().files, 2);
+	} finally {
+		f.done();
+	}
 });
 
 test("embedPending is a no-op without an embedder", async () => {
 	const f = fixture(null);
-	f.write("s1", [{ role: "user", text: "alpha" }]);
-	await f.service.sweep();
-	assert.equal(await f.service.embedPending(), 0);
-	f.done();
+	try {
+		f.write("s1", [{ role: "user", text: "alpha" }]);
+		await f.service.sweep();
+		assert.equal(await f.service.embedPending(), 0);
+	} finally {
+		f.done();
+	}
 });
 
 test("embedPending embeds in batches and a failing embedder leaves keyword search working", async () => {
 	const f = fixture(null);
-	f.write("s1", Array.from({ length: 5 }, (_, i) => ({ role: "user" as const, text: `word${i} alpha` })));
-	await f.service.sweep();
-	let calls = 0;
-	const h = hashEmbedder();
-	const counting = new SearchService({ db: f.db, embedder: { ...h, embed: (t) => (calls++, h.embed(t)) }, lookup: async () => f.listing, log: () => {}, embedBatch: 2 });
-	assert.equal(await counting.embedPending(), 5);
-	assert.equal(calls, 3);
-	assert.equal(f.db.stats().embedded, 5);
-
 	const f2 = fixture({ name: "broken", dims: 4, embed: async () => { throw new Error("no model"); } });
-	f2.write("s1", [{ role: "user", text: "restart the hub" }]);
-	await f2.service.sweep();
-	assert.equal(f2.service.stats().embedded, 0);
-	const r = await f2.service.query("restart hub", 5);
-	assert.equal(r.semantic, false);
-	assert.equal(r.hits.length, 1);
-	f.done();
-	f2.done();
+	try {
+		f.write("s1", Array.from({ length: 5 }, (_, i) => ({ role: "user" as const, text: `word${i} alpha` })));
+		await f.service.sweep();
+		const c = counting(hashEmbedder());
+		const svc = new SearchService({ db: f.db, embedder: c.embedder, lookup: async () => f.listing, log: () => {}, embedBatch: 2 });
+		assert.equal(await svc.embedPending(), 5);
+		assert.equal(c.calls(), 3);
+		assert.equal(f.db.stats().embedded, 5);
+
+		f2.write("s1", [{ role: "user", text: "restart the hub" }]);
+		await f2.service.sweep();
+		assert.equal(f2.service.stats().embedded, 0);
+		const r = await f2.service.query("restart hub", 5);
+		assert.equal(r.semantic, false);
+		assert.equal(r.hits.length, 1);
+	} finally {
+		f.done();
+		f2.done();
+	}
 });
 
 test("poke re-indexes a changed file", async () => {
-	const f = fixture(hashEmbedder(), 200);
-	f.write("s1", [{ role: "user", text: "alpha" }]);
-	await f.service.sweep();
-	f.append("s1", { role: "assistant", text: "the walrus migration finished" });
-	f.service.poke();
-	f.service.poke();
-	const deadline = Date.now() + 3000;
-	let hits: { sessionId: string; ordinal: number }[] = [];
-	while (Date.now() < deadline) {
-		hits = (await f.service.query("walrus", 5)).hits;
-		if (hits.length) break;
-		await new Promise((r) => setTimeout(r, 50));
+	const f = fixture(hashEmbedder(), { debounceMs: 200 });
+	try {
+		f.write("s1", [{ role: "user", text: "alpha" }]);
+		await f.service.sweep();
+		f.append("s1", { role: "assistant", text: "the walrus migration finished" });
+		f.service.poke();
+		f.service.poke();
+		const deadline = Date.now() + 3000;
+		let hits: { sessionId: string; ordinal: number }[] = [];
+		while (Date.now() < deadline) {
+			// keyword hits only: before the re-index, the old chunk can still come back as a semantic-only hit
+			hits = (await f.service.query("walrus", 5)).hits.filter((h) => !h.semanticOnly);
+			if (hits.length) break;
+			await sleep(50);
+		}
+		assert.deepEqual(hits.map((h) => [h.sessionId, h.ordinal]), [["s1", 1]]);
+		await f.service.sweep(); // let the poked sweep settle before the store closes
+	} finally {
+		f.done();
 	}
-	assert.deepEqual(hits.map((h) => [h.sessionId, h.ordinal]), [["s1", 1]]);
-	f.done();
+});
+
+test("two pokes run one sweep", async () => {
+	const f = fixture(hashEmbedder(), { debounceMs: 50 });
+	try {
+		f.write("s1", [{ role: "user", text: "alpha" }]);
+		f.service.poke();
+		f.service.poke();
+		await sleep(300);
+		assert.equal(f.lookups.calls, 1);
+		assert.equal(f.service.stats().files, 1);
+	} finally {
+		f.done();
+	}
+});
+
+test("a poke during a long embedding backlog re-indexes before the backlog finishes", async () => {
+	const c = counting(hashEmbedder(), 50);
+	const f = fixture(c.embedder, { debounceMs: 10, embedBatch: 2 });
+	try {
+		f.write("backlog", Array.from({ length: 30 }, (_, i) => ({ role: "user" as const, text: `filler message ${i}` })));
+		const first = f.service.sweep(); // 15 batches × 50 ms of embedding
+		await sleep(80);
+		f.write("fresh", [{ role: "user", text: "the walrus has landed" }]);
+		f.service.poke();
+		const deadline = Date.now() + 3000;
+		let found = false;
+		while (Date.now() < deadline && !found) {
+			found = (await f.service.query("walrus", 5)).hits.some((h) => h.sessionId === "fresh" && !h.semanticOnly);
+			if (!found) await sleep(10);
+		}
+		assert.equal(found, true);
+		assert.ok(f.db.stats().embedded < 31, `backlog already done: ${f.db.stats().embedded}`);
+		await first;
+		// the queued sweep picks the backlog up again and finishes it
+		const end = Date.now() + 3000;
+		while (Date.now() < end && f.db.stats().embedded < 31) await sleep(20);
+		assert.equal(f.db.stats().embedded, 31);
+		await f.service.sweep(); // let the poked sweep settle before the store closes
+	} finally {
+		f.done();
+	}
 });

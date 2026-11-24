@@ -91,11 +91,18 @@ export class SearchDb {
 
 	replaceFile(file: string, sessionId: string, cwd: string, mtimeMs: number, size: number, chunks: Chunk[]): void {
 		this.tx(() => {
+			// Unchanged chunks (same ordinal, piece and text) keep their embedding across a re-index.
+			const kept = new Map<string, Uint8Array>();
+			for (const r of this.db
+				.prepare("SELECT ordinal, piece, text, embedding FROM chunks WHERE file = ? AND embedding IS NOT NULL")
+				.all(file) as any[])
+				kept.set(`${r.ordinal}\u0000${r.piece}\u0000${r.text}`, r.embedding);
 			this.db.prepare("DELETE FROM chunks WHERE file = ?").run(file);
 			const ins = this.db.prepare(
-				"INSERT INTO chunks (session_id, file, ordinal, piece, role, ts, text) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO chunks (session_id, file, ordinal, piece, role, ts, text, embedding) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			);
-			for (const c of chunks) ins.run(sessionId, file, c.ordinal, c.piece, c.role, c.ts, c.text);
+			for (const c of chunks)
+				ins.run(sessionId, file, c.ordinal, c.piece, c.role, c.ts, c.text, kept.get(`${c.ordinal}\u0000${c.piece}\u0000${c.text}`) ?? null);
 			this.db
 				.prepare(
 					"INSERT OR REPLACE INTO files (file, session_id, cwd, mtime_ms, size, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -111,12 +118,21 @@ export class SearchDb {
 		});
 	}
 
-	keyword(query: string, limit: number): { id: number; score: number }[] {
+	/** FTS5 top `limit` chunks; `exclude` drops one session's chunks before the limit (and before the OR fallback). */
+	keyword(query: string, limit: number, exclude?: string): { id: number; score: number }[] {
 		const run = (m: string) => {
 			try {
-				const rows = this.db
-					.prepare("SELECT rowid AS id, bm25(chunks_fts) AS r FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY r LIMIT ?")
-					.all(m, limit) as { id: number; r: number }[];
+				const rows = (
+					exclude === undefined
+						? this.db
+								.prepare("SELECT rowid AS id, bm25(chunks_fts) AS r FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY r LIMIT ?")
+								.all(m, limit)
+						: this.db
+								.prepare(
+									"SELECT f.rowid AS id, bm25(chunks_fts) AS r FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ? AND c.session_id != ? ORDER BY r LIMIT ?",
+								)
+								.all(m, exclude, limit)
+				) as { id: number; r: number }[];
 				return rows.map((x) => ({ id: Number(x.id), score: -x.r }));
 			} catch {
 				return [];
@@ -142,9 +158,10 @@ export class SearchDb {
 		});
 	}
 
-	allEmbeddings(): { id: number; vec: Float32Array }[] {
-		return (this.db.prepare("SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL").all() as any[]).map((r) => ({
+	allEmbeddings(): { id: number; sessionId: string; vec: Float32Array }[] {
+		return (this.db.prepare("SELECT id, session_id, embedding FROM chunks WHERE embedding IS NOT NULL").all() as any[]).map((r) => ({
 			id: Number(r.id),
+			sessionId: r.session_id,
 			vec: toVec(r.embedding),
 		}));
 	}

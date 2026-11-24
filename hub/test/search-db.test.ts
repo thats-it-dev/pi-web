@@ -84,3 +84,39 @@ test("keyword falls back to OR when AND finds nothing", () => {
 	assert.equal(db.keyword("kubernetes banana", 5).length, 1);
 	db.close();
 });
+
+test("keyword with exclude skips that session before the limit and before the OR fallback", () => {
+	const db = new SearchDb(":memory:");
+	db.replaceFile("long", "big", "/w", 1, 1, Array.from({ length: 50 }, (_, i) => c(i, `restart hub take ${i}`)));
+	db.replaceFile("short", "small", "/w", 1, 1, [c(0, "restart the hub once")]);
+	db.replaceFile("other", "orfb", "/w", 1, 1, [c(0, "zebra crossing")]);
+	const sessions = (hits: { id: number }[]) => new Set(hits.map((h) => db.sessionOf(h.id)));
+	assert.deepEqual(sessions(db.keyword("restart hub", 40, "big")), new Set(["small"]));
+	assert.equal(db.keyword("restart hub", 40).length, 40);
+	// AND only matches the excluded session, so the OR fallback still runs for the rest
+	db.replaceFile("only", "solo", "/w", 1, 1, [c(0, "zebra giraffe")]);
+	assert.deepEqual(sessions(db.keyword("zebra giraffe", 10, "solo")), new Set(["orfb"]));
+	db.close();
+});
+
+test("allEmbeddings carries each chunk's sessionId", () => {
+	const db = new SearchDb(":memory:");
+	db.replaceFile("a", "s1", "/w", 1, 1, [c(0, "one")]);
+	db.replaceFile("b", "s2", "/w", 1, 1, [c(0, "two")]);
+	db.setEmbeddings(db.pendingEmbeddings(10).map((p) => ({ id: p.id, vec: new Float32Array([1]) })));
+	assert.deepEqual(db.allEmbeddings().map((e) => e.sessionId).sort(), ["s1", "s2"]);
+	db.close();
+});
+
+test("replaceFile keeps the embedding of an unchanged chunk", () => {
+	const db = new SearchDb(":memory:");
+	db.replaceFile("a", "s1", "/w", 1, 1, [c(0, "one"), c(1, "two")]);
+	db.setEmbeddings(db.pendingEmbeddings(10).map((p, i) => ({ id: p.id, vec: new Float32Array([i + 1]) })));
+	db.replaceFile("a", "s1", "/w", 2, 2, [c(0, "one"), c(1, "two changed"), c(2, "three")]);
+	assert.deepEqual(db.pendingEmbeddings(10).map((p) => p.text), ["two changed", "three"]);
+	const kept = db.allEmbeddings();
+	assert.equal(kept.length, 1);
+	assert.deepEqual(Array.from(kept[0].vec), [1]);
+	assert.equal(db.chunks([kept[0].id])[0].text, "one");
+	db.close();
+});
