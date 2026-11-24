@@ -99,6 +99,22 @@ test("keyword with exclude skips that session before the limit and before the OR
 	db.close();
 });
 
+test("keywordMatch reports the MATCH it used; highlights marks stemmed tokens for those ids", () => {
+	const db = new SearchDb(":memory:");
+	db.replaceFile("a", "s1", "/w", 1, 1, [c(0, "the batteries drained"), c(1, "nothing relevant"), c(2, "kubernetes deploy")]);
+	const and = db.keywordMatch("battery", 5);
+	assert.equal(and.match, '"battery"*');
+	assert.equal(and.hits.length, 1);
+	const or = db.keywordMatch("kubernetes banana", 5);
+	assert.equal(or.match, '"kubernetes" OR "banana"*');
+	const ids = db.pendingEmbeddings(10).map((p) => p.id);
+	const h = db.highlights(ids, and.match!);
+	assert.deepEqual([...h.values()], ["the \x01batteries\x02 drained"]);
+	assert.equal(db.highlights([], and.match!).size, 0);
+	assert.equal(db.highlights(ids, "NEAR(").size, 0, "a bad MATCH is empty, not a throw");
+	db.close();
+});
+
 test("allEmbeddings carries each chunk's sessionId", () => {
 	const db = new SearchDb(":memory:");
 	db.replaceFile("a", "s1", "/w", 1, 1, [c(0, "one")]);

@@ -122,6 +122,11 @@ export class SearchDb {
 
 	/** FTS5 top `limit` chunks; `exclude` drops one session's chunks before the limit (and before the OR fallback). */
 	keyword(query: string, limit: number, exclude?: string): { id: number; score: number }[] {
+		return this.keywordMatch(query, limit, exclude).hits;
+	}
+
+	/** keyword(), plus the MATCH string that produced the hits (the AND form, or the OR fallback), for highlights(). */
+	keywordMatch(query: string, limit: number, exclude?: string): { hits: { id: number; score: number }[]; match: string | null } {
 		const run = (m: string) => {
 			try {
 				const rows = (
@@ -141,10 +146,29 @@ export class SearchDb {
 			}
 		};
 		const and = ftsQuery(query);
-		if (!and) return [];
+		if (!and) return { hits: [], match: null };
 		const hits = run(and);
-		if (hits.length || terms(query).length < 2) return hits;
-		return run(ftsQuery(query, " OR ")!);
+		if (hits.length || terms(query).length < 2) return { hits, match: and };
+		const or = ftsQuery(query, " OR ")!;
+		return { hits: run(or), match: or };
+	}
+
+	/**
+	 * For each of `ids` that `match` matches: its text with every matched token wrapped in
+	 * \x01…\x02 (FTS5 highlight, so stemmed forms like "batteries" for "battery" are marked too).
+	 */
+	highlights(ids: number[], match: string): Map<number, string> {
+		const out = new Map<number, string>();
+		if (!ids.length) return out;
+		try {
+			const rows = this.db
+				.prepare(
+					`SELECT rowid AS id, highlight(chunks_fts, 0, char(1), char(2)) AS h FROM chunks_fts WHERE rowid IN (${ids.map(() => "?").join(",")}) AND chunks_fts MATCH ?`,
+				)
+				.all(...ids, match) as { id: number; h: string }[];
+			for (const r of rows) out.set(Number(r.id), r.h);
+		} catch {}
+		return out;
 	}
 
 	pendingEmbeddings(limit: number): { id: number; text: string }[] {

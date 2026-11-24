@@ -3,9 +3,9 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { chunkSession } from "./chunks.ts";
-import type { SearchDb } from "./db.ts";
+import type { ChunkRow, SearchDb } from "./db.ts";
 import { type Embedder, EmbedderUnavailableError } from "./embedder.ts";
-import { cosineTopK, queryWords, rrf, snippet, termsIn } from "./rank.ts";
+import { cosineTopK, markedSnippet, markedTerms, queryWords, rrf, snippet, termsIn } from "./rank.ts";
 
 export interface RawHit {
 	sessionId: string;
@@ -265,7 +265,7 @@ export class SearchService {
 	async query(q: string, limit: number, exclude?: string): Promise<{ hits: RawHit[]; semantic: boolean }> {
 		const words = contentWords(q);
 		if (!words.length || limit <= 0) return { hits: [], semantic: false };
-		const keyword = this.db.keyword(words.join(" "), TOP, exclude);
+		const { hits: keyword, match } = this.db.keywordMatch(words.join(" "), TOP, exclude);
 		let vector: { id: number; score: number }[] = [];
 		let semantic = false;
 		if (this.embedder && this.vectors().length) {
@@ -281,22 +281,29 @@ export class SearchService {
 		const live = new Set((await this.lookup()).map((s) => s.id));
 		const inKeyword = new Set(keyword.map((k) => k.id));
 		const score = new Map(fused.map((f) => [f.id, f.score]));
-		const hits: RawHit[] = [];
+		const chosen: ChunkRow[] = [];
 		const taken = new Set<string>();
 		for (const row of this.db.chunks(fused.map((f) => f.id))) {
 			if (taken.has(row.sessionId) || row.sessionId === exclude || !live.has(row.sessionId)) continue;
 			taken.add(row.sessionId);
-			hits.push({
+			chosen.push(row);
+			if (chosen.length >= limit) break;
+		}
+		// FTS5 marks the tokens its (stemmed) MATCH hit, so "battery" finds "batteries" for terms and the
+		// snippet window; a chunk the MATCH does not hit (semantic-only) falls back to prefix matching.
+		const marked = match ? this.db.highlights(chosen.map((r) => r.id), match) : new Map<number, string>();
+		const hits = chosen.map((row): RawHit => {
+			const m = marked.get(row.id);
+			return {
 				sessionId: row.sessionId,
 				ordinal: row.ordinal,
 				role: row.role,
-				snippet: snippet(row.text, words),
-				terms: termsIn(row.text, words),
+				snippet: m ? markedSnippet(m) : snippet(row.text, words),
+				terms: m ? markedTerms(m) : termsIn(row.text, words),
 				semanticOnly: !inKeyword.has(row.id),
 				score: score.get(row.id)!,
-			});
-			if (hits.length >= limit) break;
-		}
+			};
+		});
 		return { hits, semantic };
 	}
 

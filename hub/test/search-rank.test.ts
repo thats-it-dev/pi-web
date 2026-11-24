@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cosineTopK, queryWords, rrf, snippet, termsIn } from "../src/search/rank.ts";
+import { cosineTopK, markedSnippet, markedTerms, queryWords, rrf, snippet, termsIn } from "../src/search/rank.ts";
 
 test("rrf merges lists, descending, shared ids win", () => {
 	const out = rrf([[{ id: 1 }, { id: 2 }, { id: 3 }], [{ id: 3 }, { id: 2 }, { id: 4 }]]);
@@ -42,6 +42,29 @@ test("snippet windows around the match within max, with ellipses", () => {
 	assert.ok(s.length <= 100);
 	assert.ok(s.startsWith("…") && s.endsWith("…"));
 	assert.ok(!/(^…|\s)(lpha|pha|ha|a)\s/.test(s), "no partial words");
+});
+
+test("snippet near the end pulls its start back to use the full max", () => {
+	const text = "alpha ".repeat(60) + "needle end";
+	const s = snippet(text, ["needle"], 100);
+	assert.ok(s.endsWith("needle end"), s);
+	assert.ok(s.startsWith("…"));
+	assert.ok(s.length <= 100 && s.length >= 95, `length ${s.length}`);
+});
+
+test("snippet drops markdown noise but keeps code text", () => {
+	assert.equal(snippet("Run **this** and `npm test`:\n```bash\nnode --test __x__\n```", ["run"]), "Run this and npm test: node --test x");
+});
+
+test("markedSnippet and markedTerms read FTS5 highlight markers", () => {
+	const marked = "alpha ".repeat(60) + "the \x01Batteries\x02 died, \x01batteries\x02 again, \x01battery\x02 " + "omega ".repeat(60);
+	assert.deepEqual(markedTerms(marked), ["Batteries", "battery"]);
+	const s = markedSnippet(marked, 100);
+	assert.ok(s.includes("the Batteries died"), s);
+	assert.ok(!/[\x01\x02]/.test(s));
+	assert.ok(s.length <= 100);
+	assert.equal(markedSnippet("short \x01hit\x02 here"), "short hit here");
+	assert.deepEqual(markedTerms("no markers"), []);
 });
 
 test("snippet without match starts at 0, no leading ellipsis", () => {

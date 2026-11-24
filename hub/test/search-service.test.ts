@@ -188,6 +188,25 @@ test("query: keyword-only works before any embedding (semantic false)", async ()
 	}
 });
 
+test("query: terms and the snippet window follow the stemmed match, not a prefix", async () => {
+	const f = fixture(null);
+	try {
+		const long = `${"filler words about nothing much ".repeat(20)}the watch batteries drain overnight ${"and more trailing filler ".repeat(20)}`;
+		f.write("bat", [{ role: "user", text: long }]);
+		f.write("rst", [{ role: "assistant", text: "I restarted the hub after the deploy" }]);
+		await f.sweep();
+		const b = (await f.service.query("battery", 5)).hits;
+		assert.deepEqual(b.map((h) => h.sessionId), ["bat"]);
+		assert.deepEqual(b[0].terms, ["batteries"]);
+		assert.ok(b[0].snippet.includes("watch batteries drain"), b[0].snippet);
+		assert.ok(b[0].snippet.startsWith("…") && !b[0].snippet.includes("\x01"));
+		const r = (await f.service.query("restarting", 5)).hits;
+		assert.deepEqual(r.map((h) => [h.sessionId, h.terms]), [["rst", ["restarted"]]]);
+	} finally {
+		f.done();
+	}
+});
+
 test("query: embedder present but nothing embedded yet is keyword-only", async () => {
 	const f = fixture(null);
 	try {
