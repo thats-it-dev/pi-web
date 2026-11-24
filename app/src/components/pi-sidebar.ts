@@ -45,8 +45,11 @@ export class PiSidebar extends LitElement {
 			   list below does not move. Measured equal (65.66 px) on desktop and phone. */
 			.top { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 10px; min-height: calc(26px + 1.6rem * 1.54908); }
 			.brand { font-family: var(--font-display); font-size: 1.6rem; letter-spacing: 0.1em; color: var(--text-primary); }
-			.top-end { display: flex; align-items: center; gap: 12px; }
+			.top-start, .top-end { display: flex; align-items: center; gap: 12px; }
 			.settings, .open-search { display: inline-flex; align-items: center; color: var(--text-secondary); }
+			/* Michael's call: neither the search button nor the field ever shows a focus ring or a highlighted border. */
+			.open-search:focus, .open-search:focus-visible { outline: none; box-shadow: none; }
+			.search input:focus, .search input:focus-visible { outline: none; box-shadow: none; border-color: var(--line); }
 			.settings:hover, .open-search:hover { color: var(--text-primary); }
 			.settings svg, .open-search svg, .x svg { width: 18px; height: 18px; }
 			.new-session { position: absolute; left: 12px; bottom: calc(12px + var(--safe-bottom)); width: 48px; height: 48px; padding: 0; border-radius: 50%; }
@@ -146,8 +149,8 @@ export class PiSidebar extends LitElement {
 						<button class="x" aria-label="close search" @click=${this.closeSearch}>${X_ICON}</button>
 					</div>`
 				: html`<div class="top">
-						<a class="brand" href="#/" aria-label="pi home"><span class="u on">pi</span></a>
-						<span class="top-end">${sessionTypeToggle(this.type, (t) => this.dispatchEvent(new CustomEvent("pi-session-type", { detail: { type: t }, bubbles: true, composed: true })))}<button class="open-search" aria-label="search sessions" title="search sessions" @click=${() => (this.searchOpen = true)}>${SEARCH_ICON}</button><a class="settings" href="#/settings" aria-label="settings" title="settings">${SETTINGS_ICON}</a></span>
+						<span class="top-start"><a class="brand" href="#/" aria-label="pi home"><span class="u on">pi</span></a><button class="open-search" aria-label="search sessions" title="search sessions" @click=${() => (this.searchOpen = true)}>${SEARCH_ICON}</button></span>
+						<span class="top-end">${sessionTypeToggle(this.type, (t) => this.dispatchEvent(new CustomEvent("pi-session-type", { detail: { type: t }, bubbles: true, composed: true })))}<a class="settings" href="#/settings" aria-label="settings" title="settings">${SETTINGS_ICON}</a></span>
 					</div>`}
 			${list?.error ? html`<div class="offline" role="status">${list.error}<button class="retry u" @click=${() => list.refresh()}>retry</button></div>` : nothing}
 			<div class="groups">
