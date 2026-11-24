@@ -172,6 +172,19 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   ended BLOCK, each on a new P1 (a test missing for a spec sentence the agent had just written, then a whitespace hunk
   on a pre-existing hand-built dialog), Michael wrote "Just ship the pr and we can fix that later.", and the gate still
   demanded a review since his last message, so a sixth reviewer run started.
+- The brief carries every message of Michael's on the branch since the last PR opened, oldest first, not only his
+  last one, so "ship it" is never the request the reviewer grades against; and it says that spec sentences the diff
+  adds are the diff's own description, a P2 at most when untested. A diff whose only code changes are style and icon
+  files gets the kit rules and no test-per-behavior rule: the screenshot gate already showed the look. Why: keeb
+  2026-11-23, a hover fix and two icon swaps each cost a BLOCK and an e2e test on a computed colour, and the orphan
+  branch was blocked twice on tests for spec sentences the agent had written in the same pass.
+- The first call into an app whose tree already has uncommitted tracked changes gets `[pi-guard] inherited changes
+  <dir>: <files>`: they predate the session and may be work Michael discarded. A `git commit` in that app is blocked
+  while any of them is still changed, until a message of his after the note keeps them (keep, commit, include, yes,
+  stays, mine, or a file's name); `git stash push -- <files>` sets them aside. When his last message says to throw the
+  work away (nuke/discard/scrap/trash/throw away + this/that/it/all/everything), reverting is allowed and committing or
+  shipping a dirty tree is blocked. Why: on 2026-11-23 a session ended on "nevermind. nuke this work." with the reply
+  aborted; the next session found the files, called them a prior session's WIP, committed them and shipped PR #38.
 - When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
   UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
   `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that

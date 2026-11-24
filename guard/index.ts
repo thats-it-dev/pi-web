@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, lastRequest, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -34,6 +34,20 @@ function dirty(dir: string): boolean {
 		return execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: dir, encoding: "utf8", timeout: 5000 }).trim() !== "";
 	} catch {
 		return false;
+	}
+}
+
+// The tracked files with uncommitted changes (index or working tree), as paths from the repo root.
+function dirtyFiles(dir: string): string[] {
+	try {
+		const out = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: dir, encoding: "utf8", timeout: 5000 });
+		return out
+			.split("\n")
+			.filter(Boolean)
+			.map((l) => l.slice(3).split(" -> ").pop() ?? "")
+			.filter(Boolean);
+	} catch {
+		return [];
 	}
 }
 
@@ -309,7 +323,7 @@ export function screenContent(file: string, dir: string, snap: string, branch: I
 	const pictures = userPictures(branch).filter((p) => p.data.length <= (MAX_PICTURE_BYTES * 4) / 3);
 	return [
 		{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
-		...screenCompareContent(specText(dir), pictures, requestFiles(lastRequest(branch), home), upload),
+		...screenCompareContent(specText(dir), pictures, requestFiles(branchRequests(branch), home), upload),
 		{ type: "text", text: screenMark(dir, snap, upload) },
 	];
 }
@@ -399,7 +413,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// dropped "space and enter switch layers instead of typing", the worker enshrined that behavior in a test, and the
 	// review passed it.
 	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
-	const request = lastRequest(branch);
+	const request = branchRequests(branch);
 	const header = reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined });
 	// A resume keeps the run's own cwd, budget and model; only its message is scoped. The revived run is async, and
 	// its result names the new run id (asyncRunId), which the pending mark records.
@@ -464,6 +478,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			const stale = mergedBranch(app, prState);
 			const head = stale ? switchToMain(app) : undefined;
 			if (stale && head) addNote(event.toolCallId, switchedNote(app, stale, head, mainBranch(app)));
+			// Changes already in the tree were left by an earlier session: the note names them, and commits wait for Michael.
+			const left = dirtyFiles(app);
+			if (left.length) addNote(event.toolCallId, inheritedNote(app, left));
 		}
 		const block = checkToolCall(event.toolName, event.input ?? {}, {
 			cwd: ctx.cwd,
@@ -485,6 +502,13 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			busy: (dir) => busyWorker(branch(), dir, ctx.cwd, home),
 			screenSeen: (dir) => screenUpToDate(dir, branch()),
 			uiChanged,
+			inherited: (dir) => {
+				const files = inheritedChanges(branch(), dir);
+				if (!files.length) return [];
+				const now = new Set(dirtyFiles(dir));
+				return files.filter((f) => now.has(f));
+			},
+			discardOrdered: () => discardOrder(branch()),
 		});
 		if (block) return block;
 		// The first call that goes through into an app: its result carries the app's rules, which a session in home never

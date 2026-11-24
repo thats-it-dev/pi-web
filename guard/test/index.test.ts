@@ -236,7 +236,7 @@ test("a reviewer call is scoped by its own cwd when the task names no app, and a
 	assert.equal(r.dir, dir);
 	assert.equal(input.cwd, dir);
 	assert.match(String(input.task), /^\[pi-guard\]|review/i);
-	assert.match(String(input.task), /\[Michael's request, verbatim[^\]]*\]\nmake it so\n/, "the reviewer gets Michael's last message word for word");
+	assert.match(String(input.task), /\[Michael's messages on this branch, verbatim[^\]]*\]\nmake it so\n/, "the reviewer gets Michael's words, not a summary");
 	const tilde: Record<string, unknown> = { agent: "reviewer", cwd: "~/workspace/apps/keeb", task: "Review the branch" };
 	assert.equal((scopeReview(tilde, ready(dir), home, home) as { dir: string }).dir, dir, "a ~ cwd expands");
 	assert.equal(scopeReview({ agent: "reviewer", cwd: home, task: "Review the plan" }, ready(dir), home, home), undefined, "a cwd outside apps scopes nothing");
@@ -418,7 +418,9 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	const r = h.tool_call({ toolName: "bash", toolCallId: "pr", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.deepEqual(r, { block: true, reason: REASONS.screen }, "no picture yet");
 	const out = h.tool_result(result, ctx);
-	assert.equal(out.content.length, 7, "result, screen, spec, picture label, picture, comparison, mark");
+	// src/a.ts was already changed when the session first touched the app: the inherited-changes note rides along.
+	assert.equal(out.content.length, 8, "result, screen, spec, picture label, picture, comparison, mark, inherited note");
+	assert.match(out.content[7].text, /^\[pi-guard\] inherited changes .*\/keeb: src\/a\.ts\n/);
 	assert.deepEqual(out.content[1], { type: "image", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"), mimeType: "image/png" });
 	assert.match(out.content[2].text, /^docs\/spec\.md, what the screen must match:\n\n# Spec\n- Nut is drawn on the right edge\./);
 	assert.equal(out.content[3].text, 'Michael sent this picture with: "Make it look like this"');
@@ -929,3 +931,23 @@ test("a reviewer or worker launch runs on the session's model when the configure
 		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 0);
 	});
 }
+
+test("inherited changes: the first call into a dirty app notes the files, and a commit waits for Michael to keep them", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	const h = load(() => false, { HOME: home });
+	const entries: unknown[] = [msg("user", { content: "fix the sync bug" })];
+	const ctx = { cwd: home, sessionManager: { getBranch: () => entries } };
+	const look = { toolName: "bash", toolCallId: "l1", input: { command: `cd ${dir} && git status --short` } };
+	assert.equal(h.tool_call(look, ctx), undefined, "the first call itself goes through");
+	const out = h.tool_result({ ...look, isError: false, content: [{ type: "text", text: " M src/a.ts" }] }, ctx);
+	assert.match(out.content.at(-1).text, new RegExp(`^\\[pi-guard\\] inherited changes ${dir}: src/a\\.ts\\n`));
+	entries.push(msg("toolResult", { toolCallId: "l1", isError: false, content: out.content }));
+	const commit = { toolName: "bash", toolCallId: "c1", input: { command: `cd ${dir} && git add -A && git commit -m "feat: focus letters"` } };
+	assert.match(h.tool_call(commit, ctx)?.reason ?? "", /^Blocked: src\/a\.ts was changed before this session/);
+	// A second call into the app adds no second note.
+	assert.equal(h.tool_call({ ...look, toolCallId: "l2" }, ctx), undefined);
+	assert.equal(h.tool_result({ ...look, toolCallId: "l2", isError: false, content: [{ type: "text", text: "x" }] }, ctx), undefined);
+	entries.push(msg("user", { content: "keep it, that one's mine" }));
+	assert.equal(h.tool_call(commit, ctx), undefined, "Michael kept it");
+});

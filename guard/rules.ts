@@ -23,6 +23,7 @@ export const REASONS = {
 	screen: `Blocked: look at the screen first. Run \`${SKILL_CLI} screenshot <dir>\` in bash (a phone-size dark picture of the app as it is now; \`--path /route\` for another screen, \`--scheme light\` for light, \`--upload <file>\` to load a file Michael's request names, so the picture shows his data and not the shipped content). The picture comes back in the result together with docs/spec.md and the pictures Michael sent: compare them and write down what differs. Missing colours, borders or fills, a shifted grid, overlapping labels, a control that is gone, a side or an order the spec states differently, mean the change is wrong even though verify is green: send it back to the worker with the picture's path, then verify and look again. When nothing differs, go on to the review (or to ship for a first version).`,
 	overwrite: `Blocked: this rewrites a long existing file. Every line you write costs generation time, so change it with the edit tool: oldText is the fewest unique lines that locate the change (usually 1-3), and newText repeats as few unchanged lines as possible. If you really mean to replace most of the file, send the same write again and it will go through.`,
 	discard: "Blocked: this would throw away uncommitted changes in the app. To show a test fails, write the test first and run it before the fix; never revert source to prove it red. To see an older version, use `git show <ref>:<path>`. To set work aside, commit it first.",
+	discardOrdered: "Blocked: Michael said to discard this work, so don't commit or ship it. Revert the uncommitted changes (`git stash push -m discarded` keeps a copy; `git checkout -- .` drops them), say in one line what was dropped, and end your turn.",
 	worktreeInstall:
 		"Blocked: a pi-subagents worktree shares the main checkout's node_modules through a symlink, so `npm ci` or `npm install` here deletes the packages of the main checkout and of every other worktree. The packages are already installed: run typecheck and tests straight away. If a dependency really must change, say so in your result and let the orchestrator do it in the main checkout.",
 	orchestrator:
@@ -182,6 +183,12 @@ export type Env = {
 	screenSeen?: (dir: string) => boolean;
 	/** The branch changes UI files (uiFile) against main. Absent: assume it does. */
 	uiChanged?: (dir: string) => boolean;
+	/** Files the app's first call this session found changed and uncommitted, still so now, and not yet kept by Michael
+	 *  (inheritedChanges). A commit in the app is blocked while there are any. Absent: not checked. */
+	inherited?: (dir: string) => string[];
+	/** Michael's last message says to throw the work away (discardOrder): reverting is allowed, committing and shipping
+	 *  a dirty tree are blocked. Absent: not checked. */
+	discardOrdered?: () => boolean;
 };
 
 /** A file whose change can change what the app draws. */
@@ -340,7 +347,16 @@ export function checkShell(command: string, env: Env): Block | undefined {
 		if (worker) return { block: true, reason: workerBusy(worker) };
 	}
 	if (fullE2e(command) && env.hasScript(dir, "e2e:one")) return { block: true, reason: REASONS.e2e };
-	if (discards(command) && env.dirty(dir)) return { block: true, reason: REASONS.discard };
+	// Michael's order to throw the work away lifts the discard rule and shuts commits and shipping until the tree is clean.
+	const ordered = env.discardOrdered?.() ?? false;
+	if (discards(command) && env.dirty(dir) && !ordered) return { block: true, reason: REASONS.discard };
+	const commits = new RegExp(`${GIT}commit\\b`).test(command);
+	if (ordered && env.dirty(dir) && (commits || OPENS_PR.test(command) || PUBLISHES.test(command))) return { block: true, reason: REASONS.discardOrdered };
+	// Changes an earlier session left in the tree are not this session's to commit until Michael keeps them.
+	if (commits) {
+		const left = env.inherited?.(dir) ?? [];
+		if (left.length) return { block: true, reason: inheritedBlock(left) };
+	}
 	// A first version always has a screen; a PR needs the look only when it changes UI files.
 	if (env.screenSeen && (SHIPS.test(command) || (OPENS_PR.test(command) && (env.uiChanged?.(dir) ?? true))) && !env.screenSeen(dir)) return { block: true, reason: REASONS.screen };
 	// The review gate, at each kind's publish point: the skill's pr for an app, a push or gh pr create for any other repo.
@@ -622,6 +638,87 @@ export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to a repo (
 const REVIEW_BLOCKED_GAP = (who: string) =>
 	`${who} ended with the merge verdict BLOCK, and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. The gate stays shut until he says to ship: a message of his that says to ship, or to open the PR, opens it without another review, and the PR body then lists the findings he accepted.`;
 
+/** The note on the first call into an app whose tree already had uncommitted changes: they predate this session.
+ *  Keeb 2026-11-23: session 01a209b9 ended on "nevermind. nuke this work." with the reply aborted, so nothing was
+ *  reverted; session 01a20ac1 found the files an hour later, called them "a prior session's WIP", committed them as its
+ *  own fix and shipped them in PR #38. The first line is the mark inheritedChanges reads back from the branch. */
+export const inheritedNote = (dir: string, files: string[]): string =>
+	`[pi-guard] inherited changes ${dir}: ${files.join(", ")}\nThese uncommitted changes predate this session, and may be work Michael discarded: a "nuke this work" that ended a session reverts nothing. Tell him what they are and ask whether to keep or drop them before building on them. Until he says to keep them, a commit here is blocked; \`git stash push -m inherited -- <files>\` sets them aside.`;
+
+const INHERITED = /^\[pi-guard\] inherited changes (\S+): (.+)$/gm;
+/** Michael's word that the inherited changes are his to keep: keep, commit, include, yes, stay(s), mine, or a file's name. */
+const KEEPS = /\b(?:keep|commit|include|yes|stays?|mine)\b/i;
+
+/** The inherited files of `dir` the branch's latest note lists, unless a message of Michael's after it keeps them. */
+export function inheritedChanges(branch: Iterable<unknown>, dir: string): string[] {
+	let files: string[] = [];
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "user") {
+			const text = userText(m);
+			if (files.length && (KEEPS.test(text) || files.some((f) => text.includes(f.split("/").pop() ?? f)))) files = [];
+			continue;
+		}
+		if (m.role !== "toolResult" || m.isError) continue;
+		for (const hit of resultText(m).matchAll(INHERITED)) if (hit[1] === dir) files = hit[2].split(", ").filter(Boolean);
+	}
+	return files;
+}
+
+/** The commit block while inherited changes are still in the tree. */
+export const inheritedBlock = (files: string[]): string =>
+	`Blocked: ${files.join(", ")} ${files.length === 1 ? "was" : "were"} changed before this session and Michael has not said to keep ${files.length === 1 ? "it" : "them"}. Tell him what the change is and ask: keep or drop. To commit your own work meanwhile, set ${files.length === 1 ? "it" : "them"} aside first with \`git stash push -m inherited -- ${files.join(" ")}\`.`;
+
+/** Michael's order to throw the work away: nuke/discard/scrap/trash/throw away + this/that/it/all/everything (+ work,
+ *  changes, branch...), and nothing else after it but a stop or "and"/"then". "nuke the old dialog" is a code change. */
+const DISCARD_ORDER =
+	/\b(?:nuke|discard|scrap|trash|throw(?:\s+(?:away|out))?)\s+(?:it|everything|(?:this|that|the|these|those|all(?:\s+of\s+(?:this|that|it))?)(?:\s+(?:work|changes|branch|session|attempt|run))?)(?:\s+(?:away|out))?\s*(?:[.,;!?]|$|\s+(?:and|then|please|we|i|let'?s)\b)/i;
+
+/** True when Michael's last message on the branch orders the work discarded. */
+export function discardOrder(branch: Iterable<unknown>): boolean {
+	let order = false;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		if (e.type !== "message" || e.message?.role !== "user") continue;
+		const text = userText(e.message).trim();
+		if (text) order = DISCARD_ORDER.test(text);
+	}
+	return order;
+}
+
+/** Every message of Michael's on the branch since the last PR was opened or pushed, verbatim, oldest first, blank-line
+ *  separated; the oldest are cut when the whole runs over `max`. Why not the last message alone: on keeb 2026-11-23 the
+ *  reviewer's "named behavior" rule was briefed with "ship it" as the request, named nothing, and the reviewer graded
+ *  the diff against spec sentences the diff itself had added, five BLOCK passes in a row. */
+export function branchRequests(branch: Iterable<unknown>, max = 2000): string | undefined {
+	let texts: string[] = [];
+	const publishes = new Map<string, boolean>();
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "user") {
+			const t = userText(m).trim();
+			if (t) texts.push(t);
+		} else if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const c of m.content as { type?: string; id?: string; name?: string; arguments?: { command?: unknown } }[]) {
+				if (c.type !== "toolCall" || !c.id || (c.name !== "bash" && c.name !== "bg_bash")) continue;
+				const command = String(c.arguments?.command ?? "");
+				if (OPENS_PR.test(command) || PUBLISHES.test(command)) publishes.set(c.id, true);
+			}
+		} else if (m.role === "toolResult" && !m.isError && m.toolCallId && publishes.get(m.toolCallId)) texts = [];
+	}
+	if (!texts.length) return undefined;
+	let out = texts.join("\n\n");
+	while (out.length > max && texts.length > 1) {
+		texts.shift();
+		out = `[earlier messages cut]\n\n${texts.join("\n\n")}`;
+	}
+	return out.length > max ? `${out.slice(0, max)}\n[cut at ${max} characters]` : out;
+}
+
 /** Michael's order to ship: his message says to ship, or to open, send, make or push the PR. `shipping` is a noun. */
 const SHIP_ORDER = /\bship\b|\b(?:open|send|make|create|push|submit)\s+(?:the\s+|a\s+)?pr\b|\bpr\s+it\b/i;
 
@@ -877,10 +974,16 @@ export function reviewHeader(s: ReviewScope): string {
 		...(s.request
 			? [
 					"",
-					"[Michael's request, verbatim. The parent's summary below may have lost part of it.]",
+					"[Michael's messages on this branch, verbatim, oldest first. The parent's summary below may have lost part of them.]",
 					s.request,
 					"",
-					"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives.",
+					...(styleOnly(s.files)
+						? [
+								`[Style-only diff: ${styleOnly(s.files)?.join(", ")}. The look was checked on the screenshot; no test is required for a style, and a missing one is not a finding. Check that the change is what Michael asked for and that it keeps the kit rules below.]`,
+							]
+						: [
+								"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives. Sentences `docs/spec.md` gains in this diff are the diff's own description of itself, not behaviors Michael named: check them against the code, but a missing test for one of them is a P2 note, never a BLOCK.",
+							]),
 					...(s.inputs?.length ? ["", inputsOracle(s.inputs)] : []),
 				]
 			: []),
@@ -888,6 +991,15 @@ export function reviewHeader(s: ReviewScope): string {
 		"",
 		"[The parent's request]",
 	].join("\n");
+}
+
+/** The style and icon files of a diff that changes nothing else but tests and docs; undefined otherwise. Keeb 2026-11-23
+ *  (PR #37 follow-ups): a one-line hover fix and two icon swaps each cost a BLOCK for "named behavior has no test" and
+ *  grew an e2e test asserting a computed background colour; the screenshot gate had already shown the look. */
+function styleOnly(files: ReviewScope["files"]): string[] | undefined {
+	const code = files.map((f) => f.path).filter((p) => !reviewFree(p) && !/^(?:test|e2e)\//.test(p));
+	const styles = code.filter((p) => /(?:^|\/)(?:[\w-]*styles?|icons?)\.ts$|\.css$/.test(p));
+	return styles.length && styles.length === code.length ? styles : undefined;
 }
 
 /** The kit paragraph of a code review brief, when the diff touches a UI file and the skill's rules are at hand. Keeb

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -338,9 +338,9 @@ test("reviewHeader names the scope, the verify result and the budget", () => {
 	assert.match(h, new RegExp(`${REVIEW_BUDGET.hard} tool calls`));
 	assert.doesNotMatch(h, /Michael's request/);
 	const withReq = reviewHeader({ dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main", diffPath: "/tmp/keeb-review.diff", files: [], request: "space and enter switch layers instead of typing" });
-	assert.match(withReq, /\[Michael's request, verbatim[^\]]*\]\nspace and enter switch layers instead of typing\n/);
+	assert.match(withReq, /\[Michael's messages on this branch, verbatim[^\]]*\]\nspace and enter switch layers instead of typing\n/);
 	assert.match(withReq, /A named behavior with no such test is a P1 finding and the merge verdict is BLOCK/);
-	assert.ok(withReq.indexOf("Michael's request") < withReq.indexOf("[The parent's request]"), "Michael's words come before the parent's summary");
+	assert.ok(withReq.indexOf("Michael's messages") < withReq.indexOf("[The parent's request]"), "Michael's words come before the parent's summary");
 });
 
 test("lastRequest: Michael's last message on the branch, verbatim, text parts only, cut when long", () => {
@@ -1401,4 +1401,88 @@ test("shipOverride: Michael's ship instruction after a review of the app opens t
 	// With the override, there is no gap to report.
 	assert.equal(reviewGap([user("fix it"), blocked, user("Just ship the pr and we can fix that later.")], dir), undefined);
 	assert.match(reviewGap([user("fix it"), blocked], dir) ?? "", /The gate stays shut until he says to ship/);
+});
+
+test("inheritedChanges: the first call into a dirty app records the files; Michael keeping them releases the mark", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const user = (text: string) => ({ type: "message", message: { role: "user", content: text } });
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const note = inheritedNote(dir, ["src/lesson/ladder.ts", "test/ladder.test.ts"]);
+	assert.match(note, /^\[pi-guard\] inherited changes \/home\/m\/workspace\/apps\/keeb: src\/lesson\/ladder\.ts, test\/ladder\.test\.ts\n/);
+	assert.match(note, /predate this session/);
+	assert.match(note, /nuke/);
+	assert.deepEqual(inheritedChanges([user("fix the sync bug"), res(note)], dir), ["src/lesson/ladder.ts", "test/ladder.test.ts"]);
+	assert.deepEqual(inheritedChanges([user("fix the sync bug"), res(note)], "/home/m/workspace/apps/fret"), [], "another app");
+	assert.deepEqual(inheritedChanges([user("fix the sync bug")], dir), []);
+	// His word after the note releases them: keep/commit/include/yes, or naming a file.
+	assert.deepEqual(inheritedChanges([user("fix it"), res(note), user("keep them, they're mine")], dir), []);
+	assert.deepEqual(inheritedChanges([user("fix it"), res(note), user("yes")], dir), []);
+	assert.deepEqual(inheritedChanges([user("fix it"), res(note), user("the ladder.ts change stays")], dir), []);
+	assert.deepEqual(inheritedChanges([user("fix it"), res(note), user("no, I nuked that. stash it")], dir), ["src/lesson/ladder.ts", "test/ladder.test.ts"]);
+	assert.deepEqual(inheritedChanges([user("fix it"), user("keep them"), res(note)], dir), ["src/lesson/ladder.ts", "test/ladder.test.ts"], "a keep before the note is not an answer to it");
+});
+
+test("a commit in an app with inherited changes is blocked until Michael keeps or sets them aside", () => {
+	const files = ["src/lesson/ladder.ts"];
+	const blocked = bash(`${app}git add -A && git commit -m "feat: focus letters"`, env({ inherited: () => files }));
+	assert.match(blocked ?? "", /^Blocked: src\/lesson\/ladder\.ts (?:was|were) changed before this session/);
+	assert.match(blocked ?? "", /git stash push/);
+	assert.equal(bash(`${app}git commit -m x`, env({ inherited: () => [] })), undefined);
+	assert.equal(bash(`${app}git status`, env({ inherited: () => files })), undefined, "only commits are gated");
+	assert.equal(bash(`${app}git stash push -m inherited -- src/lesson/ladder.ts`, env({ inherited: () => files })), undefined, "setting them aside is the way out");
+});
+
+test("discardOrder: Michael's last message says to throw the work away", () => {
+	const user = (text: string) => ({ type: "message", message: { role: "user", content: text } });
+	for (const t of ["nevermind. nuke this work.", "nuke it", "discard all of this", "scrap this and start over", "throw this away", "nuke this branch", "discard these changes"]) assert.equal(discardOrder([user("fix it"), user(t)]), true, t);
+	for (const t of ["nuke the old dialog", "discard the stale pick in remapFor", "nuke this file and move it to src/ui", "nevermind", "it should be the eye-closed icon"]) assert.equal(discardOrder([user("fix it"), user(t)]), false, t);
+	assert.equal(discardOrder([user("nuke it"), user("actually keep going")]), false, "only his last message counts");
+});
+
+test("under a discard order, reverting is allowed and committing or shipping dirty work is blocked", () => {
+	const ordered = env({ dirty: () => true, discardOrdered: () => true });
+	assert.equal(bash(`${app}git checkout -- .`, ordered), undefined, "the revert Michael asked for");
+	assert.equal(bash(`${app}git reset --hard HEAD`, ordered), undefined);
+	assert.match(bash(`${app}git commit -am "wip"`, ordered) ?? "", /^Blocked: Michael said to discard this work/);
+	assert.match(bash(`${app}node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title x --body y`, ordered) ?? "", /^Blocked: Michael said to discard this work/);
+	assert.equal(bash(`${app}git commit -am "wip"`, env({ dirty: () => false, discardOrdered: () => true })), undefined, "a clean tree has nothing left to discard");
+	assert.equal(bash(`${app}git checkout -- .`, env({ dirty: () => true, discardOrdered: () => false })), REASONS.discard, "without the order the discard rule stands");
+});
+
+test("branchRequests: every message of Michael's since the last PR opened, oldest first, verbatim", () => {
+	const user = (text: string) => ({ type: "message", message: { role: "user", content: text } });
+	const call = (command: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c", name: "bash", arguments: { command } }] } });
+	assert.equal(branchRequests([]), undefined);
+	assert.equal(branchRequests([user("fix the orphan bug"), user("board+map pair. carry over the settings row."), user("ship it")]), "fix the orphan bug\n\nboard+map pair. carry over the settings row.\n\nship it");
+	// A PR opened on the branch closes the request: what came before it was shipped and reviewed.
+	const prCall = call("cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title x --body y");
+	const opened = { type: "message", message: { role: "toolResult", toolCallId: "c", content: [{ type: "text", text: 'RESULT {"ok":true}' }] } };
+	const refused = { type: "message", message: { role: "toolResult", toolCallId: "c", isError: true, content: [{ type: "text", text: "Blocked: run the reviewer before opening the PR." }] } };
+	assert.equal(branchRequests([user("hide the keyboard"), prCall, opened, user("eye icon please"), user("eye-closed, not eye-off")]), "eye icon please\n\neye-closed, not eye-off");
+	assert.equal(branchRequests([user("hide the keyboard"), prCall, opened]), undefined, "nothing asked since the PR");
+	assert.equal(branchRequests([user("hide the keyboard"), prCall, refused, user("ship it")]), "hide the keyboard\n\nship it", "a refused pr opened nothing");
+	// Pictures are left out; a long history keeps the latest messages whole.
+	assert.equal(branchRequests([user("a"), { type: "message", message: { role: "user", content: [{ type: "image", data: "x" }, { type: "text", text: "b" }] } }]), "a\n\nb");
+	const long = branchRequests([user("x".repeat(1500)), user("y".repeat(1500))], 2000) ?? "";
+	assert.match(long, /^\[earlier messages cut\]\n\ny{1500}$/);
+});
+
+test("reviewHeader: the request is every message since the PR; spec sentences the diff adds are not named behaviors", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff" };
+	const h = reviewHeader({ ...scope, files: [{ path: "src/app/repair.ts", added: "9", removed: "0" }, { path: "docs/spec.md", added: "25", removed: "0" }], request: "fix the orphan bug\n\nship it" });
+	assert.match(h, /\[Michael's messages on this branch, verbatim, oldest first\. The parent's summary below may have lost part of them\.\]\nfix the orphan bug\n\nship it\n/);
+	assert.match(h, /Sentences `docs\/spec\.md` gains in this diff are the diff's own description of itself, not behaviors Michael named: check them against the code, but a missing test for one of them is a P2 note, never a BLOCK\./);
+	assert.match(h, /A named behavior with no such test is a P1 finding and the merge verdict is BLOCK/);
+});
+
+test("reviewHeader: a style-only diff gets the kit rules and no test-per-behavior rule", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff", kit: "## Style rules\n\n- Use only kit components." };
+	const style = reviewHeader({ ...scope, files: [{ path: "src/ui/app-styles.ts", added: "1", removed: "2" }, { path: "src/ui/icons.ts", added: "4", removed: "0" }, { path: "e2e/keyboard-toggle.spec.ts", added: "12", removed: "0" }], request: "the buttons shouldn't change background on hover" });
+	assert.match(style, /\[Style-only diff: src\/ui\/app-styles\.ts, src\/ui\/icons\.ts\. The look was checked on the screenshot; no test is required for a style, and a missing one is not a finding\. Check that the change is what Michael asked for and that it keeps the kit rules below\.\]/);
+	assert.doesNotMatch(style, /named behavior with no such test/);
+	assert.match(style, /\[Kit rules\./);
+	assert.match(style, /the buttons shouldn't change background on hover/);
+	const logic = reviewHeader({ ...scope, files: [{ path: "src/ui/app-styles.ts", added: "1", removed: "2" }, { path: "src/app/boards.ts", added: "4", removed: "0" }], request: "hover" });
+	assert.doesNotMatch(logic, /Style-only diff/);
+	assert.match(logic, /named behavior with no such test/);
 });
