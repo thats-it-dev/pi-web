@@ -21,7 +21,7 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 | ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr-wait` / `gateway-pr-wait` / `ship` through `bg_bash` |
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
 | worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched without `worktree: true` is still running in the app (its launch named the app, or its status.json's cwd or tool calls show it there; a worker that has not shown where it works yet holds every app) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
-| rewrite | Python that writes files (`open(..., "w")`, `write_text`) in an app | the edit tool |
+| rewrite | a script that writes a file in the app or repo: Python (`open(..., "w")`, `write_text`), `sed -i` / `perl -i`, a `>`/`>>` redirect or heredoc into a file in the tree, or `mv`/`cp` from outside the tree over one (2026-11-24: keeb's copy-diagnostics session did eight such edits past the Python-only rule, with the AGENTS.md rule in context) | the edit tool; the write tool for a new file. Build output and plans/briefs under superpowers are exempt |
 | discard | `git checkout <ref> -- <path>`, `git restore`, `git reset --hard`, only while the app has uncommitted changes | write the test first and run it red before the fix; `git show <ref>:<path>` to look at old code |
 
 ## Stalled turns
@@ -94,7 +94,10 @@ PR #34, and Michael found the drift after the merge.
 ## pr timeouts and CI waits
 
 A bash call that runs the skill's `pr` or `gateway-pr` with any timeout is blocked: those return as soon as the PR
-is open, so a timeout means the model thinks it is waiting.
+is open, so a timeout means the model thinks it is waiting. The shell rules (the review gate above all) are checked
+first and the timeout note rides along on their reason, so one blocked call says everything the next one needs;
+before 2026-11-24 the timeout fired alone and the keeb copy-diagnostics session paid three blocked calls (600 s,
+300 s, then the gate) to learn it needed a re-review.
 
 A bash call that runs `pr-wait`, `gateway-pr-wait` or `ship` is blocked outright, backgrounded or not: they wait on
 CI, so they must go through the `bg_bash` tool, which wakes the agent with a bg-bash-done message when CI finishes.
@@ -175,9 +178,12 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 - The brief carries every message of Michael's on the branch since the last PR opened, oldest first, not only his
   last one, so "ship it" is never the request the reviewer grades against; and it says that spec sentences the diff
   adds are the diff's own description, a P2 at most when untested. A diff whose only code changes are style and icon
-  files gets the kit rules and no test-per-behavior rule: the screenshot gate already showed the look. Why: keeb
-  2026-11-23, a hover fix and two icon swaps each cost a BLOCK and an e2e test on a computed colour, and the orphan
-  branch was blocked twice on tests for spec sentences the agent had written in the same pass.
+  files gets the kit rules and no test-per-behavior rule: the screenshot gate already showed the look. Where a control
+  sits (which dialog, group or row holds it, what it comes before or after) is a look too, so a missing placement test
+  is not a finding. Why: keeb 2026-11-23, a hover fix and two icon swaps each cost a BLOCK and an e2e test on a
+  computed colour, and the orphan branch was blocked twice on tests for spec sentences the agent had written in the
+  same pass; on 2026-11-24 "under settings → account" cost a BLOCK and a boundingBox y-order e2e after the screenshot
+  gate had already checked it.
 - The first call into an app whose tree already has uncommitted tracked changes gets `[pi-guard] inherited changes
   <dir>: <files>`: they predate the session and may be work Michael discarded. A `git commit` in that app is blocked
   while any of them is still changed, until a message of his after the note keeps them (keep, commit, include, yes,

@@ -544,9 +544,9 @@ test("the orchestrator of the agent pair never edits app code itself; docs, plan
 	assert.equal(bash(`${app}git merge 6339a62 && git commit -m "merge"`, o), undefined);
 	assert.equal(bash(`${app}npm run verify > /tmp/verify.log 2>&1; tail -20 /tmp/verify.log`, o), undefined);
 	assert.equal(bash(`${app}sed -i 's/- \\[ \\]/- [x]/' docs/superpowers/plans/x.md`, o), undefined);
-	// Not the orchestrator (inline mode, or a worker child): nothing changes.
+	// Not the orchestrator (inline mode, or a worker child): the edit tool is free, and a shell rewrite is the rewrite rule's.
 	assert.equal(checkToolCall("edit", { path: code, edits: [] }, env())?.reason, undefined);
-	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`), undefined);
+	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`), REASONS.rewrite);
 });
 
 test("pairSettings reads the pair from pi's settings", () => {
@@ -1485,4 +1485,49 @@ test("reviewHeader: a style-only diff gets the kit rules and no test-per-behavio
 	const logic = reviewHeader({ ...scope, files: [{ path: "src/ui/app-styles.ts", added: "1", removed: "2" }, { path: "src/app/boards.ts", added: "4", removed: "0" }], request: "hover" });
 	assert.doesNotMatch(logic, /Style-only diff/);
 	assert.match(logic, /named behavior with no such test/);
+});
+
+test("reviewHeader: where a control sits is a look the screenshot checked, not a behavior that needs a test", () => {
+	const scope = { dir: "/home/m/workspace/apps/keeb", base: "0123456789ab", baseFrom: "main" as const, diffPath: "/tmp/keeb-review.diff" };
+	const h = reviewHeader({ ...scope, files: [{ path: "src/ui/settings-dialog.ts", added: "3", removed: "0" }, { path: "src/app/diagnostics.ts", added: "129", removed: "0" }], request: 'add a "copy diagnostics" button under settings → account' });
+	assert.match(h, /Where a control sits \(which dialog, group or row holds it, what it comes before or after\) is a look, not a behavior: the screenshot gate checked it, so no test is required for placement and a missing one is not a finding\./);
+	assert.match(h, /A named behavior with no such test is a P1 finding/);
+});
+
+test("shell rewrites of files in the app are blocked like Python ones; reads, scratch files and renames are not", () => {
+	for (const c of [
+		"sed -i '111d' src/app-main.ts",
+		"perl -0pi -e 's/a: string; name: string;/a: string;/' src/app/diagnostics.ts && grep -n name src/app/diagnostics.ts",
+		"cat >> test/diagnostics.test.ts <<'EOF'\n\ndescribe(\"x\", () => {\n\tit(\"y\", () => { expect(a).toBe(b); });\n});\nEOF",
+		"cat > docs/spec.md <<'EOF'\n# spec\nEOF",
+		"head -93 src/app/diagnostics.ts > /tmp/diagnostics.ts && mv /tmp/diagnostics.ts src/app/diagnostics.ts && tail -3 src/app/diagnostics.ts",
+		"echo 'export {};' > src/app/empty.ts",
+		"cp /tmp/fixed.ts src/app/diagnostics.ts",
+	]) assert.equal(bash(app + c), REASONS.rewrite, c);
+	assert.equal(checkToolCall("bash", { command: "sed -i 's/a/b/' src/ui/icons.ts" }, env({ cwd: "/home/m/workspace/apps/keeb/src" }))?.reason, REASONS.rewrite, "relative to the cwd");
+	for (const c of [
+		"npm test 2>&1 | tail -5",
+		"npm run typecheck 2>&1 | tail -10 && npm test 2>&1 | grep -E 'Tests |Test Files '",
+		"sed -n '1,40p' src/app-main.ts | grep -n '^$'",
+		"sed -n 100,130p src/atproto/records.ts | grep -n 'SessionRow' | head",
+		"git diff main > /tmp/keeb-review.diff",
+		"node scripts/report.ts > /tmp/report.json",
+		"mv src/app/old.ts src/app/new.ts",
+		"cp src/app/a.ts src/app/b.ts",
+		"sed -i 's/a/b/' /tmp/scratch.ts",
+		"grep -rn 'x => y' src | head; echo 'done' > /dev/null",
+		"awk 'NF==0{print NR\": \"$0}' src/app-main.ts",
+		"cat <<'EOF'\nconst f = (a: number) => a > 1;\nEOF",
+	]) assert.equal(bash(app + c), undefined, c);
+	assert.equal(bash("sed -i 's/a/b/' ~/notes/todo.md"), undefined, "outside any app or repo");
+});
+
+test("a pr with a timeout behind a shut review gate reports the gate, and the timeout with it", () => {
+	const command = app + "node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title 'feat: x' --body 'y'";
+	const shut = env({ reviewed: () => false, codeChanged: () => true });
+	const reason = checkToolCall("bash", { command, timeout: 600 }, shut)?.reason ?? "";
+	assert.ok(reason.startsWith(REASONS.review), reason);
+	assert.match(reason, /no timeout/);
+	assert.equal(checkToolCall("bash", { command, timeout: 600 }, env({ reviewed: () => true }))?.reason, REASONS.prTimeout, "open gate: the timeout alone");
+	assert.equal(checkToolCall("bash", { command }, shut)?.reason, REASONS.review, "no timeout: the gate alone");
 });

@@ -11,7 +11,7 @@ export const REASONS = {
 	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\`; it pushes and opens the PR. Then wait for CI: run \`${SKILL_CLI} pr-wait <dir>\` with the bg_bash tool. For the first version, run \`ship\` with the bg_bash tool instead.`,
 	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). Wait with \`pr-wait\`, \`gateway-pr-wait\` or \`ship\` through the bg_bash tool; it prints the failing log lines. After a fix commit, rerun the same \`pr\` command, then \`pr-wait\` with bg_bash.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
-	rewrite: "Blocked: don't rewrite files with a Python script. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match.",
+	rewrite: "Blocked: don't rewrite files with a script: no Python, `sed -i`, `perl -i`, heredoc or `>` into a file in the tree, or a copy over one. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match. A new file goes through the write tool.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
 	review: `Blocked: run the reviewer before opening the PR. A design doc or plan under docs/superpowers gets a review too (the guard briefs the reviewer for it; no verify needed for a docs-only change). Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, then have the changed tree reviewed: a fresh reviewer call, or \`resume\` of the last reviewer run with what changed (the guard scopes both). List the findings you fixed and rejected in the PR body, then rerun this command.`,
@@ -150,6 +150,46 @@ export function fullE2e(command: string): boolean {
 
 export function pythonRewrite(code: string): boolean {
 	return /\bopen\([^)]*,\s*["'][wa]\+?b?["']|\.write_text\(|\.write_bytes\(/.test(code);
+}
+
+/** A shell command that writes a file inside `dir` without the edit tool: sed or perl in place, a redirect or heredoc
+ *  into it, or a copy or move from outside the tree over it. Reads, pipes, scratch files elsewhere and renames within
+ *  the tree are fine. */
+export function shellRewrite(command: string, dir: string, cwd: string, home: string): boolean {
+	const at = workDir(command, cwd, home);
+	// Build output is nobody's to edit; a plan or brief under superpowers may be ticked with sed.
+	const SKIP = /\/(?:node_modules|dist|\.kit|test-results|docs\/superpowers|\.superpowers)\//;
+	const inside = (token: string): boolean => {
+		const t = token.replace(/^(~|\$HOME|\$\{HOME\})(?=\/)/, home);
+		if (t.includes("\u0001") || /^[<>|&;=-]/.test(t) || !/\/|\.[A-Za-z0-9]{1,6}$/.test(t)) return false;
+		const path = isAbsolute(t) ? t : join(at, t);
+		return path.startsWith(`${dir}/`) && !SKIP.test(path);
+	};
+	// Quoted text stays one token that is never a path, so a `;` or `/` in a sed script or test string means nothing here.
+	const flat = withoutHeredocBodies(command).replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g, (_, d: string | undefined, s: string | undefined) => "\u0001" + (d ?? s ?? "").replace(/[\s;&|]+/g, "\u0001"));
+	for (const seg of flat.split(/;|&&|\|\||\||\n/)) {
+		const tokens = seg.trim().split(/\s+/).filter(Boolean);
+		if (!tokens.length) continue;
+		const paths = tokens.slice(1).filter((t) => !t.startsWith("-"));
+		if (/^(?:sed|perl)$/.test(tokens[0]) && tokens.some((t) => /^-[0-9A-Za-z]*i|^--in-place/.test(t)) && paths.some(inside)) return true;
+		if (/^(?:mv|cp)$/.test(tokens[0]) && paths.length >= 2 && inside(paths[paths.length - 1]) && paths.slice(0, -1).some((p) => !inside(p))) return true;
+		for (const m of seg.matchAll(/(?:^|\s)>{1,2}(?![&=])\s*(\S+)/g)) if (inside(m[1])) return true;
+	}
+	return false;
+}
+
+/** The command with every heredoc body cut out, so a `>` or `;` in the text being written is not read as shell. */
+function withoutHeredocBodies(command: string): string {
+	const lines = command.split("\n");
+	const out: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		out.push(lines[i]);
+		const m = /<<-?\s*(?:'([^']+)'|"([^"]+)"|(\w+))/.exec(lines[i]);
+		if (!m) continue;
+		const end = m[1] ?? m[2] ?? m[3];
+		while (++i < lines.length && lines[i].trim() !== end);
+	}
+	return out.join("\n");
 }
 
 export type Env = {
@@ -342,6 +382,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 		const runsIn = workDir(command, env.cwd, env.home);
 		if (appDir("", runsIn, env.home) || repoOf("", { ...env, cwd: runsIn })) return { block: true, reason: REASONS.rewrite };
 	}
+	if (shellRewrite(command, dir, env.cwd, env.home)) return { block: true, reason: REASONS.rewrite };
 	if (RUNS_E2E.test(command) && env.busy) {
 		const worker = env.busy(dir);
 		if (worker) return { block: true, reason: workerBusy(worker) };
@@ -982,7 +1023,7 @@ export function reviewHeader(s: ReviewScope): string {
 								`[Style-only diff: ${styleOnly(s.files)?.join(", ")}. The look was checked on the screenshot; no test is required for a style, and a missing one is not a finding. Check that the change is what Michael asked for and that it keeps the kit rules below.]`,
 							]
 						: [
-								"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives. Sentences `docs/spec.md` gains in this diff are the diff's own description of itself, not behaviors Michael named: check them against the code, but a missing test for one of them is a P2 note, never a BLOCK.",
+								"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives. Where a control sits (which dialog, group or row holds it, what it comes before or after) is a look, not a behavior: the screenshot gate checked it, so no test is required for placement and a missing one is not a finding. Sentences `docs/spec.md` gains in this diff are the diff's own description of itself, not behaviors Michael named: check them against the code, but a missing test for one of them is a P2 note, never a BLOCK.",
 							]),
 					...(s.inputs?.length ? ["", inputsOracle(s.inputs)] : []),
 				]
@@ -1127,18 +1168,18 @@ const PR_OPEN = /thatsit-app\.ts\s+(?:pr|gateway-pr)\b(?!-wait)/;
 const CI_WAIT = /thatsit-app\.ts\s+(?:pr-wait|gateway-pr-wait|ship)\b/;
 
 export function checkToolCall(toolName: string, input: Record<string, unknown>, env: Env): Block | undefined {
-	if (toolName === "bash") {
-		const command = String(input.command ?? "");
-		// pr and gateway-pr return in seconds, so a timeout means the model thinks it waits.
-		if (typeof input.timeout === "number" && PR_OPEN.test(command)) return { block: true, reason: REASONS.prTimeout };
-		// Waiting on CI belongs to bg_bash, whether or not the command is backgrounded.
-		if (CI_WAIT.test(command)) return { block: true, reason: REASONS.waitInBackground };
-	}
 	const { shell, python } = codeOf(toolName, input);
-	for (const command of shell) {
-		const v = checkShell(command, env);
-		if (v) return v;
+	const command = toolName === "bash" ? String(input.command ?? "") : "";
+	// pr and gateway-pr return in seconds, so a timeout means the model thinks it waits. The shell rules (the review
+	// gate above all) come first, and the timeout rides along, so one blocked call says everything the next one needs.
+	const prTimeout = toolName === "bash" && typeof input.timeout === "number" && PR_OPEN.test(command);
+	for (const c of shell) {
+		const v = checkShell(c, env);
+		if (v) return prTimeout ? { block: true, reason: `${v.reason}\nAlso: ${REASONS.prTimeout.slice("Blocked: ".length)}` } : v;
 	}
+	if (prTimeout) return { block: true, reason: REASONS.prTimeout };
+	// Waiting on CI belongs to bg_bash, whether or not the command is backgrounded.
+	if (toolName === "bash" && CI_WAIT.test(command)) return { block: true, reason: REASONS.waitInBackground };
 	if (python.some((code) => pythonRewrite(code) && (appDir(code, env.cwd, env.home) || workspacePath(code, env.cwd, env.home)))) return { block: true, reason: REASONS.rewrite };
 	if (env.orchestrator && (toolName === "edit" || toolName === "write") && typeof input.path === "string" && appCodePath(input.path, env.cwd, env.home)) {
 		return { block: true, reason: REASONS.orchestrator };
