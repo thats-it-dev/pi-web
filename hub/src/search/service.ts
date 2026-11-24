@@ -4,7 +4,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { chunkSession } from "./chunks.ts";
 import type { ChunkRow, SearchDb } from "./db.ts";
-import { type Embedder, EmbedderUnavailableError } from "./embedder.ts";
+import { type Embedder, EmbedderUnavailableError, TRANSFORMERS_EMBEDDER_NAME } from "./embedder.ts";
 import { cosineTopK, markedSnippet, markedTerms, queryWords, rrf, snippet, termsIn } from "./rank.ts";
 
 export interface RawHit {
@@ -36,10 +36,19 @@ export interface SearchServiceOptions {
 	debounceMs?: number;
 	/** How long a query waits for its own embedding before answering keyword-only; 1 s by default. */
 	queryEmbedBudgetMs?: number;
+	/** Cosine below which a vector-only candidate is dropped; SEMANTIC_FLOOR for the transformers model, none otherwise. */
+	semanticFloor?: number;
 }
 
 const TOP = 40;
 const QUERY_EMBED_BUDGET_MS = 1000;
+
+// Lowest cosine (bge-small-en-v1.5 q8, CLS pooling) at which a chunk the keyword search did not find
+// may still come back as a semantic-only hit. Measured 2026-11-23 on short query/passage pairs:
+// 8 related pairs scored 0.638-0.786, 8 unrelated ones 0.348-0.593 (status chatter such as "CI green.
+// Getting the screenshot." sits near the top of that). 0.61 sits in the gap; it keeps every related
+// pair. Only the transformers model uses it: the test hash embedder's cosines mean something else.
+export const SEMANTIC_FLOOR = 0.61;
 // An embedding error other than "model unavailable" (which the embedder logs itself, once per load
 // attempt, so once per retry window) is logged at most this often, not on every sweep.
 const EMBED_FAIL_LOG_MS = 60 * 60_000;
@@ -75,6 +84,7 @@ export class SearchService {
 	private embedAgain = false;
 	private lastEmbedFailLog = Number.NEGATIVE_INFINITY;
 	private queryEmbedBudgetMs: number;
+	private semanticFloor: number;
 	private timer: NodeJS.Timeout | null = null;
 
 	constructor(opts: SearchServiceOptions) {
@@ -85,6 +95,7 @@ export class SearchService {
 		this.embedBatch = Math.max(1, opts.embedBatch ?? 32);
 		this.debounceMs = opts.debounceMs ?? 2000;
 		this.queryEmbedBudgetMs = opts.queryEmbedBudgetMs ?? QUERY_EMBED_BUDGET_MS;
+		this.semanticFloor = opts.semanticFloor ?? (opts.embedder?.name === TRANSFORMERS_EMBEDDER_NAME ? SEMANTIC_FLOOR : Number.NEGATIVE_INFINITY);
 	}
 
 	/** One sweep at a time; a call during a sweep waits for it and then runs once more (shared by all such callers). */
@@ -266,20 +277,21 @@ export class SearchService {
 		const words = contentWords(q);
 		if (!words.length || limit <= 0) return { hits: [], semantic: false };
 		const { hits: keyword, match } = this.db.keywordMatch(words.join(" "), TOP, exclude);
+		const inKeyword = new Set(keyword.map((k) => k.id));
 		let vector: { id: number; score: number }[] = [];
 		let semantic = false;
 		if (this.embedder && this.vectors().length) {
 			const qv = await this.queryVector(this.embedder, q);
 			if (qv) {
 				const rows = exclude === undefined ? this.vectors() : this.vectors().filter((r) => r.sessionId !== exclude);
-				vector = cosineTopK(qv, rows, TOP);
+				// The floor only drops would-be semantic-only hits; a keyword hit keeps its vector rank.
+				vector = cosineTopK(qv, rows, TOP).filter((v) => v.score >= this.semanticFloor || inKeyword.has(v.id));
 				semantic = true;
 			}
 		}
 		const fused = rrf(semantic ? [keyword, vector] : [keyword]);
 		if (!fused.length) return { hits: [], semantic };
 		const live = new Set((await this.lookup()).map((s) => s.id));
-		const inKeyword = new Set(keyword.map((k) => k.id));
 		const score = new Map(fused.map((f) => [f.id, f.score]));
 		const chosen: ChunkRow[] = [];
 		const taken = new Set<string>();

@@ -4,8 +4,8 @@ import { appendFileSync, existsSync, mkdtempSync, rmSync, unlinkSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SearchDb } from "../src/search/db.ts";
-import { EmbedderUnavailableError, hashEmbedder, type Embedder } from "../src/search/embedder.ts";
-import { SearchService } from "../src/search/service.ts";
+import { EmbedderUnavailableError, hashEmbedder, TRANSFORMERS_EMBEDDER_NAME, type Embedder } from "../src/search/embedder.ts";
+import { SEMANTIC_FLOOR, SearchService } from "../src/search/service.ts";
 
 type Msg = { role: "user" | "assistant"; text: string };
 
@@ -252,6 +252,26 @@ test("query: fused ranking groups per session and marks semanticOnly", async () 
 		}
 
 		assert.equal((await f.service.query("restart hub", 1)).hits.length, 1);
+	} finally {
+		f.done();
+	}
+});
+
+test("query: the semantic floor drops weak vector-only candidates; the transformers model gets SEMANTIC_FLOOR by default", async () => {
+	const f = fixture();
+	try {
+		f.write("a", [{ role: "user", text: "please restart the hub" }]);
+		f.write("c", [{ role: "user", text: "restart everything today" }]); // hash cosine to "restart hub" ≈ 0.41
+		f.write("z", [{ role: "user", text: "quokka marmalade sandwiches" }]); // ≈ 0
+		await f.sweep();
+		const lookup = async () => f.listing;
+		const ids = async (svc: SearchService) => (await svc.query("restart hub", 8)).hits.map((h) => h.sessionId);
+		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup, semanticFloor: 0.3 })), ["a", "c"]);
+		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup, semanticFloor: 0.9 })), ["a"], "the keyword hit survives a floor above its cosine");
+		const named: Embedder = { ...hashEmbedder(), name: TRANSFORMERS_EMBEDDER_NAME };
+		assert.ok(SEMANTIC_FLOOR > 0.41);
+		assert.deepEqual(await ids(new SearchService({ db: f.db, embedder: named, lookup })), ["a"]);
+		assert.equal((await ids(new SearchService({ db: f.db, embedder: hashEmbedder(), lookup }))).length, 3, "the hash embedder has no floor");
 	} finally {
 		f.done();
 	}

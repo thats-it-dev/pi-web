@@ -8,16 +8,19 @@ export interface SearchToolDeps {
 	currentSessionId?: () => string | null;
 }
 
-const UNAVAILABLE = "Session search isn't available right now (the hub didn't answer).";
+const FETCH_TIMEOUT_MS = 10_000;
+const UNAVAILABLE ="Session search isn't available right now (the hub didn't answer).";
 
 export function formatHits(hits: SearchHit[], appOrigin: string | null): string {
 	if (hits.length === 0) return "No past conversation matches.";
 	return hits
 		.map((h, i) => {
-			const title = h.name ?? h.firstPrompt ?? h.sessionId;
+			const title = (h.name ?? h.firstPrompt ?? h.sessionId).replace(/\s+/g, " ").trim();
 			const date = new Date(h.updatedAt).toISOString().slice(0, 10);
 			const link = `${appOrigin ?? ""}/#/s/${h.sessionId}/at/${h.ordinal}`.replace(/^\/#/, "#");
-			return `${i + 1}. ${title} · ${h.type} · ${date} · ${h.cwd}\n   ${h.role === "user" ? "you" : "pi"}: ${h.snippet}\n   ${link}`;
+			// A semantic-only hit is about the topic but shares none of the query's words; say so.
+			const related = h.semanticOnly ? " (related topic, no exact words)" : "";
+			return `${i + 1}. ${title} · ${h.type} · ${date} · ${h.cwd}${related}\n   ${h.role === "user" ? "you" : "pi"}: ${h.snippet}\n   ${link}`;
 		})
 		.join("\n\n");
 }
@@ -41,7 +44,9 @@ export function registerSearchTool(pi: { registerTool(t: any): void }, deps: Sea
 			if (current) url += `&exclude=${encodeURIComponent(current)}`;
 			let text: string;
 			try {
-				const res = await (deps.fetchFn ?? fetch)(url, { signal });
+				// The turn's abort, or 10 s: a hub that accepts the connection but never answers must not hang the tool.
+				const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+				const res = await (deps.fetchFn ?? fetch)(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
 				if (!res.ok) text = UNAVAILABLE;
 				else text = formatHits(((await res.json()) as SearchResponse).hits, env.PI_WEB_APP_ORIGIN ?? null);
 			} catch {

@@ -20,6 +20,29 @@ test("formatHits without origin and when empty", () => {
 	assert.equal(formatHits([], null), "No past conversation matches.");
 });
 
+test("formatHits flags a semantic-only hit and keeps a multi-line title on one line", () => {
+	const out = formatHits([hit({ semanticOnly: true, firstPrompt: "fix the\n\n  thing   now\n" }), hit({ sessionId: "k" })], null);
+	const [first, second] = out.split("\n\n");
+	assert.match(first, /^1\. fix the thing now · code · 2026-11-20 · \/home\/m\/proj \(related topic, no exact words\)\n {3}pi: /);
+	assert.doesNotMatch(second, /related topic/);
+});
+
+test("the fetch gets a signal even without one from the turn, and the turn's abort reaches it", async () => {
+	const seen: AbortSignal[] = [];
+	const tool = setup(async (_u: string, init: RequestInit) => {
+		seen.push(init.signal!);
+		return new Response(JSON.stringify({ hits: [], semantic: false }));
+	});
+	await tool.execute("id", { query: "x" }, undefined, undefined, {});
+	assert.ok(seen[0] instanceof AbortSignal);
+	assert.equal(seen[0].aborted, false);
+	const turn = new AbortController();
+	await tool.execute("id", { query: "x" }, turn.signal, undefined, {});
+	assert.notEqual(seen[1], turn.signal, "combined with the timeout");
+	turn.abort();
+	assert.equal(seen[1].aborted, true);
+});
+
 function setup(fetchFn: any, env: any = {}) {
 	let tool: any;
 	registerSearchTool({ registerTool: (t) => (tool = t) }, { fetchFn, env, currentSessionId: () => "cur" });
