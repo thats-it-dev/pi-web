@@ -165,6 +165,13 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator decided in its reasoning that the P0 was
   hypothetical, asked the reviewer to "re-verify" with its own counter-evidence, got "nothing changed since the last
   review, go on to pr" from the guard, and pushed.
+- Michael's say-so opens the gate. When his last message on the branch says to ship, or to open, send or make the
+  PR, and a scoped review of the app (any verdict, BLOCK included) finished before that message, `pr` runs without
+  another review; the orchestrator lists the findings he accepted in the PR body. A ship message with no review before
+  it is the ordinary request, and the first review still has to happen. Why: on keeb 2026-11-23 five reviews in a row
+  ended BLOCK, each on a new P1 (a test missing for a spec sentence the agent had just written, then a whitespace hunk
+  on a pre-existing hand-built dialog), Michael wrote "Just ship the pr and we can fix that later.", and the gate still
+  demanded a review since his last message, so a sixth reviewer run started.
 - When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
   UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
   `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that

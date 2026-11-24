@@ -422,6 +422,12 @@ export const reviewMark = (dir: string, snap: string) => `${REVIEW_MARK}${dir} a
 const resultText = (m: Entry["message"]) =>
 	Array.isArray(m?.content) ? (m.content as { type?: string; text?: string }[]).map((c) => (c.type === "text" ? c.text ?? "" : "")).join("\n") : "";
 
+/** The text parts of a user message: a plain string, or the `text` parts of a content list (pictures left out). */
+const userText = (m: Entry["message"]) => {
+	const c = m?.content;
+	return typeof c === "string" ? c : Array.isArray(c) ? (c as { type?: string; text?: string }[]).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n") : "";
+};
+
 /** A scoped review launched async: the mark goes on the launch result, and counts once the run completes. */
 export const REVIEW_PENDING_MARK = "[pi-guard] review pending ";
 export const reviewPendingMark = (dir: string, snap: string, runId: string) => `${REVIEW_PENDING_MARK}${dir} at ${snap} run ${runId}`;
@@ -614,7 +620,35 @@ export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to a repo (
 
 /** The gap line for a review that ended BLOCK: the orchestrator's own reading of the findings does not reopen the gate. */
 const REVIEW_BLOCKED_GAP = (who: string) =>
-	`${who} ended with the merge verdict BLOCK, and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. The gate stays shut until he says.`;
+	`${who} ended with the merge verdict BLOCK, and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. The gate stays shut until he says to ship: a message of his that says to ship, or to open the PR, opens it without another review, and the PR body then lists the findings he accepted.`;
+
+/** Michael's order to ship: his message says to ship, or to open, send, make or push the PR. `shipping` is a noun. */
+const SHIP_ORDER = /\bship\b|\b(?:open|send|make|create|push|submit)\s+(?:the\s+|a\s+)?pr\b|\bpr\s+it\b/i;
+
+/** True when Michael's last message on the branch orders the PR shipped and a scoped review of `dir` (any verdict,
+ *  BLOCK included) finished before it: he has seen the findings and overruled them, so the gate opens without another
+ *  review. Keeb 2026-11-23: five BLOCK passes in a row, each on a new P1 (a test for a spec sentence the agent had just
+ *  written, then a whitespace hunk on a pre-existing dialog), Michael wrote "Just ship the pr and we can fix that later.",
+ *  and `pr` was refused for want of a review since his last message, so a sixth reviewer run started. A ship message
+ *  with no review before it is the ordinary request: the first review still has to happen. */
+export function shipOverride(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): boolean {
+	let reviewed = false;
+	let order = false;
+	for (const raw of branch) {
+		const e = raw as Entry;
+		const m = e.message;
+		if (e.type !== "message" || !m) continue;
+		if (m.role === "user") {
+			const text = userText(m).trim();
+			if (text) order = reviewed && SHIP_ORDER.test(text);
+			continue;
+		}
+		if (m.role !== "toolResult" || m.isError) continue;
+		const text = resultText(m);
+		if (completedReviews(text, runState, runText).some((r) => r.dir === dir) || blockedReviews(text, runState, runText).some((r) => r.dir === dir)) reviewed = true;
+	}
+	return order;
+}
 
 const REVIEW_BLOCK_HEAD = "Blocked: run the reviewer before opening the PR";
 
@@ -622,6 +656,7 @@ const REVIEW_BLOCK_HEAD = "Blocked: run the reviewer before opening the PR";
  *  ended without a verdict, or one that failed. Prefixed by a stop order once `pr` was blocked three times with no new
  *  review in between: the orchestrator is looping (keeb 2026-11-16: 16 blocked `pr` calls over 2 h 48 min). */
 export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
+	if (shipOverride(branch, dir, runState, runText)) return undefined;
 	let last: { kind: "pending"; runId: string } | { kind: "finished" } | { kind: "blocked" } | undefined;
 	let blocks = 0;
 	for (const raw of branch) {
@@ -954,9 +989,7 @@ export function lastRequest(branch: Iterable<unknown>, max = 2000): string | und
 	for (const raw of branch) {
 		const e = raw as Entry;
 		if (e.type !== "message" || e.message?.role !== "user") continue;
-		const c = e.message.content;
-		const t = typeof c === "string" ? c : Array.isArray(c) ? (c as { type?: string; text?: string }[]).filter((p) => p.type === "text").map((p) => p.text ?? "").join("\n") : "";
-		const trimmed = t.trim();
+		const trimmed = userText(e.message).trim();
 		if (trimmed) text = trimmed;
 	}
 	if (text === undefined) return undefined;

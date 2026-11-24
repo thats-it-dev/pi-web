@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1378,3 +1378,27 @@ test("previewNote names the dir and the tool call, asks a question after the rev
 		assert.equal(shouldNudgeTodos([user, edit, edited, ran, passed, said], open), true);
 	});
 }
+
+test("shipOverride: Michael's ship instruction after a review of the app opens the gate without another review", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const other = "/home/m/workspace/apps/fret";
+	const user = (text: string) => ({ type: "message", message: { role: "user", content: text } });
+	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
+	const block = () => "## Review\n**Merge verdict: BLOCK**";
+	const blocked = res(reviewBlockedMark(dir, "bbbbbbb"));
+	const asyncBlocked = res(reviewPendingMark(dir, "aaaaaaa", "run-a"));
+	// keeb 2026-11-23: five BLOCK passes, "Just ship the pr and we can fix that later.", and `pr` was still refused.
+	assert.equal(shipOverride([user("fix it"), blocked, user("Just ship the pr and we can fix that later.")], dir), true);
+	assert.equal(shipOverride([user("fix it"), asyncBlocked, user("ship it")], dir, () => "complete", block), true, "an async BLOCK read from its transcript");
+	assert.equal(shipOverride([user("fix it"), res(reviewMark(dir, "ccccccc")), user("open the PR")], dir), true, "a review that passed counts too");
+	// Without a review of this app before it, a ship message is the ordinary request and the gate stays shut.
+	assert.equal(shipOverride([user("ship it")], dir), false);
+	assert.equal(shipOverride([user("fix it"), res(reviewBlockedMark(other, "bbbbbbb")), user("ship it")], dir), false, "another app's review");
+	// Only his last message counts, and only when it says to ship.
+	assert.equal(shipOverride([user("fix it"), blocked, user("ship it"), user("hold on, the fold test is wrong")], dir), false);
+	assert.equal(shipOverride([user("fix it"), blocked, user("the P1 is right, fix it here")], dir), false);
+	assert.equal(shipOverride([user("fix it"), blocked, user("the shipping label is cut off")], dir), false, "ship as a noun is not an order");
+	// With the override, there is no gap to report.
+	assert.equal(reviewGap([user("fix it"), blocked, user("Just ship the pr and we can fix that later.")], dir), undefined);
+	assert.match(reviewGap([user("fix it"), blocked], dir) ?? "", /The gate stays shut until he says to ship/);
+});
