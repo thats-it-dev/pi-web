@@ -10,6 +10,7 @@ import { Type } from "typebox";
 import { socketPath } from "./client.ts";
 import { BridgeSession, type CtxLike, type PiLike } from "./session.ts";
 import { PreviewManager, STATUS_KEY, defaultDeps } from "./preview.ts";
+import { registerSearchTool } from "./search-tool.ts";
 import { type ShowImageParams, showImage } from "./show-image.ts";
 import { FORWARDED_EVENTS } from "./wire.ts";
 
@@ -49,6 +50,7 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 			return showImage(params as ShowImageParams, ctx.cwd);
 		},
 	});
+	registerSearchTool(pi, { env });
 	pi.registerTool({
 		name: "preview",
 		label: "Preview",

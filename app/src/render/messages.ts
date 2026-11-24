@@ -39,15 +39,17 @@ function thumbs(images: ImageContent[], loader: ImageLoader | null, alt: string)
 export function renderConversation(conv: Conversation, loader: ImageLoader | null = null): TemplateResult {
 	const results: Results = new Map();
 	for (const m of conv.messages) if (m.role === "toolResult" && typeof m.toolCallId === "string") results.set(m.toolCallId, m);
-	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools, loader))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true, loader) : nothing}`;
+	// A message's ordinal counts user/assistant messages only, in order; the hub's search index counts the same way.
+	let ordinal = 0;
+	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools, loader, m.role === "user" || m.role === "assistant" ? ordinal++ : null))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true, loader, null) : nothing}`;
 }
 
-function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, loader: ImageLoader | null) {
+function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, loader: ImageLoader | null, ordinal: number | null) {
 	switch (m.role) {
 		case "user":
-			return renderUser(m, loader);
+			return renderUser(m, loader, ordinal);
 		case "assistant":
-			return renderAssistant(m, results, tools, false, loader);
+			return renderAssistant(m, results, tools, false, loader, ordinal);
 		case "bashExecution":
 			return renderBash(m);
 		case "compactionSummary":
@@ -64,24 +66,24 @@ function renderMessage(m: AgentMessage, results: Results, tools: Record<string, 
 // Lucide icon (ISC): paperclip.
 const CLIP = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
 
-function renderUser(m: AgentMessage, loader: ImageLoader | null) {
+function renderUser(m: AgentMessage, loader: ImageLoader | null, ordinal: number | null) {
 	const images = imagesOf(m.content);
 	// A message that carried files: the hub's attachments block becomes chips, and its inlined contents stay out of the bubble.
 	const attached = parseAttachments(blocksText(m.content));
-	return html`<div class="user">${attached ? attached.text : blocksText(m.content)}${
+	return html`<div class="user" data-ordinal=${ordinal ?? nothing}>${attached ? attached.text : blocksText(m.content)}${
 		attached?.files.length
 			? html`<div class="files">${attached.files.map((f) => html`<span class="chip file" title=${f.path}>${CLIP}<span class="name">${f.name}</span><span class="size">${f.sizeLabel}</span></span>`)}</div>`
 			: nothing
 	}${images.length ? html`<div class="imgs">${thumbs(images, loader, "attached image")}</div>` : nothing}</div>`;
 }
 
-function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null) {
+function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null, ordinal: number | null) {
 	const blocks = Array.isArray(m.content) ? m.content : [];
 	// The level this reply was actually sent at (a router like flash-auto picks it per prompt); pi records it on message_end.
 	const level = typeof m.thinkingLevel === "string" ? m.thinkingLevel : null;
 	// The agent's closing TL;DR line feeds push notifications; the chat doesn't repeat it.
 	const lastText = blocks.findLastIndex((b) => b?.type === "text");
-	return html`<div class="assistant">
+	return html`<div class="assistant" data-ordinal=${ordinal ?? nothing}>
 		${blocks.map((b, i) => {
 			if (!b) return nothing;
 			if (b.type === "thinking") {
@@ -213,9 +215,31 @@ export const previewCardStyles = css`
 	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
 `;
 
+type Washable = Pick<HTMLElement, "classList" | "offsetWidth" | "addEventListener" | "removeEventListener">;
+
+// Wash a jumped-to message amber, then drop the class: lit reuses elements, so a lingering .jump would outlive the
+// fade or move to another message on re-render. Reduced motion has no animation to end, so a short timer drops it.
+export function washJump(el: Washable, reduced = matchMedia("(prefers-reduced-motion: reduce)").matches, later: (f: () => void, ms: number) => unknown = setTimeout): void {
+	const done = () => {
+		el.removeEventListener("animationend", onEnd);
+		el.classList.remove("jump");
+	};
+	const onEnd = (e: Event) => {
+		if ((e as AnimationEvent).animationName === "jump-fade") done();
+	};
+	el.classList.remove("jump");
+	void el.offsetWidth; // restart the wash on a repeat jump
+	el.classList.add("jump");
+	if (reduced) later(done, 300);
+	else el.addEventListener("animationend", onEnd);
+}
+
 export const messageStyles = css`
 	:host { display: grid; gap: 14px; padding: 16px 18px 28px; max-width: 760px; margin: 0 auto; width: 100%; align-content: start; }
 	.user { justify-self: end; max-width: 85%; border-right: 3px solid var(--primary); padding: 2px 12px 2px 0; font-family: var(--font-quote); white-space: pre-wrap; overflow-wrap: anywhere; }
+	.jump { border-left: 2px solid var(--primary); background: linear-gradient(90deg, color-mix(in srgb, var(--primary) 18%, transparent), transparent 70%); animation: jump-fade 3s ease-out forwards; }
+	@keyframes jump-fade { to { background: transparent; } }
+	@media (prefers-reduced-motion: reduce) { .jump { animation: none; background: transparent; } }
 	.imgs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; }
 	.files { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-top: 6px; font-family: var(--font); white-space: normal; }
 	.chip.file { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius); padding: 3px 8px; font-size: 0.78rem; max-width: 100%; }

@@ -9,6 +9,19 @@ const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ESC[c]);
 const link = (href: string, inner: string) => `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
 
+// A link into this app (bare "#/…", or our own origin plus "#/…") routes in place: the hash only, no new tab.
+function sameDocHash(href: string): string | null {
+	if (href.startsWith("#/")) return href;
+	try {
+		const origin = globalThis.location?.origin;
+		if (!origin) return null;
+		const u = new URL(href, origin); // relative links resolve to our own origin
+		return u.origin === origin && u.hash.startsWith("#/") ? u.hash : null;
+	} catch {
+		return null;
+	}
+}
+
 const md = new Marked({
 	gfm: true,
 	breaks: false,
@@ -18,6 +31,8 @@ const md = new Marked({
 		},
 		link(token: Tokens.Link) {
 			const inner = this.parser.parseInline(token.tokens);
+			const hash = sameDocHash(token.href);
+			if (hash) return `<a href="${esc(hash)}">${inner}</a>`;
 			return SAFE_URL.test(token.href) ? link(token.href, inner) : inner;
 		},
 		image(token: Tokens.Image) {

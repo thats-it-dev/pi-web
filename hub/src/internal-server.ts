@@ -1,16 +1,21 @@
-// Loopback-only API for services on this machine (ring-profile) to put questions to the watch.
+// Loopback-only API for services on this machine: ring-profile puts questions to the watch, and
+// pi sessions' search_sessions tool (bridge/search-tool.ts) searches past sessions via GET /search.
 // It is a separate listener on 127.0.0.1, never a route on the public server: that one is reached
 // through `tailscale serve` from localhost and trusts Tailscale identity headers, so anything
 // mounted there would be open to the tailnet.
 
 import http from "node:http";
-import type { QueryOutcome } from "../../shared/src/protocol.ts";
+import type { QueryOutcome, SessionSummary } from "../../shared/src/protocol.ts";
+import type { SearchClient } from "./search/client.ts";
+import { runSearch } from "./search/compose.ts";
 import { HttpError } from "./errors.ts";
 import { readJson, sendJson } from "./http.ts";
 import type { QueryStore } from "./queries.ts";
 
 export interface InternalDeps {
 	store: QueryStore;
+	search?: Pick<SearchClient, "query">; // GET /search for the bridge's search_sessions tool; absent means 404
+	listSessions?: () => Promise<SessionSummary[]>; // the listing search hits are composed with (server.ts listSummaries)
 	fetchFn?: typeof fetch;
 	log?: (m: string) => void;
 }
@@ -69,7 +74,12 @@ export function createInternalServer(deps: InternalDeps): http.Server {
 	}
 
 	async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-		const path = new URL(req.url ?? "/", "http://localhost").pathname;
+		const url = new URL(req.url ?? "/", "http://localhost");
+		const path = url.pathname;
+		if (req.method === "GET" && path === "/search") {
+			if (!deps.search || !deps.listSessions) throw new HttpError(404, "search is not available");
+			return sendJson(res, 200, await runSearch(deps.search, deps.listSessions, url.searchParams, true), {});
+		}
 		if (req.method === "GET" && path === "/queries") return sendJson(res, 200, { queries: store.external() }, {});
 		if (req.method === "POST" && path === "/queries") {
 			const b = await readObject(req);

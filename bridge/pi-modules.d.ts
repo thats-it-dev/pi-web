@@ -15,6 +15,7 @@ declare module "typebox" {
 		Object(properties: Record<string, unknown>): unknown;
 		String(options?: { description?: string }): unknown;
 		Boolean(options?: { description?: string }): unknown;
+		Number(options?: { description?: string; minimum?: number; maximum?: number }): unknown;
 		Optional(schema: unknown): unknown;
 	};
 }

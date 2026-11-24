@@ -15,13 +15,14 @@ import type { ListStore } from "../lib/list-store.ts";
 import { renderMarkdown } from "../lib/markdown.ts";
 import { ProgressStore } from "../lib/progress-store.ts";
 import { sessionImageLoader } from "../lib/session-images.ts";
+import { matchesSnippet, nextJump, shouldJumpByOrdinal } from "../lib/jump.ts";
 import { hrefFor } from "../lib/route.ts";
 import { SessionStore } from "../lib/session-store.ts";
 import { matchModel, parseInput, slashItems } from "../lib/slash.ts";
 import { openStream } from "../lib/stream.ts";
 import { nextTucked } from "../lib/mobile.ts";
 import { hasProgress } from "../render/progress.ts";
-import { markdownStyles } from "../render/messages.ts";
+import { markdownStyles, washJump } from "../render/messages.ts";
 import { type MenuStep, chatMenu, chatMenuStyles } from "../render/chat-menu.ts";
 import { parseDialogTitle } from "../lib/dialog-title.ts";
 import { type DialogAnswer, UNAVAILABLE_IN_TERMINAL, dialogSheet, forkSheet, modelSheet, settingsSheet, sheetStyles, statsSheet } from "../render/sheets.ts";
@@ -45,6 +46,7 @@ export class PiSession extends LitElement {
 		sessionId: { attribute: false },
 		childKey: { attribute: false },
 		home: { attribute: false },
+		at: { attribute: false },
 		version: { state: true },
 		sheet: { state: true },
 		menuStep: { state: true },
@@ -57,6 +59,7 @@ export class PiSession extends LitElement {
 	declare sessionId: string;
 	declare childKey: string | null; // set: the chat area shows that subagent's transcript, read-only
 	declare home: string;
+	declare at: number | null; // open at this message ordinal (from #/s/<id>/at/<n>)
 	declare version: number;
 	declare sheet: Sheet | null;
 	declare menuStep: MenuStep;
@@ -70,6 +73,8 @@ export class PiSession extends LitElement {
 	private stream: { close(): void } | null = null;
 	private streamId: string | null = null;
 	private atBottom = true;
+	private jumped: number | null = null;
+	private jumpedSession: string | null = null;
 	private lastScrollTop = 0;
 	private autoScrollTop = -1; // where the last stick-to-bottom left the chat
 	private dragFromY: number | null = null;
@@ -541,6 +546,7 @@ export class PiSession extends LitElement {
 	};
 
 	updated(changed: PropertyValues<this>): void {
+		this.jumpToAt();
 		if (this.atBottom) {
 			const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 			void messages?.updateComplete.then(() => {
@@ -552,6 +558,51 @@ export class PiSession extends LitElement {
 			});
 		}
 		this.syncFocus();
+	}
+
+	// Scroll to the message the route asked for and wash it amber, once per (session, at).
+	private jumpToAt(): void {
+		const n = nextJump({ at: this.at ?? null, jumped: this.jumped, sessionId: this.sessionId, jumpedSession: this.jumpedSession, messages: this.store?.conv.messages.length ?? 0 });
+		if (n === null) {
+			// The route dropped /at/: forget the jump so the same hit clicked again is a real jump.
+			if (this.at == null) {
+				this.jumped = null;
+				this.jumpedSession = null;
+			}
+			return;
+		}
+		this.jumped = n;
+		this.jumpedSession = this.sessionId;
+		const id = this.sessionId;
+		const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
+		let snippet: string | null = null;
+		try {
+			const raw = sessionStorage.getItem("pi-web:jump-snippet");
+			sessionStorage.removeItem("pi-web:jump-snippet");
+			const j = raw ? (JSON.parse(raw) as { id?: string; at?: number; snippet?: string }) : null;
+			if (j && j.id === id && j.at === n && typeof j.snippet === "string") snippet = j.snippet;
+		} catch { /* no stored snippet: plain ordinal jump */ }
+		const compacted = this.store?.conv.messages.some((m) => m.role === "compactionSummary") ?? false;
+		const byOrdinal = shouldJumpByOrdinal(snippet !== null, compacted);
+		void messages?.updateComplete.then(() => {
+			if (this.sessionId !== id || !byOrdinal) return;
+			let target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
+			if (snippet !== null) {
+				// The ordinal may be off in a compacted live session: only land where the passage really is.
+				const text = snippet;
+				if (!target || !matchesSnippet(target.textContent ?? "", text)) {
+					target = [...messages.renderRoot.querySelectorAll<HTMLElement>("[data-ordinal]")].find((el) => matchesSnippet(el.textContent ?? "", text)) ?? null;
+				}
+			}
+			if (!target) return; // nowhere to land: the view (following or not) stays as it was
+			this.atBottom = false; // the view stays where the jump put it
+			target.scrollIntoView({ block: "center" });
+			washJump(target);
+		});
+		if (!this.childKey) {
+			history.replaceState(null, "", hrefFor({ name: "session", id }));
+			this.dispatchEvent(new CustomEvent("pi-route-replaced", { detail: { name: "session", id }, bubbles: true, composed: true }));
+		}
 	}
 
 	// Move focus into a sheet when it opens; give it back to the composer when it closes.

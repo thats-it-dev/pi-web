@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { html, nothing } from "lit";
 import type { AgentMessage } from "../../../shared/src/protocol.ts";
 import { createConversation } from "../../../shared/src/reducer.ts";
 import { formatAttachments } from "../../../shared/src/attachments.ts";
@@ -21,7 +22,7 @@ vi.mock("marked", async (importOriginal) => {
 	return { ...real, Marked: CountingMarked };
 });
 
-const { renderConversation, renderPreviewCard } = await import("./messages.ts");
+const { renderConversation, renderPreviewCard, washJump } = await import("./messages.ts");
 const { renderMarkdown } = await import("../lib/markdown.ts");
 
 function longConversation(turns: number): AgentMessage[] {
@@ -281,5 +282,81 @@ describe("TL;DR line is hidden", () => {
 		const plain = reply([{ type: "text", text: "just text" }]);
 		expect(plain).toContain("just text");
 		expect(plain).toBe(flat(renderConversation(createConversation([{ role: "assistant", content: [{ type: "text", text: "just text" }], timestamp: 1 }] as never))));
+	});
+});
+
+// Walk a lit template tree and return the bound value of every `data-ordinal=` slot, in order.
+function ordinalSlots(v: unknown): unknown[] {
+	if (Array.isArray(v)) return v.flatMap(ordinalSlots);
+	if (typeof v === "object" && v !== null && "strings" in v && "values" in v) {
+		const t = v as { strings: readonly string[]; values: unknown[] };
+		return t.strings.flatMap((s, i) => [...(/data-ordinal=$/.test(s) ? [t.values[i]] : []), ...(i < t.values.length ? ordinalSlots(t.values[i]) : [])]);
+	}
+	return [];
+}
+
+describe("message ordinals", () => {
+	const marks = (c: ReturnType<typeof createConversation>) =>
+		[...flat(renderConversation(c)).matchAll(/class="(user|assistant)" data-ordinal=([^>\s]*)/g)].map((m) => `${m[1]}:${m[2]}`);
+
+	it("numbers user and assistant messages in order, skipping tool results", () => {
+		const conv = createConversation([
+			{ role: "user", content: "a", timestamp: 1 },
+			{ role: "assistant", content: [{ type: "toolCall", id: "t", name: "bash", arguments: {} }], timestamp: 2 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "x" }], timestamp: 3 },
+			{ role: "assistant", content: [{ type: "text", text: "b" }], timestamp: 4 },
+			{ role: "user", content: "c", timestamp: 5 },
+		] as never);
+		expect(marks(conv)).toEqual(["user:0", "assistant:1", "assistant:2", "user:3"]);
+	});
+
+	it("gives the streaming partial no ordinal", () => {
+		const conv = createConversation([{ role: "user", content: "a", timestamp: 1 }] as never);
+		conv.partial = { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 } as never;
+		const slots = ordinalSlots(renderConversation(conv));
+		expect(slots).toHaveLength(2);
+		expect(slots[0]).toBe(0);
+		// The binding itself must be lit's `nothing` (attribute removed), not undefined, "" or a number.
+		expect(slots[1]).toBe(nothing);
+	});
+
+	it("the slot check rejects undefined, empty and numeric values", () => {
+		for (const bad of [undefined, "", 0]) {
+			const slots = ordinalSlots(html`<div class="assistant" data-ordinal=${bad}></div>`);
+			expect(slots[0]).not.toBe(nothing);
+		}
+	});
+});
+
+describe("washJump", () => {
+	const fakeEl = () => {
+		const classes = new Set<string>();
+		const listeners = new Map<string, (e: Event) => void>();
+		const el = {
+			classList: { add: (c: string) => void classes.add(c), remove: (c: string) => void classes.delete(c) },
+			offsetWidth: 0,
+			addEventListener: (t: string, f: (e: Event) => void) => void listeners.set(t, f),
+			removeEventListener: (t: string) => void listeners.delete(t),
+		};
+		return { el: el as never, classes, listeners };
+	};
+	it("adds .jump and drops it when the fade ends", () => {
+		const { el, classes, listeners } = fakeEl();
+		washJump(el, false);
+		expect(classes.has("jump")).toBe(true);
+		listeners.get("animationend")?.({ animationName: "other" } as never);
+		expect(classes.has("jump")).toBe(true); // another animation ending is not the fade
+		listeners.get("animationend")?.({ animationName: "jump-fade" } as never);
+		expect(classes.has("jump")).toBe(false);
+		expect(listeners.size).toBe(0);
+	});
+	it("under reduced motion drops .jump after 300 ms", () => {
+		const { el, classes } = fakeEl();
+		const timers: Array<[() => void, number]> = [];
+		washJump(el, true, (f, ms) => timers.push([f, ms]));
+		expect(classes.has("jump")).toBe(true);
+		expect(timers.map((t) => t[1])).toEqual([300]);
+		timers[0][0]();
+		expect(classes.has("jump")).toBe(false);
 	});
 });

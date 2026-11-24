@@ -64,6 +64,8 @@ export interface RpcHandleOptions {
 	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
 	type?: SessionType; // "chat" or "code" (default)
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
+	internalPort?: number; // the hub's loopback API, passed to pi as PI_WEB_INTERNAL_PORT (the bridge's search_sessions tool calls it)
+	appOrigin?: string | null; // the app's origin, passed as PI_WEB_APP_ORIGIN so tools can link into it
 }
 
 export const CHAT_PROMPT_FILE = fileURLToPath(new URL("../prompts/chat.md", import.meta.url));
@@ -265,7 +267,10 @@ export class RpcHandle implements SessionHandle {
 		args.push("--append-system-prompt", TLDR_PROMPT); // both new and resumed sessions end replies with the TL;DR line
 		const type: SessionType = this.opts.type ?? "code";
 		if (type === "chat") args.push("--no-context-files", "--append-system-prompt", CHAT_PROMPT_FILE);
-		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env: { ...process.env, ...this.opts.env, PI_WEB: "1", PI_WEB_SESSION_TYPE: type } });
+		const env: NodeJS.ProcessEnv = { ...process.env, ...this.opts.env, PI_WEB: "1", PI_WEB_SESSION_TYPE: type };
+		if (this.opts.internalPort !== undefined) env.PI_WEB_INTERNAL_PORT = String(this.opts.internalPort);
+		if (this.opts.appOrigin) env.PI_WEB_APP_ORIGIN = this.opts.appOrigin;
+		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env });
 		this.proc = proc;
 		proc.stdout.setEncoding("utf8");
 		proc.stdout.on("data", lineSplitter((line) => this.onRecord(line)));

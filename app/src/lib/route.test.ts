@@ -15,6 +15,14 @@ describe("routes", () => {
 		expect(parseRoute("#/s/abc/sub/call_1%3A0")).toEqual({ name: "subagent", id: "abc", key: "call_1:0" });
 		expect(parseRoute("#/s/abc/sub")).toEqual({ name: "session", id: "abc" });
 	});
+	it("parses and emits a message position", () => {
+		expect(parseRoute("#/s/abc/at/3")).toEqual({ name: "session", id: "abc", at: 3 });
+		expect(parseRoute("#/s/abc/at/0")).toEqual({ name: "session", id: "abc", at: 0 });
+		for (const bad of ["x", "-1", "1.5", ""]) expect(parseRoute(`#/s/abc/at/${bad}`)).toEqual({ name: "session", id: "abc" });
+		expect(hrefFor({ name: "session", id: "a b", at: 2 })).toBe("#/s/a%20b/at/2");
+		expect(hrefFor({ name: "session", id: "a b" })).toBe("#/s/a%20b");
+		expect(parseRoute(hrefFor({ name: "session", id: "abc", at: 7 }))).toEqual({ name: "session", id: "abc", at: 7 });
+	});
 	it("falls back to home on a malformed escape", () => {
 		expect(parseRoute("#/s/abc/sub/%E0%A4%A")).toEqual({ name: "home" });
 		expect(parseRoute("#/s/%E0%A4%A")).toEqual({ name: "home" });

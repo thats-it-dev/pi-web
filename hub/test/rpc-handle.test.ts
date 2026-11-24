@@ -474,27 +474,29 @@ test("fork, clone and new_session are refused while a background job runs (pi wo
 	assert.equal((await h.command({ type: "new_session" })).ok, true);
 });
 
-// Starts a handle through a shim that records its argv and PI_WEB_SESSION_TYPE, then runs the real pi.
-async function spawnRecord(t: TestContext, opts: { type?: "chat" | "code"; sessionFile?: string }) {
+// Starts a handle through a shim that records its argv, PI_WEB_SESSION_TYPE and the search env, then runs the real pi.
+async function spawnRecord(t: TestContext, opts: { type?: "chat" | "code"; sessionFile?: string; internalPort?: number; appOrigin?: string | null }) {
 	const env = makePiEnv({ modelUrl: model.url });
 	const log = join(env.root, "spawn.json");
 	const shim = join(env.root, "shim.sh");
-	writeFileSync(shim, `#!/bin/sh\nnode -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ argv: process.argv.slice(2), type: process.env.PI_WEB_SESSION_TYPE ?? null }))' "${log}" "$@"\nexec ${JSON.stringify(env.piBin)} "$@"\n`, { mode: 0o755 });
+	writeFileSync(shim, `#!/bin/sh\nnode -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ argv: process.argv.slice(2), type: process.env.PI_WEB_SESSION_TYPE ?? null, port: process.env.PI_WEB_INTERNAL_PORT ?? null, origin: process.env.PI_WEB_APP_ORIGIN ?? null }))' "${log}" "$@"\nexec ${JSON.stringify(env.piBin)} "$@"\n`, { mode: 0o755 });
 	model.setScript(HELLO);
 	const h = await RpcHandle.start({ piBin: shim, cwd: env.workDir, exportDir: join(env.root, "exports"), env: env.env, ...opts });
 	t.after(() => {
 		h.close();
 		env.cleanup();
 	});
-	return JSON.parse(readFileSync(log, "utf8")) as { argv: string[]; type: string | null };
+	return JSON.parse(readFileSync(log, "utf8")) as { argv: string[]; type: string | null; port: string | null; origin: string | null };
 }
 
-test("a chat session spawns with --no-context-files and the chat prompt file, and PI_WEB_SESSION_TYPE=chat", async (t) => {
-	const r = await spawnRecord(t, { type: "chat" });
+test("a chat session spawns with --no-context-files and the chat prompt file, PI_WEB_SESSION_TYPE=chat and the search env", async (t) => {
+	const r = await spawnRecord(t, { type: "chat", internalPort: 7999, appOrigin: "https://pi.example" });
 	assert.ok(r.argv.includes("--no-context-files"));
 	assert.equal(r.argv[r.argv.indexOf("--append-system-prompt", r.argv.indexOf("--append-system-prompt") + 1) + 1], CHAT_PROMPT_FILE);
 	assert.ok(r.argv.includes(TLDR_PROMPT));
 	assert.equal(r.type, "chat");
+	assert.equal(r.port, "7999");
+	assert.equal(r.origin, "https://pi.example");
 });
 
 test("a code session spawns as before (no --no-context-files) with PI_WEB_SESSION_TYPE=code", async (t) => {
@@ -525,4 +527,5 @@ test("chat.md exists, ends with the safety block and names no review/screenshot/
 	assert.doesNotMatch(text, /screenshot|reviewer|preview\(/i);
 	assert.match(text, /thatsit-app/);
 	assert.match(text, /covers only what it names/i);
+	assert.match(text, /search_sessions/);
 });

@@ -16,7 +16,9 @@ import { PushStore } from "./push.ts";
 import { Viewers, watchPush } from "./push-watch.ts";
 import { Registry } from "./registry.ts";
 import { RpcHandle } from "./rpc-handle.ts";
-import { createHubServer } from "./server.ts";
+import type { EmbedderKind } from "./search/worker.ts";
+import { SearchClient } from "./search/client.ts";
+import { createHubServer, listSummaries } from "./server.ts";
 import { gitUpdater } from "./update.ts";
 import { attachWatchStream } from "./watch-stream.ts";
 import { WatchService } from "./watch.ts";
@@ -45,13 +47,28 @@ const lastModel = new LastModelStore(join(cfg.dataDir, "last-model.json"));
 const types = new SessionTypeStore(join(cfg.dataDir, "session-types.json"));
 const catalog = new ModelCatalog({ piBin: cfg.piBin });
 const registry = new Registry({
-	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, uploadsDir, onModelPicked: (c) => lastModel.set(c) }) },
+	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, uploadsDir, onModelPicked: (c) => lastModel.set(c), internalPort: cfg.internalPort, appOrigin: cfg.allowedOrigins[0] ?? null }) },
 	lookup: index,
 	maxHeadless: cfg.maxHeadless,
 	idleMs: cfg.idleMinutes * 60_000,
 	types,
 });
 setInterval(() => registry.reap(), 60_000).unref();
+// PI_WEB_SEARCH_EMBEDDER: "transformers" (default), "hash" (tests) or "none" (keyword search only).
+const embedderEnv = process.env.PI_WEB_SEARCH_EMBEDDER;
+const embedder: EmbedderKind = embedderEnv === "hash" || embedderEnv === "none" ? embedderEnv : "transformers";
+if (embedderEnv && embedderEnv !== embedder) console.log(`PI_WEB_SEARCH_EMBEDDER=${embedderEnv} is not transformers, hash or none; using transformers`);
+// Session search, in a worker thread: it sweeps the sessions at start and again (debounced) when the list changes or a turn ends.
+const search = new SearchClient({
+	dbFile: join(cfg.dataDir, "search.db"),
+	cacheDir: join(cfg.dataDir, "models"),
+	embedder,
+	sessionsDir: sessionsDir(),
+	log: (m) => console.log(m),
+});
+registry.onChange((m) => {
+	if (m.type === "session_list_changed" || (m.type === "session_state" && m.state !== "running")) search.poke();
+});
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });
 const viewers = new Viewers();
 const watch = new WatchService({ registry, index, viewers, home: homedir(), dataDir: cfg.dataDir, catalog, lastModel });
@@ -82,7 +99,7 @@ const updater = gitUpdater(repoRoot, version);
 // Ring notes for ring-profile, retried every minute until it takes them; none when ringProfileUrl is "".
 const notesOutbox = createNotesOutbox(cfg.ringProfileUrl, cfg.dataDir, undefined, (m) => console.log(m));
 void notesOutbox?.flush(); // notes queued before a restart
-const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox });
+const server = createHubServer({ cfg, registry, index, version, push, viewers, updater, watch, catalog, lastModel, notesOutbox, search });
 const stream = attachWatchStream(server, { cfg, watch, log: (m) => console.log(m) });
 server.listen(cfg.port, "127.0.0.1", () => {
 	console.log(`pi-web hub ${version} on http://127.0.0.1:${cfg.port} (serving https://${cfg.hostname}, sessions in ${index.dir}, terminals on ${join(cfg.dataDir, "bridge.sock")})`);
@@ -90,12 +107,13 @@ server.listen(cfg.port, "127.0.0.1", () => {
 // The restart ended every async subagent run; the sessions that had one are reopened so pi-subagents reports it to them.
 void reopenSessionsWithActiveRuns({ root: asyncRunsRoot(), index, registry, log: (m) => console.log(m) });
 
-const internal = createInternalServer({ store: watch.queries, log: (m) => console.log(m) });
+const internal = createInternalServer({ store: watch.queries, search, listSessions: () => listSummaries(index, registry), log: (m) => console.log(m) });
 internal.listen(cfg.internalPort, "127.0.0.1", () => console.log(`internal API on http://127.0.0.1:${cfg.internalPort}`));
 
 const shutdown = () => {
 	notesOutbox?.stop();
 	internal.close();
+	void search.close();
 	stream.close();
 	watch.close();
 	registry.closeAll();

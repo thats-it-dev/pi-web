@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderMarkdown } from "./markdown.ts";
 
 describe("renderMarkdown", () => {
@@ -66,3 +66,25 @@ describe("renderMarkdown", () => {
 	});
 });
 
+
+describe("in-app session links", () => {
+	const g = globalThis as { location?: unknown };
+	const saved = g.location;
+	afterEach(() => { g.location = saved; });
+	it("renders bare hash routes in place", () => {
+		const out = renderMarkdown("[hit](#/s/abc/at/3)");
+		expect(out).toContain('<a href="#/s/abc/at/3">hit</a>');
+		expect(out).not.toContain("_blank");
+	});
+	it("renders same-origin hash routes as the hash only", () => {
+		g.location = { origin: "https://pi.thatsit.app" };
+		const out = renderMarkdown("[hit](https://pi.thatsit.app/#/s/abc/at/3)");
+		expect(out).toContain('<a href="#/s/abc/at/3">hit</a>');
+		expect(out).not.toContain("rel=");
+	});
+	it("leaves other origins and non-route hashes alone", () => {
+		g.location = { origin: "https://pi.thatsit.app" };
+		expect(renderMarkdown("[x](https://evil.example/#/s/abc)")).toContain('target="_blank"');
+		expect(renderMarkdown("[x](https://pi.thatsit.app/other)")).toContain('target="_blank"');
+	});
+});
