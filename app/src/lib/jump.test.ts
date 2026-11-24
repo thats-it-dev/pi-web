@@ -15,6 +15,9 @@ describe("nextJump", () => {
 	it("at changes on the same session scroll again", () => {
 		expect(nextJump({ ...base, at: 7, jumped: 4, jumpedSession: "a" })).toBe(7);
 	});
+	it("a cleared jump lets the same at scroll again", () => {
+		expect(nextJump({ ...base, jumped: null, jumpedSession: null })).toBe(4);
+	});
 	it("the same at on another session scrolls", () => {
 		expect(nextJump({ ...base, sessionId: "b", jumped: 4, jumpedSession: "a" })).toBe(4);
 	});

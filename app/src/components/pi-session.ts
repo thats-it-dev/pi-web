@@ -563,19 +563,32 @@ export class PiSession extends LitElement {
 	// Scroll to the message the route asked for and wash it amber, once per (session, at).
 	private jumpToAt(): void {
 		const n = nextJump({ at: this.at ?? null, jumped: this.jumped, sessionId: this.sessionId, jumpedSession: this.jumpedSession, messages: this.store?.conv.messages.length ?? 0 });
-		if (n === null) return;
+		if (n === null) {
+			// The route dropped /at/: forget the jump so the same hit clicked again is a real jump.
+			if (this.at == null) {
+				this.jumped = null;
+				this.jumpedSession = null;
+			}
+			return;
+		}
 		this.jumped = n;
 		this.jumpedSession = this.sessionId;
 		this.atBottom = false; // the view stays where the jump put it
 		const id = this.sessionId;
 		const messages = this.renderRoot.querySelector<LitElement>("pi-messages");
 		void messages?.updateComplete.then(() => {
+			if (this.sessionId !== id) return;
 			const target = messages.renderRoot.querySelector<HTMLElement>(`[data-ordinal="${n}"]`);
 			if (!target) return;
 			target.scrollIntoView({ block: "center" });
+			target.classList.remove("jump");
+			void target.offsetWidth; // restart the wash on a repeat jump
 			target.classList.add("jump");
 		});
-		if (!this.childKey) history.replaceState(null, "", hrefFor({ name: "session", id }));
+		if (!this.childKey) {
+			history.replaceState(null, "", hrefFor({ name: "session", id }));
+			this.dispatchEvent(new CustomEvent("pi-route-replaced", { detail: { name: "session", id }, bubbles: true, composed: true }));
+		}
 	}
 
 	// Move focus into a sheet when it opens; give it back to the composer when it closes.
