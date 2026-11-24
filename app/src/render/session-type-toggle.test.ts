@@ -1,6 +1,6 @@
 import { nothing } from "lit";
 import { describe, expect, it, vi } from "vitest";
-import { sessionTypeToggle } from "./session-type-toggle.ts";
+import { sessionTypeToggle, sessionTypeToggleStyles } from "./session-type-toggle.ts";
 
 // vitest runs in node (no DOM): flatten the lit template to markup.
 function flatten(v: unknown, fns: Array<() => void>): string {
@@ -24,7 +24,8 @@ describe("sessionTypeToggle", () => {
 	it("marks code pressed", () => {
 		const { html } = mount("code");
 		expect(html).toMatch(/class="type-toggle code"/);
-		expect(html).toContain('role="radiogroup"');
+		expect(html).toContain('role="group"');
+		expect(html).toContain('aria-label="Session type"');
 		const [a, b] = buttons(html);
 		expect(a).toContain('aria-label="Code sessions"');
 		expect(a).toContain('aria-pressed="true"');
@@ -48,5 +49,8 @@ describe("sessionTypeToggle", () => {
 		const { html } = mount("code");
 		expect(buttons(html)).toHaveLength(2);
 		expect(html.match(/viewBox/g)?.length ?? 0).toBe(2);
+	});
+	it("pressed icon is black on the amber pill, as the kit's .btn", () => {
+		expect(sessionTypeToggleStyles.cssText).toMatch(/\[aria-pressed="true"\] \{ color: #000; \}/);
 	});
 });
