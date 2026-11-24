@@ -42,6 +42,13 @@ const embedder: Embedder | null = data.embedder === "transformers" ? transformer
 const index = new SessionIndex(data.sessionsDir);
 const service = new SearchService({ db, embedder, lookup: () => index.list(), log, debounceMs: data.debounceMs });
 
+// Load the model now rather than on the first query: after a restart the store already has vectors,
+// so a query would otherwise wait on the load (it answers keyword-only past a 1 s budget meanwhile).
+if (data.embedder === "transformers" && embedder) {
+	log("search: warming the embedding model");
+	embedder.embed(["warm"]).catch(() => {}); // a failure is logged by the embedder and starts its retry wait
+}
+
 service.sweep().catch((err) => log(`search: initial sweep failed: ${errText(err)}`));
 
 async function answer(msg: Exclude<WorkerRequest, { op: "poke" } | { op: "close" }>): Promise<unknown> {

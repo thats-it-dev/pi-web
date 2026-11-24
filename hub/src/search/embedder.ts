@@ -39,6 +39,14 @@ export function hashEmbedder(dims = 384): Embedder {
 
 const MODEL = "Xenova/bge-small-en-v1.5";
 const RETRY_MS = 60 * 60_000;
+// A load (download included) that has not settled by then counts as failed and starts the retry wait.
+const LOAD_TIMEOUT_MS = 3 * 60_000;
+
+/** The transformers embedder's name; the service applies its semantic floor only to this model. */
+export const TRANSFORMERS_EMBEDDER_NAME = `transformers:${MODEL}:q8`;
+
+/** Thrown while the model is unavailable (it failed to load, or is waiting out the retry). Already logged by the embedder. */
+export class EmbedderUnavailableError extends Error {}
 
 type Extractor = (texts: string[], opts: { pooling: "cls"; normalize: boolean }) => Promise<{ tolist(): number[][] }>;
 
@@ -46,11 +54,14 @@ export interface TransformersOptions {
 	now?: () => number;
 	/** Test seam: replaces the real model load. */
 	load?: () => Promise<Extractor>;
+	/** Test seam: load timeout; 3 min by default. */
+	loadTimeoutMs?: number;
 }
 
 /** Lazy CPU embedder (bge-small q8). Nothing loads until the first embed(). */
 export function transformersEmbedder(cacheDir: string, log: (m: string) => void, opts: TransformersOptions = {}): Embedder {
 	const now = opts.now ?? Date.now;
+	const loadTimeoutMs = opts.loadTimeoutMs ?? LOAD_TIMEOUT_MS;
 	let loaded: Promise<Extractor> | undefined;
 	let failedAt: number | undefined;
 
@@ -68,20 +79,29 @@ export function transformersEmbedder(cacheDir: string, log: (m: string) => void,
 		if (loaded) return loaded;
 		if (failedAt !== undefined && now() - failedAt < RETRY_MS) {
 			const mins = Math.ceil((RETRY_MS - (now() - failedAt)) / 60_000);
-			return Promise.reject(new Error(`embedding model failed to load; will retry in ${mins} min`));
+			return Promise.reject(new EmbedderUnavailableError(`embedding model failed to load; will retry in ${mins} min`));
 		}
-		const attempt = (opts.load ?? realLoad)().catch((err) => {
-			failedAt = now();
-			loaded = undefined;
-			log(`embedding model load failed: ${err instanceof Error ? err.message : String(err)}`);
-			throw err;
+		let timer: NodeJS.Timeout | undefined;
+		const timeout = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`load timed out after ${Math.round(loadTimeoutMs / 1000)} s`)), loadTimeoutMs);
+			timer.unref();
 		});
+		// A load that never settles (a hung download) is abandoned at the timeout; if it settles later, nobody waits on it.
+		const attempt = Promise.race([(opts.load ?? realLoad)(), timeout])
+			.finally(() => clearTimeout(timer))
+			.catch((err) => {
+				failedAt = now();
+				loaded = undefined;
+				const msg = err instanceof Error ? err.message : String(err);
+				log(`embedding model load failed: ${msg}`);
+				throw new EmbedderUnavailableError(`embedding model failed to load: ${msg}`);
+			});
 		loaded = attempt;
 		return attempt;
 	};
 
 	return {
-		name: `transformers:${MODEL}:q8`,
+		name: TRANSFORMERS_EMBEDDER_NAME,
 		dims: 384,
 		async embed(texts) {
 			if (texts.length === 0) return [];

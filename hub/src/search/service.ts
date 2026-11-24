@@ -4,7 +4,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { chunkSession } from "./chunks.ts";
 import type { SearchDb } from "./db.ts";
-import type { Embedder } from "./embedder.ts";
+import { type Embedder, EmbedderUnavailableError } from "./embedder.ts";
 import { cosineTopK, queryWords, rrf, snippet, termsIn } from "./rank.ts";
 
 export interface RawHit {
@@ -34,9 +34,15 @@ export interface SearchServiceOptions {
 	log?: (m: string) => void;
 	embedBatch?: number;
 	debounceMs?: number;
+	/** How long a query waits for its own embedding before answering keyword-only; 1 s by default. */
+	queryEmbedBudgetMs?: number;
 }
 
 const TOP = 40;
+const QUERY_EMBED_BUDGET_MS = 1000;
+// An embedding error other than "model unavailable" (which the embedder logs itself, once per load
+// attempt, so once per retry window) is logged at most this often, not on every sweep.
+const EMBED_FAIL_LOG_MS = 60 * 60_000;
 
 // Query words that carry no meaning on their own. A query made only of these returns nothing
 // (FTS5 has no stopword list, so "the" would otherwise match nearly every chunk).
@@ -66,6 +72,9 @@ export class SearchService {
 	private inflight: Promise<{ indexed: number; removed: number }> | null = null;
 	private queued: Promise<{ indexed: number; removed: number }> | null = null;
 	private embedding: Promise<number> | null = null;
+	private embedAgain = false;
+	private lastEmbedFailLog = Number.NEGATIVE_INFINITY;
+	private queryEmbedBudgetMs: number;
 	private timer: NodeJS.Timeout | null = null;
 
 	constructor(opts: SearchServiceOptions) {
@@ -75,6 +84,7 @@ export class SearchService {
 		this.log = opts.log ?? (() => {});
 		this.embedBatch = Math.max(1, opts.embedBatch ?? 32);
 		this.debounceMs = opts.debounceMs ?? 2000;
+		this.queryEmbedBudgetMs = opts.queryEmbedBudgetMs ?? QUERY_EMBED_BUDGET_MS;
 	}
 
 	/** One sweep at a time; a call during a sweep waits for it and then runs once more (shared by all such callers). */
@@ -142,14 +152,44 @@ export class SearchService {
 			indexed++;
 		}
 		if (indexed || removed) this.log(`search: indexed ${indexed}, removed ${removed}`);
-		await this.embedPending();
+		// Started, never awaited: a slow or stuck embedder must not hold up this sweep or the next.
+		this.embedPending().catch((err) => this.embedFailed(err));
 		return { indexed, removed };
 	}
 
+	/**
+	 * One embed loop at a time. A call while it runs marks "run again" and shares its promise, which
+	 * resolves with the total embedded once the loop finds nothing more to do. Chunk ids are never
+	 * reused (AUTOINCREMENT), so a sweep that replaces chunks during a batch only makes that batch's
+	 * update miss the deleted rows; their replacements are pending and get picked up next.
+	 */
 	embedPending(): Promise<number> {
-		if (!this.embedder) return Promise.resolve(0);
-		if (!this.embedding) this.embedding = this.runEmbed(this.embedder).finally(() => (this.embedding = null));
-		return this.embedding;
+		const embedder = this.embedder;
+		if (!embedder) return Promise.resolve(0);
+		if (this.embedding) {
+			this.embedAgain = true;
+			return this.embedding;
+		}
+		const run = (async () => {
+			let total = 0;
+			do {
+				this.embedAgain = false;
+				total += await this.runEmbed(embedder);
+			} while (this.embedAgain);
+			return total;
+		})().finally(() => {
+			if (this.embedding === run) this.embedding = null;
+		});
+		this.embedding = run;
+		return run;
+	}
+
+	private embedFailed(err: unknown): void {
+		if (err instanceof EmbedderUnavailableError) return; // the embedder logged the load failure itself
+		const now = Date.now();
+		if (now - this.lastEmbedFailLog < EMBED_FAIL_LOG_MS) return;
+		this.lastEmbedFailLog = now;
+		this.log(`search: embedding failed: ${err instanceof Error ? err.message : String(err)}`);
 	}
 
 	private async runEmbed(embedder: Embedder): Promise<number> {
@@ -161,7 +201,8 @@ export class SearchService {
 			try {
 				vecs = await embedder.embed(batch.map((b) => b.text));
 			} catch (err) {
-				this.log(`search: embedding failed: ${err instanceof Error ? err.message : String(err)}`);
+				this.embedFailed(err);
+				this.embedAgain = false; // nothing succeeds before the embedder's retry; the next sweep starts the loop again
 				break;
 			}
 			const rows = batch.slice(0, vecs.length).map((b, i) => ({ id: b.id, vec: vecs[i] }));
@@ -170,8 +211,12 @@ export class SearchService {
 			this.vecs = null;
 			count += rows.length;
 			if (rows.length < batch.length) break;
-			// A sweep is waiting (a poke or a direct call): let it re-index now; it resumes the backlog after.
-			if (this.queued) break;
+			// A sweep is waiting (a poke or a direct call): yield so it re-indexes on a quiet store; it
+			// starts this loop again when it ends, which resumes the backlog.
+			if (this.queued) {
+				this.embedAgain = false;
+				break;
+			}
 		}
 		return count;
 	}
@@ -186,6 +231,32 @@ export class SearchService {
 		this.timer.unref();
 	}
 
+	/**
+	 * The query's embedding, or null when it fails or misses the budget (the model is still loading
+	 * after a restart): the query then answers keyword-only. A late embed is not abandoned; it keeps
+	 * warming the model for the next query.
+	 */
+	private async queryVector(embedder: Embedder, q: string): Promise<Float32Array | null> {
+		let timer: NodeJS.Timeout | undefined;
+		const late = new Promise<null>((resolve) => {
+			timer = setTimeout(() => resolve(null), this.queryEmbedBudgetMs);
+			timer.unref();
+		});
+		const embedded = embedder.embed([q]).then(
+			([v]) => v ?? null,
+			(err) => {
+				if (!(err instanceof EmbedderUnavailableError))
+					this.log(`search: query embedding failed: ${err instanceof Error ? err.message : String(err)}`);
+				return null;
+			},
+		);
+		try {
+			return await Promise.race([embedded, late]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	private vectors(): Vecs {
 		if (!this.vecs) this.vecs = this.db.allEmbeddings();
 		return this.vecs;
@@ -198,15 +269,11 @@ export class SearchService {
 		let vector: { id: number; score: number }[] = [];
 		let semantic = false;
 		if (this.embedder && this.vectors().length) {
-			try {
-				const [qv] = await this.embedder.embed([q]);
-				if (qv) {
-					const rows = exclude === undefined ? this.vectors() : this.vectors().filter((r) => r.sessionId !== exclude);
-					vector = cosineTopK(qv, rows, TOP);
-					semantic = true;
-				}
-			} catch (err) {
-				this.log(`search: query embedding failed: ${err instanceof Error ? err.message : String(err)}`);
+			const qv = await this.queryVector(this.embedder, q);
+			if (qv) {
+				const rows = exclude === undefined ? this.vectors() : this.vectors().filter((r) => r.sessionId !== exclude);
+				vector = cosineTopK(qv, rows, TOP);
+				semantic = true;
 			}
 		}
 		const fused = rrf(semantic ? [keyword, vector] : [keyword]);

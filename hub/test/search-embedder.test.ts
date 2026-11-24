@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cosine, hashEmbedder, transformersEmbedder } from "../src/search/embedder.ts";
+import { EmbedderUnavailableError, cosine, hashEmbedder, transformersEmbedder } from "../src/search/embedder.ts";
 
 test("hashEmbedder: deterministic, normalized, shares words → higher cosine than unrelated", async () => {
 	const e = hashEmbedder();
@@ -57,6 +57,27 @@ test("transformersEmbedder: load failure rejects, retry waits 60 min", async () 
 	await assert.rejects(e.embed(["x"]), /no network/);
 	assert.equal(loads, 2);
 	assert.ok(logs.length >= 1);
+});
+
+test("transformersEmbedder: a load that never settles times out and counts as a failure", async () => {
+	let t = 1000;
+	let loads = 0;
+	const logs: string[] = [];
+	const e = transformersEmbedder("/nonexistent", (m) => logs.push(m), {
+		now: () => t,
+		loadTimeoutMs: 50,
+		load: () => {
+			loads++;
+			return new Promise(() => {});
+		},
+	});
+	await assert.rejects(e.embed(["x"]), (err: Error) => err instanceof EmbedderUnavailableError && /timed out/.test(err.message));
+	assert.equal(loads, 1);
+	assert.deepEqual(logs, ["embedding model load failed: load timed out after 0 s"]);
+	t += 30 * 60_000;
+	await assert.rejects(e.embed(["x"]), /retry in 30 min/);
+	assert.equal(loads, 1, "the retry waits out the hour");
+	assert.equal(logs.length, 1, "nothing more is logged inside the window");
 });
 
 test("transformersEmbedder: real model ranks sensibly", { skip: !process.env.PI_WEB_REAL_EMBEDDER, timeout: 300_000 }, async () => {

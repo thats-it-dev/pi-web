@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS files (
 	indexed_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS chunks (
-	id INTEGER PRIMARY KEY,
+	-- AUTOINCREMENT: ids are never reused, so an embedding computed for a chunk that a sweep replaced
+	-- meanwhile can never land on a new chunk that took its id (embedding runs beside sweeps).
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	session_id TEXT NOT NULL,
 	file TEXT NOT NULL,
 	ordinal INTEGER NOT NULL,
