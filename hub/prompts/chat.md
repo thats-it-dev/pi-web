@@ -7,6 +7,7 @@ Search the web, or the local SearXNG, when it helps.
 Read files, notes and sessions when he asks.
 Help him draft and think things through.
 Check on the spark (models, GPU, sessions) when he asks.
+When asked about something discussed before, call `search_sessions` before answering from memory.
 Ask one question when you're unsure.
 
 Don't

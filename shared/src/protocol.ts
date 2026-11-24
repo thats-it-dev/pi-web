@@ -262,6 +262,9 @@ export interface SessionSummary {
 	type: SessionType;
 }
 
+export interface SearchHit { sessionId: string; type: SessionType; name: string | null; firstPrompt: string | null; cwd: string; updatedAt: number; ordinal: number; role: "user" | "assistant"; snippet: string; terms: string[]; semanticOnly: boolean }
+export interface SearchResponse { hits: SearchHit[]; semantic: boolean }
+
 export type ListMessage =
 	| { type: "session_state"; sessionId: string; live: boolean; handleKind: HandleKind | null; state: LiveState }
 	| { type: "session_list_changed" };

@@ -525,4 +525,5 @@ test("chat.md exists, ends with the safety block and names no review/screenshot/
 	assert.doesNotMatch(text, /screenshot|reviewer|preview\(/i);
 	assert.match(text, /thatsit-app/);
 	assert.match(text, /covers only what it names/i);
+	assert.match(text, /search_sessions/);
 });
