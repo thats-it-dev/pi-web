@@ -25,13 +25,13 @@ test("the toggle filters the list and the button label follows", async ({ page, 
 	await expect(page.locator("pi-sidebar").getByRole("group", { name: "Session type" })).toBeVisible();
 	await expect(codeTitle(page).filter({ hasText: "show me the app" }).first()).toBeVisible();
 	await expect(codeTitle(page).filter({ hasText: "chatty hello" })).toHaveCount(0);
-	await expect(page.getByRole("button", { name: /^new (code session|chat)$/ })).toHaveText(/new code session/);
+	await expect(page.getByRole("button", { name: /^new (code session|chat)$/ })).toHaveAccessibleName("new code session");
 
 	await toggle(page, "Chat sessions").click();
 	await expect(toggle(page, "Chat sessions")).toHaveAttribute("aria-pressed", "true");
 	await expect(codeTitle(page).filter({ hasText: "chatty hello" })).toBeVisible();
 	await expect(codeTitle(page).filter({ hasText: "show me the app" })).toHaveCount(0);
-	await expect(newButton(page)).toHaveText(/new chat/);
+	await expect(newButton(page)).toHaveAccessibleName("new chat");
 	await expect(page.getByRole("button", { name: /^new (code session|chat)$/ })).toBeVisible();
 });
 
@@ -123,7 +123,7 @@ test("the setting survives a reload", async ({ page, isMobile }) => {
 	await page.reload();
 	await openPanel(page, isMobile);
 	await expect(toggle(page, "Chat sessions")).toHaveAttribute("aria-pressed", "true");
-	await expect(newButton(page)).toHaveText(/new chat/);
+	await expect(newButton(page)).toHaveAccessibleName("new chat");
 });
 
 test("flipping the toggle keeps the typed draft", async ({ page, isMobile }) => {
