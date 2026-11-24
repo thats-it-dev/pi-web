@@ -68,6 +68,15 @@ describe("SearchStore", () => {
 		expect(store.state).toEqual({ status: "error", query: "zz", message: "Search isn't available on this hub." });
 		expect(changes).toHaveBeenCalled();
 	});
+	it("ignores a repeat of the current query", async () => {
+		const { store, search } = setup();
+		store.setQuery("res");
+		store.setQuery(" res ");
+		await vi.advanceTimersByTimeAsync(300);
+		store.setQuery("res");
+		await vi.advanceTimersByTimeAsync(300);
+		expect(search).toHaveBeenCalledTimes(1);
+	});
 	it("clear goes idle and aborts", async () => {
 		const signals: AbortSignal[] = [];
 		const { store } = setup((_q, _l, s) => {

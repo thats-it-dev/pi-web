@@ -1,5 +1,5 @@
 import type { SearchHit, SearchResponse } from "../../../shared/src/protocol.ts";
-import { HubError } from "./api.ts";
+import { HubError, type HubApi } from "./api.ts";
 
 export type SearchState =
 	| { status: "idle" }
@@ -8,8 +8,7 @@ export type SearchState =
 	| { status: "error"; query: string; message: string };
 
 export interface SearchStoreOptions {
-	// Pick<HubApi, "search"> once api.ts has it.
-	api: { search(q: string, limit: number, signal?: AbortSignal): Promise<SearchResponse> };
+	api: Pick<HubApi, "search">;
 	debounceMs?: number;
 	minChars?: number;
 	limit?: number;
@@ -49,6 +48,7 @@ export class SearchStore extends EventTarget {
 
 	setQuery(q: string): void {
 		const query = q.trim();
+		if (query === this.query && this.state.status !== "idle") return;
 		this.cancel();
 		this.query = query;
 		if (query.length < this.minChars) return this.set({ status: "idle" });

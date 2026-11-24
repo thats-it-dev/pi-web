@@ -344,7 +344,7 @@ export class PiApp extends LitElement {
 				?aside-fullscreen=${a.asideFullscreen}
 				aside-size=${a.asideSize}
 			>
-				<pi-sidebar slot="nav" .type=${this.sessionType} .list=${this.list} .currentId=${isSession(r) ? r.id : null}></pi-sidebar>
+				<pi-sidebar slot="nav" .api=${this.api} .type=${this.sessionType} .list=${this.list} .currentId=${isSession(r) ? r.id : null}></pi-sidebar>
 				${this.progress || shown
 					? html`<pi-aside
 							slot="aside"
