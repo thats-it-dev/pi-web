@@ -9,9 +9,9 @@ import superpowersSwitch, { bootstrap, buildManualSkills, forPi, initialState, p
 const entry = (on: boolean) => ({ type: "custom", customType: ENTRY_TYPE, data: { on } });
 
 test("savedState: the last saved switch on the branch, off by default", () => {
-	assert.equal(savedState([]), false);
-	assert.equal(savedState([entry(true)]), true);
-	assert.equal(savedState([entry(true), { type: "message" }, entry(false)]), false);
+	assert.equal(savedState([], {}), false);
+	assert.equal(savedState([entry(true)], {}), true);
+	assert.equal(savedState([entry(true), { type: "message" }, entry(false)], {}), false);
 });
 
 test("savedState: default on for a code child, off otherwise, an entry always wins", () => {
@@ -71,19 +71,7 @@ test("session start: a subagent child of a code session stays off and writes not
 });
 
 test("session start in a code child with an empty branch turns superpowers on", () => {
-	const handlers: Record<string, (e: any, c: any) => any> = {};
-	const saved: unknown[] = [];
-	const status: Record<string, string | undefined> = {};
-	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: () => {}, appendEntry: (t, d) => saved.push([t, d]) });
-	const ctx = { sessionManager: { getBranch: () => [] }, ui: { setStatus: (k: string, t: string | undefined) => (status[k] = t), notify: () => {} } };
-	const before = process.env.PI_WEB_SESSION_TYPE;
-	process.env.PI_WEB_SESSION_TYPE = "code";
-	try {
-		handlers.session_start({ reason: "startup" }, ctx);
-	} finally {
-		if (before === undefined) delete process.env.PI_WEB_SESSION_TYPE;
-		else process.env.PI_WEB_SESSION_TYPE = before;
-	}
+	const { saved, status } = startWith({ PI_WEB_SESSION_TYPE: "code" }, []);
 	assert.equal(status[STATUS_KEY], STATUS_ON);
 	assert.deepEqual(saved, [[ENTRY_TYPE, { on: true }], [FLOOR_ENTRY, { level: "medium" }]], "the default is written into the session");
 });
@@ -176,7 +164,14 @@ test("the switch: command saves and shows the state; off by default with no boot
 	const status: Record<string, string | undefined> = {};
 	const ctx = { sessionManager: { getBranch: () => [] }, ui: { setStatus: (k: string, t: string | undefined) => (status[k] = t), notify: () => {} } };
 	superpowersSwitch({ on: (e, h) => (handlers[e] = h), registerCommand: (_n, o) => (command = o.handler), appendEntry: (t, d) => saved.push([t, d]) });
-	handlers.session_start({ reason: "startup" }, ctx);
+	const keys = ["PI_WEB_SESSION_TYPE", "PI_SUBAGENT_CHILD"];
+	const before = keys.map((k) => process.env[k]);
+	for (const k of keys) delete process.env[k];
+	try {
+		handlers.session_start({ reason: "startup" }, ctx);
+	} finally {
+		keys.forEach((k, i) => (before[i] === undefined ? delete process.env[k] : (process.env[k] = before[i])));
+	}
 	assert.equal(status[STATUS_KEY], undefined);
 	assert.equal(handlers.context({ messages: [] }, ctx), undefined);
 	assert.deepEqual(saved, [], "a fresh chat with superpowers off writes nothing");

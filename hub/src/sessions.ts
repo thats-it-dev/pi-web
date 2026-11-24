@@ -12,7 +12,7 @@ import { historyFromText, parseEntries } from "../../shared/src/session-file.ts"
 
 export { historyFromText };
 
-export type FileSummary = Omit<SessionSummary, "live" | "handleKind" | "state"> & { file: string };
+export type FileSummary = Omit<SessionSummary, "live" | "handleKind" | "state" | "type"> & { file: string };
 
 export function sessionsDir(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
 	if (env.PI_CODING_AGENT_SESSION_DIR) return env.PI_CODING_AGENT_SESSION_DIR;
@@ -60,7 +60,6 @@ export function summarize(file: string, text: string, mtimeMs: number): FileSumm
 		createdAt: Date.parse(header.timestamp) || mtimeMs,
 		updatedAt: mtimeMs,
 		parentSession: header.parentSession ?? null,
-		type: "code",
 	};
 }
 
