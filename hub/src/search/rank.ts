@@ -1,17 +1,12 @@
 // Pure ranking helpers for session search: fusion, cosine top-k, query terms, snippets.
 
+import { cosine } from "./embedder.ts";
+
 export function rrf(lists: { id: number }[][], k = 60): { id: number; score: number }[] {
 	const scores = new Map<number, number>();
 	for (const list of lists) list.forEach((r, i) => scores.set(r.id, (scores.get(r.id) ?? 0) + 1 / (k + i + 1)));
 	// Map keeps insertion order and sort is stable, so ties stay in first-appearance order.
 	return [...scores].map(([id, score]) => ({ id, score })).sort((a, b) => b.score - a.score);
-}
-
-function cosine(a: Float32Array, b: Float32Array): number {
-	let dot = 0, na = 0, nb = 0;
-	const n = Math.min(a.length, b.length);
-	for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-	return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
 export function cosineTopK(query: Float32Array, rows: { id: number; vec: Float32Array }[], k: number): { id: number; score: number }[] {

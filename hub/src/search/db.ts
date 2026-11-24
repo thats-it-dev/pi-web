@@ -1,6 +1,7 @@
 import { renameSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Chunk } from "./chunks.ts";
+import { queryWords } from "./rank.ts";
 
 export interface ChunkRow extends Chunk {
 	id: number;
@@ -48,13 +49,9 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE OF text ON chunks BEGIN
 END;
 `;
 
-function terms(q: string): string[] {
-	return q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-}
-
-/** User text → FTS5 MATCH string: quoted terms ANDed, prefix on the last; null when no term survives. */
+/** User text → FTS5 MATCH string: quoted terms (queryWords: 1-char words dropped) ANDed, prefix on the last; null when no term survives. */
 export function ftsQuery(q: string, join = " "): string | null {
-	const t = terms(q);
+	const t = queryWords(q);
 	if (!t.length) return null;
 	return t.map((w, i) => `"${w}"${i === t.length - 1 ? "*" : ""}`).join(join);
 }
@@ -175,7 +172,7 @@ export class SearchDb {
 		const and = ftsQuery(query);
 		if (!and) return { hits: [], match: null };
 		const hits = run(and);
-		if (hits.length || terms(query).length < 2) return { hits, match: and };
+		if (hits.length || queryWords(query).length < 2) return { hits, match: and };
 		const or = ftsQuery(query, " OR ")!;
 		return { hits: run(or), match: or };
 	}

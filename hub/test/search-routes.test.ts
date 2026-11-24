@@ -42,6 +42,12 @@ const search = {
 	},
 };
 
+const failing = {
+	async query(): Promise<{ hits: RawHit[]; semantic: boolean }> {
+		throw new Error("search query timed out after 5000 ms");
+	},
+};
+
 const index = new SessionIndex(sessions);
 // sess-chat is a chat: its type comes from the registry's store, not the file.
 const types = { get: (id: string) => (id === "sess-chat" ? ("chat" as const) : ("code" as const)), set: () => {} };
@@ -51,8 +57,10 @@ const bare = createHubServer({ cfg, registry, index, version: "t", home: root, l
 const store = new QueryStore({ onChange: () => {} });
 const internal = createInternalServer({ store, search, listSessions: () => listSummaries(index, registry) });
 const internalBare = createInternalServer({ store });
+const hubFailing = createHubServer({ cfg, registry, index, version: "t", home: root, log: () => {}, search: failing });
+const internalFailing = createInternalServer({ store, search: failing, listSessions: () => listSummaries(index, registry) });
 const ports: Record<string, number> = {};
-const servers: Record<string, Server> = { hub, bare, internal, internalBare };
+const servers: Record<string, Server> = { hub, bare, internal, internalBare, hubFailing, internalFailing };
 
 before(async () => {
 	for (const [k, s] of Object.entries(servers)) {
@@ -121,6 +129,13 @@ test("internal GET /search passes exclude and composes the same hits", async () 
 	const short = await (await fetch(`http://127.0.0.1:${ports.internal}/search?q=x`)).json();
 	assert.deepEqual(short, { hits: [], semantic: false });
 	assert.equal(calls.length, 1);
+});
+
+test("a search that rejects (worker down or timed out) is a 500 on both routes", async () => {
+	const r = await call(ports.hubFailing, "GET", "/api/search?q=parser", GOOD);
+	assert.equal(r.status, 500);
+	const res = await fetch(`http://127.0.0.1:${ports.internalFailing}/search?q=parser`);
+	assert.equal(res.status, 500);
 });
 
 test("internal GET /search without the search dep is 404", async () => {

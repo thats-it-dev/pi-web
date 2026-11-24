@@ -32,6 +32,9 @@ test("fts: diacritics fold", () => {
 test("ftsQuery escapes punctuation and returns null for nothing usable", () => {
 	assert.equal(ftsQuery("??"), null);
 	assert.equal(ftsQuery('tk-shell "aside'), '"tk" "shell" "aside"*');
+	// the same word split as rank.ts queryWords: 1-char words are dropped
+	assert.equal(ftsQuery("a b"), null);
+	assert.equal(ftsQuery("x9 a hub"), '"x9" "hub"*');
 });
 
 test("replaceFile replaces, removeFile purges, files() reflects both", () => {
