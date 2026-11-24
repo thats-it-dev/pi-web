@@ -241,13 +241,13 @@ export class PiApp extends LitElement {
 		return this.renderRoot.querySelector("pi-session");
 	}
 
-	// The progress drawer sits on a history entry of its own, so Back closes it and leaves the chat where it is.
 	// Tapping "new" on the page that is already a new chat changes no hash, which is what closes the nav drawer.
 	private onNewSession = () => {
 		const shell = this.shell();
-		if (shell?.renderRoot.querySelector(".layout.nav-open")) shell.hide("nav"); // nav-open is the drawer only; a docked nav stays
+		if (shell?.navOpen) shell.hide("nav"); // navOpen is the drawer only; a docked nav stays
 	};
 
+	// The progress drawer sits on a history entry of its own, so Back closes it and leaves the chat where it is.
 	private onPanelChange = (e: Event) => {
 		const { panel, open, docked } = (e as CustomEvent<{ panel: Panel; open: boolean; docked: boolean }>).detail;
 		if (panel !== "aside") return;
