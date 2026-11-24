@@ -24,6 +24,14 @@ describe("HubApi", () => {
 		expect(await new HubApi("http://x").files("s1", "a b", ctl.signal)).toEqual({ files: [{ path: "a b.ts", dir: false }] });
 		expect(fetchMock).toHaveBeenCalledWith("http://x/api/sessions/s1/files?q=a%20b", { method: "GET", signal: ctl.signal });
 	});
+	it("searches sessions with the query escaped and the signal passed", async () => {
+		const body = { hits: [], semantic: false };
+		const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+		vi.stubGlobal("fetch", fetchMock);
+		const ctl = new AbortController();
+		expect(await new HubApi("http://x").search("hub restart", 8, ctl.signal)).toEqual(body);
+		expect(fetchMock).toHaveBeenCalledWith("http://x/api/search?q=hub%20restart&limit=8", { method: "GET", signal: ctl.signal });
+	});
 	it("turns hub errors into HubError with the hub's message", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "6 pi sessions are already running. Close one first." }), { status: 503 })));
 		await expect(new HubApi("http://x").createSession({ cwd: "~" })).rejects.toMatchObject({ status: 503, message: "6 pi sessions are already running. Close one first." });

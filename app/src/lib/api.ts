@@ -1,7 +1,7 @@
 import type { Goal } from "../../../shared/src/goal.ts";
 import type { RunReport } from "../../../shared/src/run-report.ts";
 import type { SubagentChild } from "../../../shared/src/progress.ts";
-import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SessionSummary, SessionType, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
+import type { AgentMessage, AppCommand, CommandResult, DefaultsInfo, HealthInfo, PushSubscriptionInfo, SearchResponse, SessionSummary, SessionType, ThinkingLevel, UpdateResult, UpdateStatus } from "../../../shared/src/protocol.ts";
 
 export class HubError extends Error {
 	status: number;
@@ -71,6 +71,9 @@ export class HubApi {
 	}
 	command(id: string, cmd: AppCommand) {
 		return this.req<{ result: CommandResult; sessionId: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/commands`, cmd);
+	}
+	search(q: string, limit: number, signal?: AbortSignal): Promise<SearchResponse> {
+		return this.req<SearchResponse>("GET", `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`, undefined, signal);
 	}
 	files(id: string, q: string, signal?: AbortSignal) {
 		return this.req<{ files: FileEntry[] }>("GET", `/api/sessions/${encodeURIComponent(id)}/files?q=${encodeURIComponent(q)}`, undefined, signal);
