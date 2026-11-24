@@ -283,3 +283,27 @@ describe("TL;DR line is hidden", () => {
 		expect(plain).toBe(flat(renderConversation(createConversation([{ role: "assistant", content: [{ type: "text", text: "just text" }], timestamp: 1 }] as never))));
 	});
 });
+
+describe("message ordinals", () => {
+	const marks = (c: ReturnType<typeof createConversation>) =>
+		[...flat(renderConversation(c)).matchAll(/class="(user|assistant)" data-ordinal=([^>\s]*)/g)].map((m) => `${m[1]}:${m[2]}`);
+
+	it("numbers user and assistant messages in order, skipping tool results", () => {
+		const conv = createConversation([
+			{ role: "user", content: "a", timestamp: 1 },
+			{ role: "assistant", content: [{ type: "toolCall", id: "t", name: "bash", arguments: {} }], timestamp: 2 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "x" }], timestamp: 3 },
+			{ role: "assistant", content: [{ type: "text", text: "b" }], timestamp: 4 },
+			{ role: "user", content: "c", timestamp: 5 },
+		] as never);
+		expect(marks(conv)).toEqual(["user:0", "assistant:1", "assistant:2", "user:3"]);
+	});
+
+	it("gives the streaming partial no ordinal", () => {
+		const conv = createConversation([{ role: "user", content: "a", timestamp: 1 }] as never);
+		conv.partial = { role: "assistant", content: [{ type: "text", text: "hi" }], timestamp: 2 } as never;
+		const out = marks(conv);
+		expect(out[0]).toBe("user:0");
+		expect(out[1]).not.toMatch(/:\d/);
+	});
+});

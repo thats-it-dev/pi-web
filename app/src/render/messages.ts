@@ -39,15 +39,17 @@ function thumbs(images: ImageContent[], loader: ImageLoader | null, alt: string)
 export function renderConversation(conv: Conversation, loader: ImageLoader | null = null): TemplateResult {
 	const results: Results = new Map();
 	for (const m of conv.messages) if (m.role === "toolResult" && typeof m.toolCallId === "string") results.set(m.toolCallId, m);
-	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools, loader))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true, loader) : nothing}`;
+	// A message's ordinal counts user/assistant messages only, in order; the hub's search index counts the same way.
+	let ordinal = 0;
+	return html`${conv.messages.map((m) => renderMessage(m, results, conv.tools, loader, m.role === "user" || m.role === "assistant" ? ordinal++ : null))}${conv.partial ? renderAssistant(conv.partial, results, conv.tools, true, loader, null) : nothing}`;
 }
 
-function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, loader: ImageLoader | null) {
+function renderMessage(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, loader: ImageLoader | null, ordinal: number | null) {
 	switch (m.role) {
 		case "user":
-			return renderUser(m, loader);
+			return renderUser(m, loader, ordinal);
 		case "assistant":
-			return renderAssistant(m, results, tools, false, loader);
+			return renderAssistant(m, results, tools, false, loader, ordinal);
 		case "bashExecution":
 			return renderBash(m);
 		case "compactionSummary":
@@ -64,24 +66,24 @@ function renderMessage(m: AgentMessage, results: Results, tools: Record<string, 
 // Lucide icon (ISC): paperclip.
 const CLIP = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>`;
 
-function renderUser(m: AgentMessage, loader: ImageLoader | null) {
+function renderUser(m: AgentMessage, loader: ImageLoader | null, ordinal: number | null) {
 	const images = imagesOf(m.content);
 	// A message that carried files: the hub's attachments block becomes chips, and its inlined contents stay out of the bubble.
 	const attached = parseAttachments(blocksText(m.content));
-	return html`<div class="user">${attached ? attached.text : blocksText(m.content)}${
+	return html`<div class="user" data-ordinal=${ordinal ?? nothing}>${attached ? attached.text : blocksText(m.content)}${
 		attached?.files.length
 			? html`<div class="files">${attached.files.map((f) => html`<span class="chip file" title=${f.path}>${CLIP}<span class="name">${f.name}</span><span class="size">${f.sizeLabel}</span></span>`)}</div>`
 			: nothing
 	}${images.length ? html`<div class="imgs">${thumbs(images, loader, "attached image")}</div>` : nothing}</div>`;
 }
 
-function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null) {
+function renderAssistant(m: AgentMessage, results: Results, tools: Record<string, ToolRun>, streaming: boolean, loader: ImageLoader | null, ordinal: number | null) {
 	const blocks = Array.isArray(m.content) ? m.content : [];
 	// The level this reply was actually sent at (a router like flash-auto picks it per prompt); pi records it on message_end.
 	const level = typeof m.thinkingLevel === "string" ? m.thinkingLevel : null;
 	// The agent's closing TL;DR line feeds push notifications; the chat doesn't repeat it.
 	const lastText = blocks.findLastIndex((b) => b?.type === "text");
-	return html`<div class="assistant">
+	return html`<div class="assistant" data-ordinal=${ordinal ?? nothing}>
 		${blocks.map((b, i) => {
 			if (!b) return nothing;
 			if (b.type === "thinking") {
