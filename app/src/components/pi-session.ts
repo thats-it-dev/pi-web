@@ -1,13 +1,13 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { sharedStyles, toast } from "@thatsit/kit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import type { AppCommand, Capabilities, CommandResult, FileInput, ForkPoint, ImageInput, PromptMode, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
+import type { AppCommand, Capabilities, CommandResult, FileInput, ForkPoint, ImageInput, PromptMode, SessionType, Snapshot, StreamMessage } from "../../../shared/src/protocol.ts";
 import { MESSAGE_SWALLOWED, swallowed } from "../lib/prompt-result.ts";
 import { type PreviewState, derivePreview } from "../../../shared/src/preview.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 import { stripTldr } from "../../../shared/src/tldr.ts";
 import type { HubApi } from "../lib/api.ts";
-import { takeHandoff } from "../lib/draft.ts";
+import { superpowersCommand, takeHandoff } from "../lib/draft.ts";
 import { DropTarget, dragHasFiles } from "../lib/drop.ts";
 import { abbreviateCwd, sessionTitle } from "../lib/format.ts";
 import type { ImageLoader } from "../lib/image-loader.ts";
@@ -348,7 +348,9 @@ export class PiSession extends LitElement {
 		const msg = s?.snapshot ? takeHandoff(s.id) : null;
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
-		if (msg.superpowers && !superpowersOn(s.snapshot)) await this.run({ type: "set_superpowers", on: true });
+		const status = s.snapshot.statuses?.superpowers;
+		const on = superpowersCommand(msg.superpowers, status === undefined ? undefined : superpowersOn(s.snapshot), msg.type);
+		if (on !== null) await this.run({ type: "set_superpowers", on });
 		await this.send(msg.text, msg.images, msg.files, "send");
 	}
 
@@ -646,6 +648,11 @@ export class PiSession extends LitElement {
 		});
 	}
 
+	// The session's type, as the hub lists it; sessions from before types are code.
+	private get sessionType(): SessionType {
+		return this.list?.sessions.find((s) => s.id === this.sessionId)?.type ?? "code";
+	}
+
 	private renderMenu(snap: Snapshot) {
 		const step = this.menuStep;
 		const model = snap.state.model;
@@ -655,6 +662,7 @@ export class PiSession extends LitElement {
 				canImages: Boolean(model?.input.includes("image")),
 				cwd: abbreviateCwd(snap.cwd, this.home),
 				cwdFixed: true, // a running session's folder can't change
+				cwdHidden: this.sessionType === "chat", // a chat has no folder to show
 				model: model ? `${model.name} · ${snap.state.thinkingLevel}` : "—",
 				approval: snap.capabilities.dialogs === "terminal" ? null : snap.approvalMode,
 				superpowers: superpowersOn(snap),

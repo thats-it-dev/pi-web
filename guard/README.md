@@ -75,6 +75,10 @@ an async `subagent` run it launched or revived has not sent its `subagent-notify
 then, and the done message starts the next one.
 At most 2 per user prompt.
 
+Chat sessions (`PI_WEB_SESSION_TYPE=chat`, set by the hub) keep every block and the merge nudge, and app briefs still
+attach. The stall, to-do and PR nudges and the preview note are left out: they belong to the code workflow, not a
+conversation.
+
 ## The app's rules
 
 The first tool call of a session that goes through into an app (the same calls as above, child sessions included) gets

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { previewNote, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -25,6 +25,34 @@ const stalled = [
 	{ role: "toolResult", content: [{ type: "text", text: "ok" }] },
 	{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }] },
 ];
+
+const chatEnv = { PI_WEB_SESSION_TYPE: "chat" };
+
+test("a chat session gets no stall, to-do or PR nudge, but still the merge nudge", () => {
+	const settle = (messages: unknown[], ctx: unknown = { cwd: "/", sessionManager: { getBranch: () => [] } }, gitNeedsPr: (d: string) => boolean = () => false) =>
+		load(gitNeedsPr, chatEnv).agent_before_settle({ outcome: "completed", context: { canContinue: false, contextMessages: messages } }, ctx);
+	assert.equal(settle(stalled), undefined, "no stall nudge");
+	const keeb = join(homedir(), "workspace", "apps", "keeb");
+	const finished = [
+		{ role: "user", content: "fix it" },
+		{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "edit", arguments: { path: `${keeb}/src/app-main.ts` } }] },
+		{ role: "toolResult", content: [{ type: "text", text: "ok" }] },
+		{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done. Next: open the PR with these commands. " + "x".repeat(400) }] },
+	];
+	const branch = [{ type: "message", message: { role: "toolResult", toolName: "todo", details: { nextId: 3, tasks: [{ id: 2, subject: "b", status: "in_progress" }] } } }];
+	assert.equal(settle(finished, { cwd: "/", sessionManager: { getBranch: () => branch } }), undefined, "no to-do nudge");
+	assert.equal(settle(finished, { cwd: "/", sessionManager: { getBranch: () => [] } }, (d) => d === keeb), undefined, "no PR nudge");
+	const handed = [{ role: "user", content: "ship it" }, { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Run this:\n\n```\ngh pr merge 2 --merge\n```" }] }];
+	const r = settle(handed);
+	assert.equal(r.continue, true);
+	assert.equal(r.entries[0].customType, MERGE_NUDGE_TYPE);
+});
+
+test("a chat session is still blocked from pushing and merging", () => {
+	const h = load(() => false, chatEnv);
+	assert.deepEqual(h.tool_call({ toolName: "bash", input: { command: "cd ~/workspace/apps/keeb && git push" } }, { cwd: "/" }), { block: true, reason: REASONS.push });
+	assert.deepEqual(h.tool_call({ toolName: "bash", input: { command: "gh pr merge 3" } }, { cwd: "/" }), { block: true, reason: REASONS.merge });
+});
 
 test("a stalled run is continued, though pi reports canContinue false before the nudge is added", () => {
 	const r = load().agent_before_settle({ outcome: "completed", context: { canContinue: false, contextMessages: stalled } }, { cwd: "/" });
@@ -874,6 +902,18 @@ test("a reviewer or worker launch runs on the session's model when the configure
 		const h = load(() => false, { HOME: home });
 		const ctx = ctxOf(home, gated(dir));
 		h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx);
+		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 0);
+	});
+
+	test("a chat session never gets the preview note", () => {
+		const { home, dir } = appRepo();
+		writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+		const h = load(() => false, { HOME: home, PI_WEB_SESSION_TYPE: "chat" });
+		const before = ctxOf(home, ready(dir));
+		assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "v1", input: { ...reviewCall } }, before), undefined);
+		assert.equal(notes(h.tool_result(reviewResult("v1"), before), dir, "review"), 0);
+		const ctx = ctxOf(home, gated(dir));
+		assert.equal(h.tool_call({ toolName: "bash", toolCallId: "r1", input: { command: prCmd(dir) } }, ctx), undefined);
 		assert.equal(notes(h.tool_result(result("r1", prCmd(dir)), ctx), dir), 0);
 	});
 

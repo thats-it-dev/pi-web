@@ -1,5 +1,5 @@
 import { summarizeAttachments } from "../../../shared/src/attachments.ts";
-import type { AgentMessage, SessionSummary } from "../../../shared/src/protocol.ts";
+import type { AgentMessage, SessionSummary, SessionType } from "../../../shared/src/protocol.ts";
 import { contentText } from "../../../shared/src/reducer.ts";
 
 const trimZero = (s: string) => s.replace(/\.0$/, "");
@@ -110,4 +110,12 @@ export function blocksText(content: unknown): string {
 export function formatElapsed(ms: number): string {
 	const s = Math.max(0, Math.floor(ms / 1000));
 	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+export function filterByType(sessions: SessionSummary[], type: SessionType): SessionSummary[] {
+	return sessions.filter((s) => (s.type ?? "code") === type);
+}
+
+export function newSessionLabel(type: SessionType): string {
+	return type === "chat" ? "new chat" : "new code session";
 }

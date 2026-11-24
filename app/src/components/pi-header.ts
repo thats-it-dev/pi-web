@@ -4,7 +4,6 @@ import { formatCost, formatTokens } from "../lib/format.ts";
 import { contextLabel, speedLabel } from "../lib/live-stats.ts";
 import type { SessionStore } from "../lib/session-store.ts";
 import { headerStatus } from "../lib/status.ts";
-import { newChatButton, newChatStyles } from "../render/new-chat.ts";
 
 export class PiHeader extends LitElement {
 	static properties = { store: { attribute: false }, draft: { attribute: false }, version: { attribute: false }, heading: { attribute: false }, tucked: { type: Boolean }, previewLive: { attribute: false } };
@@ -17,7 +16,6 @@ export class PiHeader extends LitElement {
 
 	static styles = [
 		sharedStyles,
-		newChatStyles,
 		css`
 			/* tk-header is the sticky bar; this host must not box it in, or sticky would stick within it */
 			:host { display: contents; }
@@ -44,7 +42,7 @@ export class PiHeader extends LitElement {
 	}
 
 	render() {
-		if (this.draft) return this.frame("new chat", 0, `0 / ${formatTokens(this.draft.contextWindow)} (0%) · — t/s`, null);
+		if (this.draft) return this.frame(this.heading || "new chat", 0, `0 / ${formatTokens(this.draft.contextWindow)} (0%) · — t/s`, null);
 		const s = this.store;
 		if (!s) return nothing;
 		const snap = s.snapshot;
@@ -68,7 +66,6 @@ export class PiHeader extends LitElement {
 	private frame(heading: string, pct: number | null, nums: string, status: string | null) {
 		return html`<tk-header ?tucked=${this.tucked} menu-label="Open sessions" aside-label=${this.previewLive ? "Progress, preview open" : "Progress"} aside-badge=${this.previewLive ? "•" : ""}>
 			<h1 slot="title">${heading}</h1>
-			${newChatButton()}
 			<button class="l2" aria-label="Session stats" @click=${() => this.emit("pi-open-sheet", "stats")}>
 				<span class="meter ${pct != null && pct >= 80 ? "hot" : ""}"><i style=${`width:${Math.min(100, Math.max(0, pct ?? 0))}%`}></i></span>
 				<span>${nums}</span>

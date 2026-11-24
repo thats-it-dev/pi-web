@@ -57,7 +57,7 @@ const catalog = { get: async () => catalogNow };
 const lastModel = new LastModelStore(join(root, "last-model.json"));
 
 const handles = new Map<string, FakeHandle>();
-const starts: Array<{ cwd: string; sessionFile?: string; model?: ModelChoice | null }> = [];
+const starts: Array<{ cwd: string; sessionFile?: string; model?: ModelChoice | null; type?: string }> = [];
 let n = 0;
 let nextId: string | null = null; // forces the id of the next started handle
 const index = new SessionIndex(sessions);
@@ -185,6 +185,44 @@ test("a new session starts on the requested model and records it", async () => {
 	assert.deepEqual(starts.at(-1)?.model, { provider: "fake", modelId: "fake-a", thinking: "high" });
 	assert.equal(handles.get(a.body.sessionId)?.snapshot().state.model?.id, "fake-a");
 	assert.deepEqual(lastModel.get(), { provider: "fake", modelId: "fake-a", thinking: "high" });
+});
+
+test("POST /api/sessions type chat creates in home and lists as chat", async () => {
+	const elsewhere = join(root, "elsewhere");
+	mkdirSync(elsewhere, { recursive: true });
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: elsewhere, type: "chat" });
+	assert.equal(r.status, 200);
+	assert.equal(starts.at(-1)?.cwd, work, "chat starts in home, whatever the body said");
+	assert.equal(starts.at(-1)?.type, "chat");
+	const list = await call(port, "GET", "/api/sessions", GOOD);
+	assert.equal(list.body.sessions.find((s: { id: string }) => s.id === r.body.sessionId)?.type, "chat");
+	const missing = await call(port, "POST", "/api/sessions", GOOD, { cwd: join(root, "nope"), type: "chat" });
+	assert.equal(missing.status, 200, "a chat ignores the body's folder");
+});
+
+test("POST without type is code; existing disk sessions list as code", async () => {
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work });
+	assert.equal(starts.at(-1)?.type, "code");
+	const list = await call(port, "GET", "/api/sessions", GOOD);
+	assert.equal(list.body.sessions.find((s: { id: string }) => s.id === r.body.sessionId)?.type, "code");
+	assert.equal(list.body.sessions.find((s: { id: string }) => s.id === "disk-1")?.type, "code");
+});
+
+test("a child of a chat session lists as chat through parentSession", async () => {
+	const chat = await call(port, "POST", "/api/sessions", GOOD, { type: "chat" });
+	writeFileSync(
+		join(sessions, "--work--", "2026-10-08T00-00-00-000Z_child-1.jsonl"),
+		`${JSON.stringify({ type: "session", version: 3, id: "child-1", timestamp: "2026-10-08T00:00:00.000Z", cwd: work, parentSession: chat.body.sessionId })}\n` +
+			`${JSON.stringify({ type: "message", id: "u1", parentId: null, timestamp: "x", message: { role: "user", content: "forked", timestamp: 1 } })}\n`,
+	);
+	const list = await call(port, "GET", "/api/sessions", GOOD);
+	assert.equal(list.body.sessions.find((s: { id: string }) => s.id === "child-1")?.type, "chat");
+});
+
+test("type is validated: 'bogus' is code, not a 400", async () => {
+	const r = await call(port, "POST", "/api/sessions", GOOD, { cwd: work, type: "bogus" });
+	assert.equal(r.status, 200);
+	assert.equal(starts.at(-1)?.type, "code");
 });
 
 test("an unknown model is a 400", async () => {

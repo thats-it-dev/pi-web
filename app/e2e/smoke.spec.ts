@@ -25,6 +25,12 @@ async function pickFolder(page: Page, folder: string) {
 	await page.keyboard.press("Escape");
 }
 
+// The panel's new-session button (the header has none); a phone opens the drawer first.
+async function newSessionFromPanel(page: Page, isMobile: boolean) {
+	if (isMobile) await page.getByRole("button", { name: "Open sessions" }).click();
+	await page.locator("pi-sidebar .new-session").click();
+}
+
 async function pickDraftModel(page: Page, name: string) {
 	await expect(page.getByRole("button", { name: /^Model Fake/ })).toBeVisible();
 	await page.getByRole("button", { name: "Chat options" }).click();
@@ -41,7 +47,7 @@ const noSessions = (page: Page) =>
 test("launch with no route opens a new chat when nothing is recent", async ({ page }) => {
 	await noSessions(page);
 	await page.goto("/");
-	await expect(page.getByRole("heading", { name: "new chat" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "new code session" })).toBeVisible();
 	await expect(page).toHaveURL(/#\/new$/);
 });
 
@@ -67,7 +73,7 @@ test("new chat: a bad folder keeps the message and says why", async ({ page }) =
 	await expect(page).toHaveURL(/#\/new$/);
 });
 
-test("new chat: the model picked in the draft is the one pi starts with, and the next new chat remembers it", async ({ page }) => {
+test("new chat: the model picked in the draft is the one pi starts with, and the next new chat remembers it", async ({ page, isMobile }) => {
 	// Both ways round, so the hub is left on Fake A (pi's default) for the tests after this one.
 	await page.goto("/#/new");
 	for (const name of ["Fake B", "Fake A"]) {
@@ -77,7 +83,7 @@ test("new chat: the model picked in the draft is the one pi starts with, and the
 		await expect(page).toHaveURL(/#\/s\//);
 		await expect(page.locator("pi-messages")).toContainText("Hello world");
 		await expect(page.getByRole("button", { name: new RegExp(`^Model ${name}`) })).toBeVisible();
-		await page.locator("pi-header").getByRole("button", { name: "New chat" }).click();
+		await newSessionFromPanel(page, isMobile);
 		await expect(page).toHaveURL(/#\/new$/);
 		await expect(page.getByRole("button", { name: new RegExp(`^Model ${name}`) })).toBeVisible();
 	}

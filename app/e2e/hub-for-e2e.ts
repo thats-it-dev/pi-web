@@ -25,8 +25,10 @@ const model = await startFakeModel((req) => {
 // The preview tool needs tailscale serve, so a running preview's status is faked: when the hub resumes the live
 // preview session, it reports `preview` in its statuses as the bridge does while a preview server runs.
 const PREVIEW_STATUS = `export default (pi) => pi.on("session_start", (_e, ctx) => { if (process.env.PI_WEB === "1" && ctx.sessionManager.getSessionId() === "e2e-preview-live") ctx.ui.setStatus("preview", "preview fret :10600"); });`;
+// The superpowers extension, cut down: /superpowers on|off sets its status, shown only while on (off = no status, as the real one).
+const SUPERPOWERS = `export default (pi) => pi.registerCommand("superpowers", { description: "fake", handler: async (args, ctx) => ctx.ui.setStatus("superpowers", args.trim() === "on" ? "superpowers on" : undefined) });`;
 // Manual /compact needs older turns to summarize; auto-compaction stays off so only the test compacts.
-const pi = makePiEnv({ modelUrl: model.url, extensions: { "bridge.ts": `import bridge from ${JSON.stringify(BRIDGE)};\nexport default (pi) => (process.env.PI_WEB === "1" ? bridge(pi) : undefined);`, "preview-status.ts": PREVIEW_STATUS }, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
+const pi = makePiEnv({ modelUrl: model.url, extensions: { "bridge.ts": `import bridge from ${JSON.stringify(BRIDGE)};\nexport default (pi) => (process.env.PI_WEB === "1" ? bridge(pi) : undefined);`, "preview-status.ts": PREVIEW_STATUS, "superpowers.ts": SUPERPOWERS }, settings: { compaction: { enabled: false, keepRecentTokens: 10 } } });
 rmSync(WORKDIR, { recursive: true, force: true });
 mkdirSync(join(WORKDIR, "docs"), { recursive: true });
 writeFileSync(join(WORKDIR, "docs", "notes.md"), "notes\n"); // for the @ mention test
@@ -159,6 +161,21 @@ writeFileSync(E2E_ENV_FILE, JSON.stringify({ piBin: pi.piBin, agentDir: pi.agent
 // New chats start in ~: make that a throwaway folder, not the real home.
 const home = join(pi.root, "home");
 mkdirSync(home);
+// A chat session (it lives in ~) and the hub's record of it: sessions not in session-types.json are code.
+{
+	const t = "2026-11-08T22:30:00.000Z";
+	writeFileSync(
+		join(seedDir, "chat.jsonl"),
+		[
+			{ type: "session", version: 3, id: "e2e-chat", timestamp: t, cwd: home },
+			{ type: "message", id: "u1", parentId: null, timestamp: t, message: { role: "user", content: [{ type: "text", text: "chatty hello" }], timestamp: 1 } },
+			{ type: "message", id: "a1", parentId: "u1", timestamp: t, message: { role: "assistant", content: [{ type: "text", text: "Hi there" }], timestamp: 2 } },
+		]
+			.map((e) => JSON.stringify(e))
+			.join("\n") + "\n",
+	);
+	writeFileSync(join(dataDir, "session-types.json"), JSON.stringify({ "e2e-chat": "chat" }));
+}
 Object.assign(process.env, pi.env, { PI_WEB_DATA_DIR: dataDir, HOME: home });
 process.on("exit", () => pi.cleanup());
 await import("../../hub/src/main.ts");

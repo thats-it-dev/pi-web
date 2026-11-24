@@ -425,6 +425,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// A pi-subagents child runs this extension too. The blocking rules hold there; the nudges (stall, to-dos,
 	// PR) are the parent session's business — a worker told to open a PR would fight its brief.
 	const child = !!env.PI_SUBAGENT_CHILD;
+	// A pi-web chat session: the blocks hold and a merge command still gets sent back, but the ritual nudges
+	// (stall, to-dos, PR, preview note) are code-session workflow and stay out of a conversation.
+	const chat = env.PI_WEB_SESSION_TYPE === "chat";
 	// With the agent pair in pi's settings, the parent session orchestrates and never edits app code (rules.ts).
 	const orchestrator = !child && pairSettings(readSettings(home));
 	const rewrites = new Set<string>();
@@ -442,7 +445,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const addNote = (id: string, text: string) => notes.set(id, [...(notes.get(id) ?? []), text]);
 	// Changed UI with no live preview opened: the note goes on this call's result, once per session, never in a child.
 	const previewNudge = (id: string, dir: string, when: "review" | "pr", branch: () => unknown[], cwd: string) => {
-		if (child || previewNudged || previewOpened(branch(), dir, cwd, home) || !uiChanged(dir)) return;
+		if (child || chat || previewNudged || previewOpened(branch(), dir, cwd, home) || !uiChanged(dir)) return;
 		previewNudged = true;
 		addNote(id, previewNote(dir, when));
 	};
@@ -606,6 +609,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		const messages = event.context.contextMessages ?? [];
 		// A reply that hands Michael a merge command is wrong whatever else happened in the run, so it goes first.
 		if (shouldNudgeMerge(messages)) return { entries: [{ type: "custom_message", customType: MERGE_NUDGE_TYPE, content: MERGE_NUDGE, display: true }], continue: true };
+		if (chat) return undefined;
 		if (shouldNudge(messages)) return { entries: [{ type: "custom_message", customType: NUDGE_TYPE, content: NUDGE, display: true }], continue: true };
 		// The branch, not the context: after a compaction the last todo result is no longer in the context.
 		const open = openTodos(ctx.sessionManager?.getBranch() ?? []);

@@ -3,6 +3,9 @@
 
 const HUB_KEY = "pi-web:hub";
 const THEME_KEY = "pi-web:theme";
+const TYPE_KEY = "pi-web:session-type";
+
+import type { SessionType } from "../../../shared/src/protocol.ts";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -52,4 +55,12 @@ export function setTheme(pref: ThemePref): void {
 	const dark = pref === "dark" || (pref === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
 	document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 	for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", dark ? "#171717" : "#f1f1f1"); // the status bar's color, as in theme-init.js
+}
+
+export function getSessionType(): SessionType {
+	return read(TYPE_KEY) === "chat" ? "chat" : "code";
+}
+
+export function setSessionType(t: SessionType): void {
+	write(TYPE_KEY, t);
 }

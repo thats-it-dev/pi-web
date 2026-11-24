@@ -21,6 +21,7 @@ import { gitUpdater } from "./update.ts";
 import { attachWatchStream } from "./watch-stream.ts";
 import { WatchService } from "./watch.ts";
 import { SessionIndex, sessionsDir } from "./sessions.ts";
+import { SessionTypeStore } from "./session-types.ts";
 
 const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
@@ -41,12 +42,14 @@ mkdirSync(exportDir, { recursive: true });
 mkdirSync(join(cfg.dataDir, "index"), { recursive: true }); // webhook drop folder
 const index = new SessionIndex(sessionsDir());
 const lastModel = new LastModelStore(join(cfg.dataDir, "last-model.json"));
+const types = new SessionTypeStore(join(cfg.dataDir, "session-types.json"));
 const catalog = new ModelCatalog({ piBin: cfg.piBin });
 const registry = new Registry({
 	factory: { startRpc: (o) => RpcHandle.start({ ...o, piBin: cfg.piBin, exportDir, approvalMode: cfg.approvalMode, uploadsDir, onModelPicked: (c) => lastModel.set(c) }) },
 	lookup: index,
 	maxHeadless: cfg.maxHeadless,
 	idleMs: cfg.idleMinutes * 60_000,
+	types,
 });
 setInterval(() => registry.reap(), 60_000).unref();
 const push = new PushStore({ dataDir: cfg.dataDir, subject: cfg.allowedOrigins[0] ?? "https://pi.thatsit.app" });

@@ -10,6 +10,7 @@ export interface ChatMenuView {
 	canImages: boolean;
 	cwd: string; // as shown: the caller abbreviates it
 	cwdFixed: boolean;
+	cwdHidden: boolean; // no folder row at all (chats have no folder)
 	model: string; // "name · thinking"
 	approval: ApprovalMode | null;
 	superpowers: boolean; // the superpowers skills run on their own (on) or only by /skill:<name> (off)
@@ -45,10 +46,13 @@ export function menuRows(v: ChatMenuView): MenuRow[] {
 	const rows: MenuRow[] = [];
 	if (v.canImages) rows.push({ key: "attach", label: "attach image", value: "", disabled: false });
 	rows.push({ key: "file", label: "attach file", value: "", disabled: false });
+	if (!v.cwdHidden)
+		rows.push(
+			v.cwdFixed
+				? { key: "folder", label: "folder", value: v.cwd, disabled: true, hint: FOLDER_FIXED_HINT }
+				: { key: "folder", label: "folder", value: v.cwd, disabled: false },
+		);
 	rows.push(
-		v.cwdFixed
-			? { key: "folder", label: "folder", value: v.cwd, disabled: true, hint: FOLDER_FIXED_HINT }
-			: { key: "folder", label: "folder", value: v.cwd, disabled: false },
 		{ key: "model", label: "model", value: v.model, disabled: false },
 		{ key: "approvals", label: "approvals", value: v.approval ?? "—", disabled: false },
 		{ key: "superpowers", label: "superpowers", value: v.superpowers ? "on" : "off", disabled: false, toggle: true, hint: v.superpowers ? "pi uses the skills on its own" : "only when you type /skill:<name>" },

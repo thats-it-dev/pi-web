@@ -6,6 +6,9 @@ import { html, svg as svgTag } from "lit";
 const svg = (body: ReturnType<typeof svgTag>) =>
 	html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
+export const CODE_ICON = svg(svgTag`<path d="m16 18 6-6-6-6" /><path d="m8 6-6 6 6 6" />`);
+export const MESSAGE_CIRCLE_ICON = svg(svgTag`<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />`);
+export const SQUARE_PEN_ICON = svg(svgTag`<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />`);
 export const X_ICON = svg(svgTag`<path d="M18 6 6 18" /><path d="m6 6 12 12" />`);
 export const MENU_ICON = svg(svgTag`<path d="M4 6h16" /><path d="M4 12h16" /><path d="M4 18h16" />`);
 export const PANEL_LEFT_ICON = svg(svgTag`<rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" />`);
@@ -90,6 +93,7 @@ export const ICONS: Record<string, ReturnType<typeof svg>> = {
 	"circle-help": HELP_ICON,
 	"circle-x": X_CIRCLE_ICON,
 	"clock": CLOCK_ICON,
+	"code": CODE_ICON,
 	"copy": COPY_ICON,
 	"download": DOWNLOAD_ICON,
 	"ellipsis": MORE_ICON,
@@ -111,6 +115,7 @@ export const ICONS: Record<string, ReturnType<typeof svg>> = {
 	"mail": MAIL_ICON,
 	"maximize-2": EXPAND_ICON,
 	"menu": MENU_ICON,
+	"message-circle": MESSAGE_CIRCLE_ICON,
 	"mic": MIC_ICON,
 	"minimize-2": COLLAPSE_ICON,
 	"minus": MINUS_ICON,
@@ -127,6 +132,7 @@ export const ICONS: Record<string, ReturnType<typeof svg>> = {
 	"settings": SETTINGS_ICON,
 	"share-2": SHARE_ICON,
 	"square": SQUARE_ICON,
+	"square-pen": SQUARE_PEN_ICON,
 	"star": STAR_ICON,
 	"sun": SUN_ICON,
 	"trash-2": TRASH_ICON,

@@ -1,6 +1,7 @@
 import { LitElement, type PropertyValues, css, html, nothing } from "lit";
 import { ARROW_LEFT_ICON, type Panel, type TkShell, sharedStyles } from "@thatsit/kit";
 import type { PreviewKind, PreviewState } from "../../../shared/src/preview.ts";
+import type { SessionType } from "../../../shared/src/protocol.ts";
 import { HubApi } from "../lib/api.ts";
 import { type AsideTab, isFreshArrival, nextTab, shellAttrs, shownPreview, snapSize } from "../lib/aside-state.ts";
 import { launchRoute } from "../lib/launch.ts";
@@ -9,7 +10,7 @@ import { type AsideSize, PHONE_MAX_W, type PreviewMode, TABLET_MAX_W, readTab } 
 import type { ProgressStore } from "../lib/progress-store.ts";
 import { browserPushEnv, resyncPush } from "../lib/push.ts";
 import { type Route, hrefFor, parseRoute } from "../lib/route.ts";
-import { getHubUrl } from "../lib/settings.ts";
+import { getHubUrl, getSessionType, setSessionType } from "../lib/settings.ts";
 import "./pi-aside.ts";
 import "./pi-new-chat.ts";
 import "./pi-session.ts";
@@ -34,7 +35,9 @@ export class PiApp extends LitElement {
 		mode: { state: true },
 		finePointer: { state: true },
 		asideOpen: { state: true },
+		sessionType: { state: true },
 	};
+	declare sessionType: SessionType;
 	declare route: Route;
 	declare api: HubApi | null;
 	declare list: ListStore | null;
@@ -87,6 +90,7 @@ export class PiApp extends LitElement {
 		this.mode = this.computeMode();
 		this.finePointer = this.fineMq.matches;
 		this.asideOpen = false;
+		this.sessionType = getSessionType();
 	}
 
 	private computeMode(): PreviewMode {
@@ -110,6 +114,8 @@ export class PiApp extends LitElement {
 		window.addEventListener("hashchange", this.onHash);
 		this.addEventListener("pi-route-replaced", this.onRouteReplaced);
 		this.addEventListener("pi-progress", this.onProgress);
+		this.addEventListener("pi-session-type", this.onSessionType);
+		this.addEventListener("pi-new-session", this.onNewSession);
 		this.addEventListener("tk-panel-change", this.onPanelChange);
 		this.addEventListener("tk-aside-resize", this.onAsideResize);
 		this.addEventListener("pi-preview", this.onPreview);
@@ -124,6 +130,8 @@ export class PiApp extends LitElement {
 		window.removeEventListener("hashchange", this.onHash);
 		this.removeEventListener("pi-route-replaced", this.onRouteReplaced);
 		this.removeEventListener("pi-progress", this.onProgress);
+		this.removeEventListener("pi-session-type", this.onSessionType);
+		this.removeEventListener("pi-new-session", this.onNewSession);
 		this.removeEventListener("tk-panel-change", this.onPanelChange);
 		this.removeEventListener("tk-aside-resize", this.onAsideResize);
 		this.removeEventListener("pi-preview", this.onPreview);
@@ -215,6 +223,12 @@ export class PiApp extends LitElement {
 		return { derived: this.preview, pages: this.pages, tab: this.tab, hasProgress: this.progress !== null, width: window.innerWidth, arrived: false, engaged: this.engaged };
 	}
 
+	private onSessionType = (e: Event) => {
+		const t = (e as CustomEvent<{ type: SessionType }>).detail.type;
+		setSessionType(t);
+		this.sessionType = t;
+	};
+
 	private onProgress = (e: Event) => {
 		this.progress = (e as CustomEvent<{ store: ProgressStore | null }>).detail.store;
 	};
@@ -226,6 +240,12 @@ export class PiApp extends LitElement {
 	private session(): PiSession | null {
 		return this.renderRoot.querySelector("pi-session");
 	}
+
+	// Tapping "new" on the page that is already a new chat changes no hash, which is what closes the nav drawer.
+	private onNewSession = () => {
+		const shell = this.shell();
+		if (shell?.navOpen) shell.hide("nav"); // navOpen is the drawer only; a docked nav stays
+	};
 
 	// The progress drawer sits on a history entry of its own, so Back closes it and leaves the chat where it is.
 	private onPanelChange = (e: Event) => {
@@ -276,7 +296,7 @@ export class PiApp extends LitElement {
 	private launch = () => {
 		const list = this.list;
 		if (this.route.name !== "home" || !list?.loaded) return;
-		const r = launchRoute(list.sessions, Date.now());
+		const r = launchRoute(list.sessions, Date.now(), this.sessionType);
 		history.replaceState(null, "", hrefFor(r));
 		this.route = r;
 	};
@@ -324,7 +344,7 @@ export class PiApp extends LitElement {
 				?aside-fullscreen=${a.asideFullscreen}
 				aside-size=${a.asideSize}
 			>
-				<pi-sidebar slot="nav" .list=${this.list} .currentId=${isSession(r) ? r.id : null}></pi-sidebar>
+				<pi-sidebar slot="nav" .type=${this.sessionType} .list=${this.list} .currentId=${isSession(r) ? r.id : null}></pi-sidebar>
 				${this.progress || shown
 					? html`<pi-aside
 							slot="aside"
@@ -355,7 +375,7 @@ export class PiApp extends LitElement {
 		// A subagent route is the same pi-session element: only childKey changes, so the parent's stream stays open.
 		if (r.name === "session" || r.name === "subagent")
 			return html`<pi-session .api=${this.api} .list=${this.list} .sessionId=${r.id} .childKey=${r.name === "subagent" ? r.key : null} .home=${this.list?.home ?? ""}></pi-session>`;
-		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""}></pi-new-chat>`;
+		if (r.name === "new") return html`<pi-new-chat .api=${this.api} .home=${this.list?.home ?? ""} .type=${this.sessionType}></pi-new-chat>`;
 		// home: launch() picks the route once the sessions are in; till then, a way to the sessions.
 		return html`<div class="waiting"><button class="menu" aria-label="Open sessions" @click=${this.openNav}>☰</button></div>`;
 	}

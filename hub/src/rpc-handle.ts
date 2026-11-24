@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
 	ApprovalMode,
 	AgentMessage,
@@ -21,6 +22,7 @@ import type {
 	ModelInfo,
 	PiEvent,
 	SessionStateInfo,
+	SessionType,
 	SessionStats,
 	Snapshot,
 	StreamMessage,
@@ -60,8 +62,11 @@ export interface RpcHandleOptions {
 	approvalMode?: ApprovalMode; // the session starts in this mode (auto-approve.ts); manual if unset
 	uploadsDir?: string; // the hub's uploads root; this session's attached files are under <uploadsDir>/<sessionId>
 	onModelPicked?: (c: ModelChoice) => void; // after a successful set_model / set_thinking
+	type?: SessionType; // "chat" or "code" (default)
 	model?: ModelChoice | null; // a new session (no sessionFile) starts on this model
 }
+
+export const CHAT_PROMPT_FILE = fileURLToPath(new URL("../prompts/chat.md", import.meta.url));
 
 export const BG_JOBS_BLOCK = "A background job is running (bg-jobs); wait for it or cancel it first.";
 
@@ -258,7 +263,9 @@ export class RpcHandle implements SessionHandle {
 			if (this.opts.model.thinking) args.push("--thinking", this.opts.model.thinking);
 		}
 		args.push("--append-system-prompt", TLDR_PROMPT); // both new and resumed sessions end replies with the TL;DR line
-		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env: { ...process.env, ...this.opts.env, PI_WEB: "1" } });
+		const type: SessionType = this.opts.type ?? "code";
+		if (type === "chat") args.push("--no-context-files", "--append-system-prompt", CHAT_PROMPT_FILE);
+		const proc = spawn(this.opts.piBin, args, { cwd: this.cwd, env: { ...process.env, ...this.opts.env, PI_WEB: "1", PI_WEB_SESSION_TYPE: type } });
 		this.proc = proc;
 		proc.stdout.setEncoding("utf8");
 		proc.stdout.on("data", lineSplitter((line) => this.onRecord(line)));

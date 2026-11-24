@@ -6,7 +6,7 @@ import type { AgentMessage, ApprovalMode, StreamMessage } from "../../shared/src
 import { HttpError } from "../src/errors.ts";
 import type { HandleEvent } from "../src/handle.ts";
 import type { ModelChoice } from "../src/last-model.ts";
-import { RpcHandle } from "../src/rpc-handle.ts";
+import { CHAT_PROMPT_FILE, RpcHandle } from "../src/rpc-handle.ts";
 import { TLDR_PROMPT } from "../src/tldr-prompt.ts";
 import { type FakeModel, type FakeScript, HELLO, startFakeModel } from "./support/fake-model.ts";
 import { makePiEnv } from "./support/pi-env.ts";
@@ -472,4 +472,57 @@ test("fork, clone and new_session are refused while a background job runs (pi wo
 	assert.equal(h.sessionId, before);
 	ui(undefined);
 	assert.equal((await h.command({ type: "new_session" })).ok, true);
+});
+
+// Starts a handle through a shim that records its argv and PI_WEB_SESSION_TYPE, then runs the real pi.
+async function spawnRecord(t: TestContext, opts: { type?: "chat" | "code"; sessionFile?: string }) {
+	const env = makePiEnv({ modelUrl: model.url });
+	const log = join(env.root, "spawn.json");
+	const shim = join(env.root, "shim.sh");
+	writeFileSync(shim, `#!/bin/sh\nnode -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ argv: process.argv.slice(2), type: process.env.PI_WEB_SESSION_TYPE ?? null }))' "${log}" "$@"\nexec ${JSON.stringify(env.piBin)} "$@"\n`, { mode: 0o755 });
+	model.setScript(HELLO);
+	const h = await RpcHandle.start({ piBin: shim, cwd: env.workDir, exportDir: join(env.root, "exports"), env: env.env, ...opts });
+	t.after(() => {
+		h.close();
+		env.cleanup();
+	});
+	return JSON.parse(readFileSync(log, "utf8")) as { argv: string[]; type: string | null };
+}
+
+test("a chat session spawns with --no-context-files and the chat prompt file, and PI_WEB_SESSION_TYPE=chat", async (t) => {
+	const r = await spawnRecord(t, { type: "chat" });
+	assert.ok(r.argv.includes("--no-context-files"));
+	assert.equal(r.argv[r.argv.indexOf("--append-system-prompt", r.argv.indexOf("--append-system-prompt") + 1) + 1], CHAT_PROMPT_FILE);
+	assert.ok(r.argv.includes(TLDR_PROMPT));
+	assert.equal(r.type, "chat");
+});
+
+test("a code session spawns as before (no --no-context-files) with PI_WEB_SESSION_TYPE=code", async (t) => {
+	for (const type of ["code", undefined] as const) {
+		const r = await spawnRecord(t, { type });
+		assert.ok(!r.argv.includes("--no-context-files"));
+		assert.ok(!r.argv.includes(CHAT_PROMPT_FILE));
+		assert.equal(r.type, "code");
+	}
+});
+
+test("a resumed chat session (sessionFile set) still gets the chat flags", async (t) => {
+	const first = await startHandle(t, HELLO, undefined);
+	const file = first.h.snapshot().state.sessionFile as string;
+	assert.ok(file);
+	const r = await spawnRecord(t, { type: "chat", sessionFile: file });
+	assert.ok(r.argv.includes("--session"));
+	assert.ok(r.argv.includes("--no-context-files"));
+	assert.ok(r.argv.includes(CHAT_PROMPT_FILE));
+	assert.equal(r.type, "chat");
+});
+
+test("chat.md exists, ends with the safety block and names no review/screenshot/preview ritual", () => {
+	const text = readFileSync(CHAT_PROMPT_FILE, "utf8");
+	assert.match(text, /never merge or close a pull request/i);
+	assert.match(text, /explicit yes/i);
+	assert.match(text, /`cf`/);
+	assert.doesNotMatch(text, /screenshot|reviewer|preview\(/i);
+	assert.match(text, /thatsit-app/);
+	assert.match(text, /covers only what it names/i);
 });
