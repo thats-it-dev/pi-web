@@ -239,7 +239,7 @@ export class PiNewChat extends LitElement {
 			const type = this.type;
 			const cwd = type === "chat" ? "~" : d.cwd; // a chat has no folder: it runs in home
 			const { sessionId } = await this.api.createSession({ cwd, ...(model ? { model: { provider: model.provider, modelId: model.id }, thinking } : {}), type });
-			handOff(sessionId, { text, images, files, approval: d.approval, superpowers: d.superpowers });
+			handOff(sessionId, { text, images, files, approval: d.approval, superpowers: d.superpowers, type });
 			resetDraft(type);
 			draftType = type;
 			this.sent = true;

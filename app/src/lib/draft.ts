@@ -17,6 +17,7 @@ export interface Handoff {
 	files: FileInput[];
 	approval: ApprovalMode | null;
 	superpowers: boolean; // what the draft's switch said; applied once pi is up
+	type: SessionType; // the draft's type: the superpowers default to compare against, known before the list has the session
 }
 
 // The superpowers switch to send after the hand-off, or null when pi already

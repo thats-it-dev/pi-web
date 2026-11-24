@@ -349,7 +349,7 @@ export class PiSession extends LitElement {
 		if (!s?.snapshot || !msg) return;
 		if (msg.approval && msg.approval !== s.snapshot.approvalMode) await this.run({ type: "set_approval", mode: msg.approval });
 		const status = s.snapshot.statuses?.superpowers;
-		const on = superpowersCommand(msg.superpowers, status === undefined ? undefined : superpowersOn(s.snapshot), this.sessionType);
+		const on = superpowersCommand(msg.superpowers, status === undefined ? undefined : superpowersOn(s.snapshot), msg.type);
 		if (on !== null) await this.run({ type: "set_superpowers", on });
 		await this.send(msg.text, msg.images, msg.files, "send");
 	}

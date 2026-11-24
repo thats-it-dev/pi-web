@@ -24,8 +24,8 @@ describe("draft chat", () => {
 		retypeDraft("code");
 		expect(getDraft()).toMatchObject({ text: "x", cwd: "~", superpowers: true });
 	});
-	it("takeHandoff returns the message once, superpowers included", () => {
-		const msg: Handoff = { text: "hi", images: [], files: [], approval: null, superpowers: false };
+	it("takeHandoff returns the message once, superpowers and type included", () => {
+		const msg: Handoff = { text: "hi", images: [], files: [], approval: null, superpowers: false, type: "chat" };
 		handOff("s1", msg);
 		expect(takeHandoff("s2")).toBeNull();
 		expect(takeHandoff("s1")).toEqual(msg);
