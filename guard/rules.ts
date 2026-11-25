@@ -1029,6 +1029,11 @@ export type ReviewScope = {
 	request?: string;
 	/** The files that message names by path and that exist (requestFiles): the data the change reads. */
 	inputs?: string[];
+	/** Repo facts the brief is built from: a `verify` script exists (the parent ran it), a `test` script exists (there
+	 *  are tests to cite). Absent means true. Website 2026-11-24: a static site with neither was briefed "verify
+	 *  passed" and reviewed to the test-per-behavior rule, two BLOCKs on a two-page site Michael had called perfect. */
+	verify?: boolean;
+	tests?: boolean;
 	/** Where the diff starts: the last review's snapshot, or the branch point from main. */
 	base: string;
 	baseFrom: "review" | "main";
@@ -1049,7 +1054,9 @@ export function reviewHeader(s: ReviewScope): string {
 		`App: ${s.dir} (your working directory). Its AGENTS.md, if it has one, is already in your context.`,
 		`Diff: ${s.diffPath}, every change from ${from} to the current working tree, uncommitted and new files included, lockfiles and build output left out.`,
 		`Changed files:\n${files}`,
-		"`npm run verify` (typecheck, lint, guardrail tests, unit tests and e2e tests) passed after the last code edit. Don't check whether tests pass or run, and don't read config, CI, lock, test-result, coverage or git files.",
+		s.verify === false
+			? "This repo has no `verify` script; the parent ran the checks it has. Don't check whether tests pass or run, and don't read config, CI, lock, test-result, coverage or git files."
+			: "`npm run verify` (typecheck, lint, guardrail tests, unit tests and e2e tests) passed after the last code edit. Don't check whether tests pass or run, and don't read config, CI, lock, test-result, coverage or git files.",
 		`Read the diff first. Open a file outside the list only to check a caller, a definition or a contract the diff depends on. Put independent reads in one turn. You have ${REVIEW_BUDGET.hard} tool calls; at ${REVIEW_BUDGET.soft} write your review.`,
 		...(s.request
 			? [
@@ -1061,7 +1068,11 @@ export function reviewHeader(s: ReviewScope): string {
 						? [
 								`[Style-only diff: ${styleOnly(s.files)?.join(", ")}. The look was checked on the screenshot; no test is required for a style, and a missing one is not a finding. Check that the change is what Michael asked for and that it keeps the kit rules below.]`,
 							]
-						: [
+						: s.tests === false
+							? [
+									"For each behavior Michael names, check that the diff implements it, against the code: a behavior he names that the change does not do, or does differently, is a P1 finding and the merge verdict is BLOCK. This repo has no test script, so a missing test is never a finding.",
+								]
+							: [
 								"For each behavior Michael names (what a key, control or input must do, with the file or layout he names), cite the test in the diff that drives that exact input and asserts that behavior (path:line). A named behavior with no such test is a P1 finding and the merge verdict is BLOCK. A test that asserts the behavior Michael says is wrong is a P1 and BLOCK too. Passing tests prove nothing about a behavior no test drives. Where a control sits (which dialog, group or row holds it, what it comes before or after) is a look, not a behavior: the screenshot gate checked it, so no test is required for placement and a missing one is not a finding. Sentences `docs/spec.md` gains in this diff are the diff's own description of itself, not behaviors Michael named: check them against the code, but a missing test for one of them is a P2 note, never a BLOCK.",
 							]),
 					...(s.inputs?.length ? ["", inputsOracle(s.inputs)] : []),

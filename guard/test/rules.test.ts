@@ -1641,3 +1641,16 @@ test("a Python script that only ticks a plan or appends to the SDD ledger is not
 	assert.equal(bash(both), REASONS.rewrite, "a code path anywhere keeps the block");
 	assert.equal(planRewrite("open(p,'w').write(s)"), false, "no literal path: not exempt");
 });
+
+test("reviewHeader on a repo without verify or test scripts: no verify claim, behaviors checked against the code, no test-per-behavior BLOCK", () => {
+	const files = [{ path: "index.html", added: "3", removed: "1" }];
+	const h = reviewHeader({ dir: "/home/m/workspace/website", base: "a".repeat(40), baseFrom: "main", diffPath: "/tmp/website-review.diff", files, request: "white text on the hero", verify: false, tests: false });
+	assert.doesNotMatch(h, /npm run verify/);
+	assert.match(h, /no `verify` script/);
+	assert.doesNotMatch(h, /A named behavior with no such test is a P1/);
+	assert.match(h, /no test script, so a missing test is never a finding/);
+	assert.match(h, /does not do, or does differently, is a P1/);
+	const withTests = reviewHeader({ dir: "/home/m/workspace/apps/keeb", base: "a".repeat(40), baseFrom: "main", diffPath: "/tmp/keeb-review.diff", files, request: "space switches layers" });
+	assert.match(withTests, /npm run verify/);
+	assert.match(withTests, /A named behavior with no such test is a P1 finding/);
+});

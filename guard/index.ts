@@ -436,7 +436,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	// review passed it.
 	const kind: ReviewScope["kind"] = files.some((f) => !reviewFree(f.path)) ? "code" : "docs";
 	const request = branchRequests(branch);
-	const header = reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined });
+	const header = reviewHeader({ dir, kind, base, baseFrom, diffPath, files, request, inputs: requestFiles(request, home), kit: app ? styleRules(home) : undefined, verify: hasScript(dir, "verify"), tests: hasScript(dir, "test") });
 	// A resume keeps the run's own cwd, budget and model; only its message is scoped. The revived run is async, and
 	// its result names the new run id (asyncRunId), which the pending mark records.
 	if (resumed) {
