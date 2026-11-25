@@ -545,14 +545,14 @@ test("the orchestrator of the agent pair never edits app code itself; docs, plan
 	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`), REASONS.rewrite);
 });
 
-test("pairSettings reads the pair from pi's settings, or the orchestrate flag on any models", () => {
-	assert.equal(pairSettings({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+test("pairSettings reads only the orchestrate flag; the pair's model names mean nothing since 2026-11-25", () => {
+	assert.equal(pairSettings({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
 	assert.equal(pairSettings({ defaultModel: "spark/flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
 	assert.equal(pairSettings(undefined), false);
 	// 2026-11-24: delegation decoupled from the model pair, which was unloaded on 11-17 and took the workers with it.
 	assert.equal(pairSettings({ defaultModel: "spark/flash-auto", subagents: { defaultModel: "spark/qwen3.8-flash-next", orchestrate: true } }), true);
 	assert.equal(pairSettings({ defaultModel: "spark/flash-auto", subagents: { defaultModel: "spark/qwen3.8-flash-next", orchestrate: false } }), false);
-	assert.equal(pairSettings({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang", orchestrate: false } }), false, "the flag, when set, decides");
+	assert.equal(pairSettings({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang", orchestrate: false } }), false, "the flag decides");
 	assert.equal(pairSettings({ subagents: { orchestrate: "yes" } }), false, "a boolean, nothing else");
 });
 

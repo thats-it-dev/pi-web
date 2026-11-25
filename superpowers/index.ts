@@ -48,14 +48,11 @@ export const PI_NOTES_PAIR: Record<string, string> = {
 	].join("\n"),
 };
 
-/** True when pi's settings put an orchestrator in charge: `subagents.orchestrate` (a boolean) when set, else when the
- *  agent pair is the session model and the MoE the subagent default. The guard reads the same settings (pairSettings). */
+/** True when pi's settings put an orchestrator in charge: `subagents.orchestrate` is true. The guard reads the same
+ *  flag (pairSettings). */
 export function pairMode(settings: unknown): boolean {
-	const s = settings as { defaultModel?: unknown; subagents?: { defaultModel?: unknown; orchestrate?: unknown } } | undefined;
-	if (typeof s?.subagents?.orchestrate === "boolean") return s.subagents.orchestrate;
-	const main = typeof s?.defaultModel === "string" ? s.defaultModel : "";
-	const sub = typeof s?.subagents?.defaultModel === "string" ? s.subagents.defaultModel : "";
-	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
+	const s = settings as { subagents?: { orchestrate?: unknown } } | undefined;
+	return s?.subagents?.orchestrate === true;
 }
 
 /** A skill's SKILL.md with its pi note (if any) right after the frontmatter. */

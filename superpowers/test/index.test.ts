@@ -155,9 +155,8 @@ test("session start brings an older chat's reasoning floor in line with its swit
 	assert.deepEqual(saved, [[FLOOR_ENTRY, { level: null }]], "off with a floor left over: clear it");
 });
 
-test("pairMode reads the orchestrator flag, else the pair, from settings", () => {
-	assert.equal(pairMode({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
-	assert.equal(pairMode({ defaultModel: "spark/qwen3.8-27b-pi", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), true);
+test("pairMode reads only the orchestrate flag", () => {
+	assert.equal(pairMode({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false, "the pair's model names mean nothing since 2026-11-25");
 	assert.equal(pairMode({ defaultModel: "flash-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }), false);
 	assert.equal(pairMode({ defaultModel: "spark/pair-auto" }), false);
 	assert.equal(pairMode(undefined), false);

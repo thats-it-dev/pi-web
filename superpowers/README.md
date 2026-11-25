@@ -24,8 +24,8 @@ skills. Off by default everywhere; the skills are manual (`/skill:<name>`) until
   loaded from the raw checkout anyway).
 - On also sets flash-auto's reasoning floor to medium for the chat (`flash-auto-floor` entry); off clears it.
 
-Orchestrator mode: with `subagents.orchestrate: true` in `~/.pi/agent/settings.json` (or, with no flag, the agent
-pair as the model), the pi note on `writing-plans` (parallel groups) and `executing-plans` (scout, brief a `worker`
+Orchestrator mode: with `subagents.orchestrate: true` in `~/.pi/agent/settings.json`,
+the pi note on `writing-plans` (parallel groups) and `executing-plans` (scout, brief a `worker`
 per task, gate on verify and the reviewer, never edit app code; the guard enforces that part) replaces the inline
 wording. Read at resource discovery, so a new pi session picks a change up; no hub restart.
 

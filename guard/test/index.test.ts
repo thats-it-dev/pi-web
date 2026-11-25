@@ -319,10 +319,10 @@ test("an async scoped review whose launch result has no run id gets a pending ma
 	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }], () => "complete"), false, "an unknown run never counts, whatever the resolver says");
 });
 
-test("with the agent pair in settings.json, the parent session is the orchestrator and may not edit app code; a child may", () => {
+test("with subagents.orchestrate in settings.json, the parent session is the orchestrator and may not edit app code; a child may", () => {
 	const home = mkdtempSync(join(tmpdir(), "home-"));
 	mkdirSync(join(home, ".pi", "agent"), { recursive: true });
-	writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ defaultModel: "spark/pair-auto", subagents: { defaultModel: "spark/qwen3.6-35b-a3b-sglang" } }));
+	writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify({ defaultModel: "spark/flash-auto", subagents: { orchestrate: true } }));
 	const edit = { toolName: "edit", input: { path: join(home, "workspace", "apps", "keeb", "src", "a.ts"), edits: [] } };
 	assert.deepEqual(load(() => false, { HOME: home }).tool_call(edit, { cwd: home }), { block: true, reason: REASONS.orchestrator });
 	assert.equal(load(() => false, { HOME: home, PI_SUBAGENT_CHILD: "1" }).tool_call(edit, { cwd: home }), undefined);

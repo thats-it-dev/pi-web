@@ -94,15 +94,11 @@ export function workspacePath(text: string, cwd: string, home: string): string |
 	return cwd.startsWith(`${ws}/`) && !cwd.startsWith(apps) ? cwd : undefined;
 }
 
-/** pi's settings put an orchestrator in charge: `subagents.orchestrate` (a boolean) when set, else the agent pair (the
- *  pair orchestrator or the pi tune as the session model, the MoE as the subagent default). The flag came on 2026-11-24:
- *  the pair was unloaded on 11-17 and no session dispatched a worker in the week after. */
+/** pi's settings put an orchestrator in charge: `subagents.orchestrate` is true. (Until 2026-11-25 the agent pair as
+ *  the session model also counted; the pair was unloaded on 11-17 and the flag has decided since 11-24.) */
 export function pairSettings(settings: unknown): boolean {
-	const s = settings as { defaultModel?: unknown; subagents?: { defaultModel?: unknown; orchestrate?: unknown } } | undefined;
-	if (typeof s?.subagents?.orchestrate === "boolean") return s.subagents.orchestrate;
-	const main = typeof s?.defaultModel === "string" ? s.defaultModel : "";
-	const sub = typeof s?.subagents?.defaultModel === "string" ? s.subagents.defaultModel : "";
-	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
+	const s = settings as { subagents?: { orchestrate?: unknown } } | undefined;
+	return s?.subagents?.orchestrate === true;
 }
 
 /** The file is code the pair's workers own: inside an app (or one of its worktrees), or any other path under ~/workspace,
