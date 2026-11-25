@@ -10,6 +10,7 @@ writeFileSync(join(root, "index.html"), "<html><body><h1>hi</h1></body></html>")
 mkdirSync(join(root, "sub"));
 writeFileSync(join(root, "sub", "index.html"), "<body>sub</body>");
 writeFileSync(join(root, "a.css"), "h1{}");
+writeFileSync(join(root, "resume.html"), "<body>cv</body>");
 after(() => rmSync(root, { recursive: true, force: true }));
 
 test("serves index.html with the reload script, css with its type, 404 for missing and escapes", async () => {
@@ -24,6 +25,10 @@ test("serves index.html with the reload script, css with its type, 404 for missi
 		assert.match(await (await fetch(`${base}/sub/`)).text(), /sub/);
 		assert.equal((await fetch(`${base}/a.css`)).headers.get("content-type"), "text/css; charset=utf-8");
 		assert.equal((await fetch(`${base}/nope.html`)).status, 404);
+		// Clean URLs, as Cloudflare Pages serves them.
+		assert.match(await (await fetch(`${base}/resume`)).text(), /cv/);
+		assert.equal((await fetch(`${base}/resume`)).headers.get("content-type"), "text/html; charset=utf-8");
+		assert.equal((await fetch(`${base}/nope`)).status, 404);
 		assert.equal((await fetch(`${base}/..%2f..%2fetc%2fpasswd`)).status, 404);
 	} finally {
 		await s.close();

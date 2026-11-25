@@ -398,6 +398,13 @@ export class PreviewManager {
 			return errorResult(`Could not claim a preview port in ${SERVE_PORT_MIN}-${SERVE_PORT_MAX}: other sessions took them first.`);
 		}
 		port = claimed;
+		// "Preview open" means the port answers now, whatever the server kind: a static server that failed to bind, or a
+		// dev server that died between its health check and the claim, is an error, not an open preview.
+		if (!(await this.deps.waitHealthy(started.localPort, 5000))) {
+			await started.close().catch(() => {});
+			await ts.remove(port).catch(() => {});
+			return errorResult(`The preview server on 127.0.0.1:${started.localPort} is not answering, so the preview is not open. Call preview again; if it fails twice, tell Michael.`);
+		}
 		const details: PreviewDetails = { url: `https://${host}:${port}${path}`, label, kind, port, root };
 		const active: Active = { ...started, details, dead: false };
 		this.active = active;

@@ -534,3 +534,15 @@ test("killNow kills a running dev server and its pgid file, and one still in its
 	assert.equal(adds(slow.calls).length, 0);
 	assert.equal(slow.mgr.current(), null);
 });
+
+test("a server that does not answer on its port is an error, never \"Preview open\"; the entry is removed", async () => {
+	const { mgr, serve } = setup({ startStatic: async () => ({ port: 1, close: async () => {} }) });
+	const dir = join(scratch, `static-dead-${++seq}`);
+	mkdirSync(dir);
+	writeFileSync(join(dir, "index.html"), "<body>x</body>");
+	const res = await mgr.run({ dir }, scratch, "s1");
+	assert.equal(res.isError, true);
+	assert.match(res.content[0].text, /not answering, so the preview is not open/);
+	assert.equal(mgr.current(), null);
+	assert.deepEqual([...serve.keys()], [], "the claimed port was given back");
+});

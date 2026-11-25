@@ -78,7 +78,15 @@ export function startStaticServer(root: string): Promise<StaticServer> {
 			if (decoded.split("/").some((seg) => seg.startsWith("."))) return notFound(res);
 			let file = resolve(base, `.${decoded}`);
 			if (!within(base, file)) return notFound(res);
-			let st = await stat(file);
+			// Clean URLs as Cloudflare Pages serves them: /resume is resume.html when no such file or folder exists
+			// (website 2026-11-24: the preview 404ed on /resume, the fix linked /resume.html, and Pages redirected
+			// that back to /resume; three commits and two reviews for one URL).
+			let st = await stat(file).catch(() => undefined);
+			if (!st && !extname(file) && !decoded.endsWith("/")) {
+				file = `${file}.html`;
+				st = await stat(file).catch(() => undefined);
+			}
+			if (!st) return notFound(res);
 			if (st.isDirectory()) {
 				file = join(file, "index.html");
 				st = await stat(file);
