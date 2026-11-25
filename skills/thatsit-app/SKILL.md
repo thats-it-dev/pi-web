@@ -11,8 +11,7 @@ served at `https://<name>.thatsit.app`. All GitHub and Cloudflare work goes thro
 The CLI prints progress, then `RESULT {...json...}`. Exit 0: done; 1: failed (reason on stderr and in `RESULT`); 2: usage error. `pr` and `gateway-pr` push and return in seconds. `pr-wait`, `gateway-pr-wait` and `ship` wait for CI
 (20 minutes or more): run them only with the `bg_bash` tool (`command` = the whole line), then end your turn.
 When it exits, a `bg-bash-done` message arrives: first line `bg_bash job <id> exited <code>`, then `RESULT`.
-Never set a bash timeout on any of these. Never push or wait for CI any other way
-(no `git push`, `sleep`, polling or `gh run`). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
+No bash timeout on any of these (the guard blocks timeouts, `git push`, CI polling and merges; a block says what to run instead). Copy URLs from `RESULT` exactly; never guess a URL. Each bash call starts in the session folder, so a `cd` does not carry over:
 start every app command with `cd ~/workspace/apps/<name> &&` and edit files by full path.
 Mockups and prototypes before code: write the HTML in the folder `preview({})` returns, then `preview({ dir })`; Michael sees it in pi-web.
 
@@ -53,7 +52,7 @@ If `ship` says `is already shipped`, use **Change**. Spark data: see **Needs spa
    `docs/spec.md` and `~/workspace/apps/<name>` (plus a file of sampled output, first, middle and last stage, if the app generates content or changes with progress). Don't write a diff: the guard writes it, covering only what changed since the last review, and sets the reviewer's scope and budget. Fix what you confirm, rerun verify, commit (`git add -A && git commit -m "<what changed>"`).
 5. Only after Michael has seen the live preview (or said to skip it). Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/<name> --title "<short title>" --body "<what and why; spec changes; review findings fixed and rejected>"` in bash (no timeout).
 6. Run `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr-wait ~/workspace/apps/<name>` with `bg_bash`. Then end your turn with a reply: the `pr` link from `RESULT`, CI is still running, the preview link follows.
-7. When `bg-bash-done` arrives: `exited 0` means mark every to-do completed or deleted and reply with the `pr` and `preview` URLs from `RESULT` (and `gatewayPreview` if present); anything else means fix the cause, commit, rerun the same `pr` command (same `--title`, `--body`, `--gateway-pr`; add `--force true` only if you rebased or amended the branch after it was pushed), then `pr-wait` with `bg_bash`. Never merge a PR (`gh pr merge`) or push to `main` after the first version, and don't suggest a merge command: Michael merges.
+7. When `bg-bash-done` arrives: `exited 0` means mark every to-do completed or deleted and reply with the `pr` and `preview` URLs from `RESULT` (and `gatewayPreview` if present); anything else means fix the cause, commit, rerun the same `pr` command (same `--title`, `--body`, `--gateway-pr`; add `--force true` only if you rebased or amended the branch after it was pushed), then `pr-wait` with `bg_bash`. Michael merges.
 
 ## Bring an app up to the template
 
