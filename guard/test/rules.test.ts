@@ -60,21 +60,17 @@ test("the full suite is blocked only in apps that have e2e:one", () => {
 	assert.equal(bash(`${app}npm run e2e`, env({ hasScript: () => false })), undefined);
 });
 
-test("Python file rewrites in an app are blocked, in bash and ctx_execute", () => {
+test("Python file rewrites in an app are blocked", () => {
 	const py = `${app}python3 - <<'PY'\np="src/app-main.ts"; s=open(p).read()\nopen(p,"w").write(s.replace("a","b"))\nPY`;
 	assert.equal(bash(py), REASONS.rewrite);
 	assert.equal(bash(`${app}python3 -c 'print(open("src/x.ts").read())'`), undefined);
 	// A scratch file in /tmp, even when the script mentions the app.
 	assert.equal(bash(`cd /tmp && python3 - <<'PY'\nopen("m3check.cjs","w").write("~/workspace/apps/keeb")\nPY`), undefined);
-	const code = 'from pathlib import Path\nPath("/home/m/workspace/apps/keeb/src/x.ts").write_text("y")';
-	assert.equal(checkToolCall("ctx_execute", { language: "python", code }, env())?.reason, REASONS.rewrite);
-	assert.equal(checkToolCall("ctx_execute", { language: "python", code: 'open("/tmp/x","w")' }, env()), undefined);
 });
 
-test("ctx_execute shell and ctx_batch_execute go through the same rules", () => {
-	assert.equal(checkToolCall("ctx_execute", { language: "shell", code: `${app}sleep 420` }, env())?.reason, REASONS.ci);
-	const commands = [{ label: "a", command: "ls" }, { label: "runs", command: `${app}gh run list --limit 8` }];
-	assert.equal(checkToolCall("ctx_batch_execute", { commands }, env())?.reason, REASONS.ci);
+test("only bash and bg_bash carry shell for the rules; other tools pass", () => {
+	assert.equal(checkToolCall("bg_bash", { command: `${app}sleep 420` }, env())?.reason, REASONS.ci);
+	assert.equal(checkToolCall("ctx_execute", { language: "shell", code: `${app}sleep 420` }, env()), undefined, "context-mode is gone (2026-11-25)");
 	assert.equal(checkToolCall("read", { path: "/home/m/workspace/apps/keeb/x" }, env()), undefined);
 });
 

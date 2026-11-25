@@ -103,7 +103,7 @@ The progress panel shows the session's goal, plan, to-dos and subagents. On desk
 
 - **To-dos:** `todo` results from rpiv-todo.
 - **Subagents:** `subagent` results from pi-subagents, plus `status.json` for background runs.
-- **Goal:** `goal-state` session entries from pi-goal.
+- **Goal:** `goal-state` session entries, when an extension writes them (pi-goal was removed on 2026-11-25; the section stays empty without one).
 - **Plan:** the most recent `docs/superpowers/plans/*.md` the agent read or edited.
 
 ## thatsit.app apps

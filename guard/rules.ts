@@ -1288,17 +1288,10 @@ export function lastRequest(branch: Iterable<unknown>, max = 2000): string | und
 	return text.length > max ? `${text.slice(0, max)}\n[cut at ${max} characters]` : text;
 }
 
-// The shell commands and Python code a tool call would run, for bash and context-mode's ctx_* tools.
+// The shell commands a tool call would run (bash and bg_bash; Python comes out of heredocs in the shell rules).
 export function codeOf(toolName: string, input: Record<string, unknown>): { shell: string[]; python: string[] } {
 	const str = (v: unknown) => (typeof v === "string" ? [v] : []);
 	if (toolName === "bash" || toolName === "bg_bash") return { shell: str(input.command), python: [] };
-	if (toolName === "ctx_execute") {
-		if (input.language === "shell") return { shell: str(input.code), python: [] };
-		if (input.language === "python") return { shell: [], python: str(input.code) };
-	}
-	if (toolName === "ctx_batch_execute" && Array.isArray(input.commands)) {
-		return { shell: input.commands.flatMap((c) => str((c as { command?: unknown })?.command)), python: [] };
-	}
 	return { shell: [], python: [] };
 }
 

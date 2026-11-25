@@ -12,7 +12,7 @@ for any other git repo under `~/workspace` (its git root; a worktree is its own)
 long-overwrite rule and the pair's code-path rule apply to both; `ci` has a repo form (`ciRepo`: watch once through
 `bg_bash` with `gh pr checks --watch` or `gh run watch`), and the review gate sits on `git push` / `gh pr create` there.
 The merged-branch switch and the PR nudge cover both as well, against the repo's `main` or `master`.
-Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
+Checked for `bash` and `bg_bash` (context-mode's `ctx_*` tools were covered until the package went on 2026-11-25).
 
 | Rule | Blocks | Use instead |
 | --- | --- | --- |
