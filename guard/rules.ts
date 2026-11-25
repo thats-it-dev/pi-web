@@ -686,18 +686,6 @@ export function lastBlockedReview(branch: Iterable<unknown>, dir: string, runSta
 	return snap;
 }
 
-/** True when a review the guard scoped completed without error after Michael's last message on the branch. */
-export function reviewedSinceUser(branch: Iterable<unknown>, runState: RunState = defaultRunState, runText: RunText = defaultRunText): boolean {
-	let reviewed = false;
-	for (const raw of branch) {
-		const e = raw as Entry;
-		const m = e.message;
-		if (e.type !== "message" || !m) continue;
-		if (m.role === "user") reviewed = false;
-		else if (m.role === "toolResult" && !m.isError && completedReviews(resultText(m), runState, runText).length > 0) reviewed = true;
-	}
-	return reviewed;
-}
 
 /** The snapshot commit the last completed scoped review of `dir` covered, from the marks on the branch. */
 export function lastReview(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
@@ -715,8 +703,8 @@ export function lastReview(branch: Iterable<unknown>, dir: string, runState: Run
 export const REVIEW_UNSCOPED = "[pi-guard] this review is not scoped to a repo (the task names no path under ~/workspace and the call's cwd is not in one), so it does not count for the PR gate. Call the reviewer again with `cwd` set to the app or repo, or with its path in the task.";
 
 /** The gap line for a review that ended BLOCK: the orchestrator's own reading of the findings does not reopen the gate. */
-const REVIEW_BLOCKED_GAP = (who: string) =>
-	`${who} ended with the merge verdict BLOCK, and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. The gate stays shut until he says to ship: a message of his that says to ship, or to open the PR, opens it without another review, and the PR body then lists the findings he accepted.`;
+const REVIEW_BLOCKED_GAP = (who: string, rounds: number) =>
+	`${who} ended with the merge verdict BLOCK (round ${rounds} of ${REVIEW_ROUNDS} on this branch), and it counts for nothing until a changed tree is reviewed again: send its P0 and P1 findings to the worker, run \`npm run verify\`, commit, and call the reviewer again. If you are sure a finding is wrong, don't argue it with the reviewer or in your own reasoning: tell Michael which finding and why, and end your turn. A second BLOCK on a changed tree opens the gate: the PR body then lists the open findings and Michael decides.`;
 
 /** The note on the first call into an app whose tree already had uncommitted changes: they predate this session.
  *  Keeb 2026-11-23: session 01a209b9 ended on "nevermind. nuke this work." with the reply aborted, so nothing was
@@ -799,83 +787,79 @@ export function branchRequests(branch: Iterable<unknown>, max = 2000): string | 
 	return out.length > max ? `${out.slice(0, max)}\n[cut at ${max} characters]` : out;
 }
 
-/** Michael's order to ship: his message says to ship, or to open, send, make or push the PR. `shipping` is a noun. */
-const SHIP_ORDER = /\bship\b|\b(?:open|send|make|create|push|submit)\s+(?:the\s+|a\s+)?pr\b|\bpr\s+it\b/i;
-
-/** True when Michael's last message on the branch orders the PR shipped and a scoped review of `dir` (any verdict,
- *  BLOCK included) finished before it: he has seen the findings and overruled them, so the gate opens without another
- *  review. Keeb 2026-11-23: five BLOCK passes in a row, each on a new P1 (a test for a spec sentence the agent had just
- *  written, then a whitespace hunk on a pre-existing dialog), Michael wrote "Just ship the pr and we can fix that later.",
- *  and `pr` was refused for want of a review since his last message, so a sixth reviewer run started. A ship message
- *  with no review before it is the ordinary request: the first review still has to happen. */
-export function shipOverride(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): boolean {
-	let reviewed = false;
-	let order = false;
+/** How many scoped reviews of `dir` ended BLOCK on this branch since the last publish (a `pr`, `gateway-pr`, push or
+ *  `gh pr create` that returned without error), each on a different tree; a review that counted in between restarts
+ *  the count. REVIEW_ROUNDS of them open the gate: the PR body carries the open findings and Michael decides. Why a
+ *  cap and not his say-so: keeb 2026-11-23, five BLOCK passes in a row, each on a new P1, and "Just ship the pr and
+ *  we can fix that later." still met a shut gate, so a sixth review ran; the override rule that fixed it keyed on his
+ *  words and patched the gate instead of bounding it. */
+export const REVIEW_ROUNDS = 2;
+export function blockedRounds(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): number {
+	const snaps = new Set<string>();
+	const publishes = new Map<string, boolean>();
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
 		if (e.type !== "message" || !m) continue;
-		if (m.role === "user") {
-			const text = userText(m).trim();
-			if (text) order = reviewed && SHIP_ORDER.test(text);
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const c of m.content as ToolCallPart[]) {
+				if (c.type !== "toolCall" || !c.id || (c.name !== "bash" && c.name !== "bg_bash")) continue;
+				const command = String(c.arguments?.command ?? "");
+				if (OPENS_PR.test(command) || PUBLISHES.test(command)) publishes.set(c.id, true);
+			}
 			continue;
 		}
 		if (m.role !== "toolResult" || m.isError) continue;
+		if (m.toolCallId && publishes.get(m.toolCallId)) {
+			snaps.clear();
+			continue;
+		}
 		const text = resultText(m);
-		if (completedReviews(text, runState, runText).some((r) => r.dir === dir) || blockedReviews(text, runState, runText).some((r) => r.dir === dir)) reviewed = true;
+		const all = [...completedReviews(text, runState, runText).map((r) => ({ ...r, blocked: false })), ...blockedReviews(text, runState, runText).map((r) => ({ ...r, blocked: true }))].sort((a, b) => a.at - b.at);
+		for (const r of all) {
+			if (r.dir !== dir) continue;
+			if (r.blocked) snaps.add(r.snap);
+			else snaps.clear();
+		}
 	}
-	return order;
+	return snaps.size;
 }
 
-const REVIEW_BLOCK_HEAD = "Blocked: run the reviewer before opening the PR";
+/** Appended to the sync result of the BLOCK that fills the rounds: the gate is open, the findings go in the PR body. */
+export const REVIEW_ROUNDS_OPEN = `[pi-guard] this is the ${REVIEW_ROUNDS === 2 ? "second" : `${REVIEW_ROUNDS}th`} BLOCK on this branch: the review gate is open. Don't call the reviewer again. Put the open P0 and P1 findings in the PR body, open the PR (the skill's \`pr\` command in an app, \`gh pr create\` elsewhere), and tell Michael which findings are open; he decides what ships.`;
 
-/** Why the review gate is shut for `dir` after Michael's last message: no scoped review, one still running, one that
- *  ended without a verdict, or one that failed. Prefixed by a stop order once `pr` was blocked three times with no new
- *  review in between: the orchestrator is looping (keeb 2026-11-16: 16 blocked `pr` calls over 2 h 48 min). */
+const TREE_CHANGED = "The tree changed since the last review that counted: call the reviewer again (the guard's diff covers only what changed since that review).";
+
+/** Why the review gate is shut for `dir`: no scoped review of this repo, the tree changed since the last one that
+ *  counted, the last one still running, ended BLOCK, ended without a verdict, or failed. Tied to the tree, never to
+ *  Michael's messages: a message changes nothing about which tree was reviewed. */
 export function reviewGap(branch: Iterable<unknown>, dir: string, runState: RunState = defaultRunState, runText: RunText = defaultRunText): string | undefined {
-	if (shipOverride(branch, dir, runState, runText)) return undefined;
 	let last: { kind: "pending"; runId: string } | { kind: "finished" } | { kind: "blocked" } | undefined;
-	let blocks = 0;
 	for (const raw of branch) {
 		const e = raw as Entry;
 		const m = e.message;
-		if (e.type !== "message" || !m) continue;
-		if (m.role === "user") {
-			last = undefined;
-			blocks = 0;
-			continue;
-		}
-		if (m.role !== "toolResult") continue;
+		if (e.type !== "message" || !m || m.role !== "toolResult" || m.isError) continue;
 		const text = resultText(m);
-		if (m.isError) {
-			if (text.startsWith(REVIEW_BLOCK_HEAD)) blocks++;
-			continue;
-		}
 		const marks: { at: number; last: NonNullable<typeof last> }[] = [];
 		for (const f of text.matchAll(FINISHED)) if (f[1] === dir) marks.push({ at: f.index ?? 0, last: { kind: "finished" } });
 		for (const b of text.matchAll(BLOCKED)) if (b[1] === dir) marks.push({ at: b.index ?? 0, last: { kind: "blocked" } });
 		for (const p of text.matchAll(PENDING)) if (p[1] === dir) marks.push({ at: p.index ?? 0, last: { kind: "pending", runId: p[3] } });
-		for (const m of marks.sort((a, b) => a.at - b.at)) {
-			last = m.last;
-			blocks = 0;
-		}
+		for (const m of marks.sort((a, b) => a.at - b.at)) last = m.last;
 	}
-	let why: string;
-	if (!last) why = "No reviewer call since Michael's last message was scoped to this repo: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or repo, or whose task names its path under ~/workspace, and only those count.";
-	else if (last.kind === "finished") return undefined;
-	else if (last.kind === "blocked") why = REVIEW_BLOCKED_GAP("The last scoped review");
-	else if (last.runId === UNKNOWN_RUN) why = "The last scoped review's launch result carried no run id, so it can never count: call the reviewer again.";
-	else {
-		const state = runState(last.runId);
-		const reply = state === "complete" ? runText(last.runId) ?? "" : "";
-		if (state === "running") why = `The last scoped review (run ${last.runId.slice(0, 8)}) is still running: wait for its subagent-notify message, then run this command again.`;
-		else if (state === "complete" && reviewBlocked(reply)) why = REVIEW_BLOCKED_GAP(`The last scoped review (run ${last.runId.slice(0, 8)})`);
-		else if (state === "complete") why = reviewVerdict(reply) ? "" : `The last scoped review (run ${last.runId.slice(0, 8)}) ended without a verdict the guard accepts: a \`## Review\` block with a Finding, Merge verdict or P0-P2 line, or \`No issues found.\`. Call the reviewer again and ask for that shape.`;
-		else why = `The last scoped review (run ${last.runId.slice(0, 8)}) ${state === "missing" ? "has no run directory any more" : "failed"}: call the reviewer again.`;
+	if (!last) return "No reviewer call was scoped to this repo yet: the guard scopes a `subagent` call with agent \"reviewer\" whose `cwd` is the app or repo, or whose task names its path under ~/workspace, and only those count.";
+	if (last.kind === "finished") return TREE_CHANGED;
+	const rounds = blockedRounds(branch, dir, runState, runText);
+	if (last.kind === "blocked") return REVIEW_BLOCKED_GAP("The last scoped review", rounds);
+	if (last.runId === UNKNOWN_RUN) return "The last scoped review's launch result carried no run id, so it can never count: call the reviewer again.";
+	const state = runState(last.runId);
+	const who = `The last scoped review (run ${last.runId.slice(0, 8)})`;
+	if (state === "running") return `${who} is still running: wait for its subagent-notify message, then run this command again.`;
+	if (state === "complete") {
+		const reply = runText(last.runId) ?? "";
+		if (reviewBlocked(reply)) return REVIEW_BLOCKED_GAP(who, rounds);
+		return reviewVerdict(reply) ? TREE_CHANGED : `${who} ended without a verdict the guard accepts: a \`## Review\` block with a Finding, Merge verdict or P0-P2 line, or \`No issues found.\`. Call the reviewer again and ask for that shape.`;
 	}
-	if (!why) return undefined;
-	const stop = blocks >= 3 ? `This is the ${blocks + 1}th time this command is blocked with no new review in between: stop retrying. Tell Michael the PR is blocked, quote the line below, and end your turn.\n` : "";
-	return `${stop}${why}`;
+	return `${who} ${state === "missing" ? "has no run directory any more" : "failed"}: call the reviewer again.`;
 }
 
 /** The app a reviewer call is about: an apps path in the task, then a /tmp/<name>-review.diff naming an app that

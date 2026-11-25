@@ -130,8 +130,11 @@ Listed in `~/.pi/agent/settings.json` `packages` as `../../workspace/pi-web/guar
 
 ## Scoped reviews
 
-A `pr` or `gateway-pr` that changes code is blocked until a review the guard scoped has finished since Michael's last
-message, or the app is exactly as the last review left it. Only a direct `subagent` call with agent `reviewer` counts;
+A `pr` or `gateway-pr` that changes code is blocked until a review the guard scoped, and that did not end BLOCK, covered
+the tree exactly as it is now, or until two scoped reviews on the branch ended BLOCK (the rounds cap, below). The gate
+is about the tree, never about Michael's messages: a message of his changes nothing about which tree was reviewed, and
+an edit after a review, a P2 fix included, needs a review of the new tree (2026-11-25; before that a review counted for
+the rest of the turn and his next message shut the gate again). Only a direct `subagent` call with agent `reviewer` counts;
 on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session cwd), the guard rewrites that call:
 
 - Blocked until `npm run verify` passed in the app after the last code edit (docs and Markdown edits don't count).
@@ -169,13 +172,14 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   reviewer wrote `**Merge verdict: BLOCK**` with a P0, the orchestrator decided in its reasoning that the P0 was
   hypothetical, asked the reviewer to "re-verify" with its own counter-evidence, got "nothing changed since the last
   review, go on to pr" from the guard, and pushed.
-- Michael's say-so opens the gate. When his last message on the branch says to ship, or to open, send or make the
-  PR, and a scoped review of the app (any verdict, BLOCK included) finished before that message, `pr` runs without
-  another review; the orchestrator lists the findings he accepted in the PR body. A ship message with no review before
-  it is the ordinary request, and the first review still has to happen. Why: on keeb 2026-11-23 five reviews in a row
-  ended BLOCK, each on a new P1 (a test missing for a spec sentence the agent had just written, then a whitespace hunk
-  on a pre-existing hand-built dialog), Michael wrote "Just ship the pr and we can fix that later.", and the gate still
-  demanded a review since his last message, so a sixth reviewer run started.
+- The rounds cap. Two scoped reviews of the repo that ended BLOCK on different trees since the last publish
+  (`blockedRounds`, `REVIEW_ROUNDS`) open the gate: the result of the second one says so (`REVIEW_ROUNDS_OPEN`), the
+  orchestrator puts the open P0/P1 findings in the PR body and Michael decides at the PR. A review that counted, or a
+  publish, restarts the count; the same tree twice is one round (and is refused anyway, above). Michael's words don't
+  steer the gate: "ship it" after one BLOCK means one more round at most. Why: keeb 2026-11-23, five BLOCK passes in a
+  row, each on a new P1, and "Just ship the pr and we can fix that later." still met a shut gate, so a sixth review
+  ran; the ship-override rule that followed keyed on his words and patched the gate rather than bounding it, and the
+  2026-11-24 harness review replaced it and the three-blocks stop order with this cap.
 - The brief carries every message of Michael's on the branch since the last PR opened, oldest first, not only his
   last one, so "ship it" is never the request the reviewer grades against; and it says that spec sentences the diff
   adds are the diff's own description, a P2 at most when untested. A diff whose only code changes are style and icon
@@ -239,11 +243,10 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   their expected values were the code's own output (`7 · Sym` for a key that types `&`, all shifted symbols folded
   to the key underneath); the design doc stated the same rule and three reviews passed it. Running the file through
   the code was the only thing that showed it.
-- When `pr` is blocked on the review gate, the reason ends with why: no scoped review since Michael's last message,
-  the last one still running (wait for its message), ended BLOCK, ended without an accepted verdict, or failed. After three blocks
-  with no new review in between, the reason opens with a stop order: tell Michael the PR is blocked and end the turn.
-  Why: the same keeb session blocked `pr` 16 times while the orchestrator re-ran verify and the reviewer each time and
-  finally reported that "the guard's LLM is looping".
+- When `pr` is blocked on the review gate, the reason ends with why (`reviewGap`): no scoped review of this repo yet,
+  the tree changed since the last review that counted, the last one still running (wait for its message), ended BLOCK
+  (round n of 2), ended without an accepted verdict, or failed. Why: keeb 2026-11-16 blocked `pr` 16 times while the
+  orchestrator re-ran verify and the reviewer each time and finally reported that "the guard's LLM is looping".
 
 The reviewer itself is `agents/reviewer.md`, symlinked to `~/.pi/agent/agents/reviewer.md`: read-only tools, diff
 first, no test or config spelunking, and the same tool budget in its frontmatter.
@@ -251,8 +254,8 @@ first, no test or config spelunking, and the same tool budget in its frontmatter
 ### Any other repo under `~/workspace`
 
 A git repo under `~/workspace` that is not an app gets the same gate at its own publish point: `git push` and
-`gh pr create` are blocked until a scoped review finished since Michael's last message, or the tree is exactly as the
-last review left it (`pi-guard` reason `reviewRepo`). A reviewer call is scoped by its `cwd` or a path in its task, with
+`gh pr create` are blocked until the tree is exactly as a counted review left it, or two reviews ended BLOCK
+(`pi-guard` reason `reviewRepo`). A reviewer call is scoped by its `cwd` or a path in its task, with
 the git root as the dir (a worktree is reviewed as itself), against the repo's `main` or `master`. Verify is required
 only when the repo has a `verify` script, and there is no screen gate (the screenshot command is the app skill's). Why:
 the website session of 2026-11-19 pushed a 77-file branch from `~/workspace/ref/worktrees/website-next` and opened its

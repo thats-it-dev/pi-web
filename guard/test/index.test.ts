@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import piGuard, { codeChanged, mainBranch, onTrunk, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
-import { KIT_PATTERNS_MARK, previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
+import { KIT_PATTERNS_MARK, previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, lastReview, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -316,7 +316,7 @@ test("an async scoped review whose launch result has no run id gets a pending ma
 	const text = r.content.map((c: any) => c.text ?? "").join("\n");
 	assert.match(text, /\[pi-guard\] review pending \S+ at [0-9a-f]{40} run unknown/);
 	assert.doesNotMatch(text, /\[pi-guard\] reviewed /);
-	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }], () => "complete"), false, "an unknown run never counts, whatever the resolver says");
+	assert.equal(lastReview([{ type: "message", message: { role: "toolResult", content: r.content } }], dir, () => "complete"), undefined, "an unknown run never counts, whatever the resolver says");
 });
 
 test("with subagents.orchestrate in settings.json, the parent session is the orchestrator and may not edit app code; a child may", () => {
@@ -342,7 +342,7 @@ test("a sync scoped review that returns without a verdict gets a note instead of
 	assert.doesNotMatch(text(r), /\[pi-guard\] reviewed /);
 	assert.doesNotMatch(text(r), /review pending/);
 	assert.match(text(r), /\[pi-guard\] review ended without a verdict/);
-	assert.equal(reviewedSinceUser([{ type: "message", message: { role: "user", content: "go" } }, { type: "message", message: { role: "toolResult", content: r.content } }]), false);
+	assert.equal(lastReview([{ type: "message", message: { role: "toolResult", content: r.content } }], dir), undefined);
 	// The same call again is not "nothing to review": the app is still unreviewed at this state.
 	const again: Record<string, unknown> = { agent: "reviewer", task: "Review keeb at ~/workspace/apps/keeb" };
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "r4", input: again }, { ...ctx, sessionManager: { getBranch: () => [...ready(dir), { type: "message", message: { role: "toolResult", toolCallId: "r3", content: r.content } }] } }), undefined);
@@ -428,7 +428,7 @@ test("a screenshot command's result gets the picture and the mark, and the gate 
 	assert.equal(screenUpToDate(dir, entries), true);
 	const r2 = h.tool_call({ toolName: "bash", toolCallId: "pr2", input: { command: `node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ${dir} --title t --body b` } }, ctx);
 	assert.equal(r2?.block, true, "looked; the review gate is next");
-	assert.match(String(r2?.reason), /^Blocked: run the reviewer before opening the PR[\s\S]*\nNo reviewer call since Michael's last message was scoped to this repo/);
+	assert.match(String(r2?.reason), /^Blocked: run the reviewer before opening the PR[\s\S]*\nNo reviewer call was scoped to this repo yet/);
 	// A failed command or one that reported no picture leaves no mark.
 	h.tool_call({ toolName: "bash", toolCallId: "s2", input: { command } }, ctx);
 	assert.equal(h.tool_result({ ...result, toolCallId: "s2", content: [{ type: "text", text: 'RESULT {"ok":false,"reason":"no vite"}' }] }, ctx), undefined);
@@ -650,16 +650,17 @@ test("through pi: a push from a workspace repo outside apps is blocked until its
 	const push = { toolName: "bash", input: { command: `cd ${dir} && git push -u origin next` } };
 	const r = h.tool_call(push, ctx([msg("user", { content: "ship it" })]));
 	assert.match(String(r?.reason), /^Blocked: run the reviewer before opening the PR or pushing this branch/);
-	assert.match(String(r?.reason), /No reviewer call since Michael's last message/);
+	assert.match(String(r?.reason), /No reviewer call was scoped to this repo yet/);
 	const pr = { toolName: "bash", input: { command: `cd ${dir} && gh pr create --base master --head next --title t --body b` } };
 	assert.match(String(h.tool_call(pr, ctx([]))?.reason), /^Blocked: run the reviewer/);
 	const reviewed = [msg("user", { content: "ship it" }), msg("toolResult", { toolCallId: "r", isError: false, content: [{ type: "text", text: reviewMark(dir, snapshot(dir)) }] })];
 	assert.equal(h.tool_call(push, ctx(reviewed)), undefined, "the tree as the review left it may go");
-	// One finished review per user message opens the gate (fixing its P2s and pushing needs no second review, as in apps);
-	// Michael's next message shuts it again until the new tree is reviewed.
+	assert.equal(h.tool_call(push, ctx([...reviewed, msg("user", { content: "and now this" })])), undefined, "a message of Michael's changes nothing about which tree was reviewed");
+	// The gate is about the tree: an edit after the review, P2 fix or not, shuts it until the new tree is reviewed.
 	writeFileSync(join(dir, "src", "a.ts"), "export const a = 3;\n");
-	assert.equal(h.tool_call(push, ctx(reviewed)), undefined, "a fix after the review in the same turn may go");
-	assert.match(String(h.tool_call(push, ctx([...reviewed, msg("user", { content: "and now this" })]))?.reason), /^Blocked: run the reviewer/, "a new request needs a new review");
+	const after = h.tool_call(push, ctx(reviewed));
+	assert.match(String(after?.reason), /^Blocked: run the reviewer/, "an edit after the review needs a new review");
+	assert.match(String(after?.reason), /The tree changed since the last review that counted/);
 	assert.equal(h.tool_call({ toolName: "bash", input: { command: `cd ${dir} && npm test` } }, ctx([])), undefined, "only publishing is gated");
 });
 

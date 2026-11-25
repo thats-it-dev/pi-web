@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exhaustedRun, planRewrite, kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { exhaustedRun, planRewrite, kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -281,12 +281,20 @@ const marked = (id: string, dir = "/home/m/workspace/apps/keeb", snap = "abc1234
 	message: { role: "toolResult", toolCallId: id, isError, content: [{ type: "text", text: "## Review\nNo issues found." }, { type: "text", text: reviewMark(dir, snap) }] },
 });
 
-test("reviewedSinceUser: only a review the guard scoped and marked, after Michael's last message, counts", () => {
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review" }), marked("a")]), true);
-	assert.equal(reviewedSinceUser([userMsg("fix it"), subCall("a", { agent: "reviewer", task: "review", async: false }), toolRes("a")]), false, "unscoped: no mark");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), marked("a", undefined, undefined, true)]), false, "failed review");
-	assert.equal(reviewedSinceUser([userMsg("fix it"), marked("a"), userMsg("now this")]), false, "before the last message");
-	assert.equal(reviewedSinceUser([]), false);
+test("blockedRounds: BLOCK reviews of the repo on different trees since the last publish; a counted review or a publish restarts", () => {
+	const dir = "/home/m/workspace/apps/keeb";
+	const res = (text: string, id?: string) => ({ type: "message", message: { role: "toolResult", toolCallId: id, content: [{ type: "text", text }] } });
+	const pr = (id: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: { command: "cd ~/workspace/apps/keeb && node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title t --body b" } }] } });
+	assert.equal(REVIEW_ROUNDS, 2);
+	assert.equal(blockedRounds([], dir), 0);
+	assert.equal(blockedRounds([userMsg("fix it"), res(reviewBlockedMark(dir, "aaaaaaa"))], dir), 1);
+	assert.equal(blockedRounds([res(reviewBlockedMark(dir, "aaaaaaa")), userMsg("ship it"), res(reviewBlockedMark(dir, "bbbbbbb"))], dir), 2, "Michael's messages change nothing");
+	assert.equal(blockedRounds([res(reviewBlockedMark(dir, "aaaaaaa")), res(reviewBlockedMark(dir, "aaaaaaa"))], dir), 1, "the same tree twice is one round");
+	assert.equal(blockedRounds([res(reviewBlockedMark(dir, "aaaaaaa")), res(reviewMark(dir, "bbbbbbb")), res(reviewBlockedMark(dir, "ccccccc"))], dir), 1, "a review that counted restarts the count");
+	assert.equal(blockedRounds([res(reviewBlockedMark(dir, "aaaaaaa")), res(reviewBlockedMark(dir, "bbbbbbb")), pr("p"), res("RESULT {}", "p"), res(reviewBlockedMark(dir, "ccccccc"))], dir), 1, "a publish restarts the count");
+	assert.equal(blockedRounds([res(reviewBlockedMark("/home/m/workspace/apps/fret", "aaaaaaa"))], dir), 0, "another app");
+	const block = () => "## Review\n**Merge verdict: BLOCK**";
+	assert.equal(blockedRounds([res(reviewPendingMark(dir, "aaaaaaa", "run-a")), res(reviewPendingMark(dir, "bbbbbbb", "run-b"))], dir, () => "complete", block), 2, "async BLOCKs read from their transcripts");
 });
 
 test("lastReview: the snapshot of the newest mark for that app", () => {
@@ -467,12 +475,11 @@ test("a pending review counts only once its run is complete, and the latest comp
 	const states: Record<string, ReturnType<RunState>> = { "run-a": "complete", "run-b": "running" };
 	const runState: RunState = (id) => states[id] ?? "missing";
 	const verdict = () => "No issues found.";
-	assert.equal(reviewedSinceUser(branch, runState, verdict), true);
 	assert.equal(lastReview(branch, dir, runState, verdict), "aaaaaaa");
 	states["run-b"] = "complete";
 	assert.equal(lastReview(branch, dir, runState, verdict), "bbbbbbb");
-	assert.equal(reviewedSinceUser(branch, () => "missing", verdict), false);
-	assert.equal(reviewedSinceUser(branch, () => "failed", verdict), false);
+	assert.equal(lastReview(branch, dir, () => "missing", verdict), undefined);
+	assert.equal(lastReview(branch, dir, () => "failed", verdict), undefined);
 });
 
 test("asyncRunId reads the run id from an async launch result", () => {
@@ -700,13 +707,12 @@ test("pending reviews count only when the finished run's reply holds a verdict",
 	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
 	const branch = [{ type: "message", message: { role: "user", content: "go" } }, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))];
 	const complete: RunState = () => "complete";
-	assert.equal(reviewedSinceUser(branch, complete, () => "## Review\n- Merge verdict: OK"), true);
+	assert.equal(lastReview(branch, dir, complete, () => "## Review\n- Merge verdict: OK"), "aaaaaaa");
 	assert.equal(lastReview(branch, dir, complete, () => "No issues found."), "aaaaaaa");
-	assert.equal(reviewedSinceUser(branch, complete, () => "Now let me check one more thing:"), false, "no verdict");
-	assert.equal(lastReview(branch, dir, complete, () => "Now let me check one more thing:"), undefined);
-	assert.equal(reviewedSinceUser(branch, complete, () => undefined), false, "transcript gone: fail closed");
+	assert.equal(lastReview(branch, dir, complete, () => "Now let me check one more thing:"), undefined, "no verdict");
+	assert.equal(lastReview(branch, dir, complete, () => undefined), undefined, "transcript gone: fail closed");
 	// A finished (sync) mark was only written after the guard saw a verdict, so it needs no transcript.
-	assert.equal(reviewedSinceUser([...branch, res(reviewMark(dir, "bbbbbbb"))], () => "missing", () => undefined), true);
+	assert.equal(lastReview([...branch, res(reviewMark(dir, "bbbbbbb"))], dir, () => "missing", () => undefined), "bbbbbbb");
 });
 
 test("defaultRunText: the assistant's replies from the run's session file named in status.json", () => {
@@ -896,25 +902,22 @@ test("the orchestrator reason no longer calls merges the orchestrator's, and the
 	assert.match(prNudge(["/home/m/workspace/apps/keeb"]), /Michael merges the PR; never merge or close it yourself/);
 });
 
-test("reviewGap says why the review gate is shut, and orders a stop after three blocks with no new review", () => {
+test("reviewGap says why the review gate is shut, about the tree and never about Michael's messages", () => {
 	const dir = "/home/m/workspace/apps/keeb";
 	const user = { type: "message", message: { role: "user", content: "go" } };
 	const res = (text: string, isError = false) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }], isError } });
-	const blocked = res("Blocked: run the reviewer before opening the PR. Run `npm run verify`...", true);
-	assert.match(reviewGap([user], dir) ?? "", /^No reviewer call since Michael's last message was scoped to this repo/);
+	assert.match(reviewGap([user], dir) ?? "", /^No reviewer call was scoped to this repo yet/);
 	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "running"), "The last scoped review (run run-a) is still running: wait for its subagent-notify message, then run this command again.");
 	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "Let me look at one more file") ?? "", /ended without a verdict the guard accepts/);
-	assert.equal(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "## Review\n- Merge verdict: OK"), undefined, "a counted review has no gap");
+	// A counted review with the gate still shut means the tree moved on; so does a finished mark.
+	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", () => "## Review\n- Merge verdict: OK") ?? "", /^The tree changed since the last review that counted/);
+	assert.match(reviewGap([res(reviewMark(dir, "aaaaaaa"))], dir) ?? "", /^The tree changed since the last review that counted/);
 	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "failed") ?? "", /failed: call the reviewer again/);
 	assert.match(reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "missing") ?? "", /has no run directory any more/);
-	// Three blocks with no new review in between: the fourth reason opens with the stop order.
-	const two = reviewGap([user, blocked, blocked], dir) ?? "";
-	assert.doesNotMatch(two, /stop retrying/);
-	const four = reviewGap([user, blocked, blocked, blocked], dir) ?? "";
-	assert.match(four, /^This is the 4th time this command is blocked with no new review in between: stop retrying\. Tell Michael/);
-	// A new scoped review resets the count, and Michael's next message resets everything.
-	assert.doesNotMatch(reviewGap([user, blocked, blocked, blocked, res(reviewPendingMark(dir, "bbbbbbb", "run-b"))], dir, () => "running") ?? "", /stop retrying/);
-	assert.doesNotMatch(reviewGap([user, blocked, blocked, blocked, user], dir) ?? "", /stop retrying/);
+	// Michael's next message changes nothing: the last mark still says what happened to this tree.
+	assert.match(reviewGap([res(reviewMark(dir, "aaaaaaa")), user], dir) ?? "", /^The tree changed/);
+	const blocked = res("Blocked: run the reviewer before opening the PR. Run `npm run verify`...", true);
+	assert.doesNotMatch(reviewGap([user, blocked, blocked, blocked, blocked], dir) ?? "", /stop retrying/, "no stop order: the rounds cap bounds the loop instead");
 	assert.equal(REVIEW_PENDING_MARK, "[pi-guard] review pending ");
 });
 
@@ -949,12 +952,10 @@ test("a review that ended BLOCK never counts for the gate or as the next base, a
 	const complete: RunState = () => "complete";
 	const block = () => "## Review\n- Finding: P0 - space switches layers\n\n**Merge verdict: BLOCK**";
 	const async = [user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))];
-	assert.equal(reviewedSinceUser(async, complete, block), false, "async BLOCK");
-	assert.equal(lastReview(async, dir, complete, block), undefined);
+	assert.equal(lastReview(async, dir, complete, block), undefined, "async BLOCK");
 	assert.equal(lastBlockedReview(async, dir, complete, block), "aaaaaaa");
 	const sync = [user, res(reviewBlockedMark(dir, "bbbbbbb"))];
-	assert.equal(reviewedSinceUser(sync, () => "missing", () => undefined), false, "sync BLOCK");
-	assert.equal(lastReview(sync, dir, () => "missing", () => undefined), undefined);
+	assert.equal(lastReview(sync, dir, () => "missing", () => undefined), undefined, "sync BLOCK");
 	assert.equal(lastBlockedReview(sync, dir, () => "missing", () => undefined), "bbbbbbb");
 	const fixed = [...sync, res(reviewMark(dir, "ccccccc"))];
 	assert.equal(lastBlockedReview(fixed, dir), undefined, "a later counted review clears it");
@@ -968,10 +969,12 @@ test("reviewGap after a BLOCK sends the findings to the worker or to Michael, ne
 	const user = { type: "message", message: { role: "user", content: "go" } };
 	const block = () => "## Review\n**Merge verdict: BLOCK**";
 	const gap = reviewGap([user, res(reviewPendingMark(dir, "aaaaaaa", "run-a"))], dir, () => "complete", block) ?? "";
-	assert.match(gap, /^The last scoped review \(run run-a\) ended with the merge verdict BLOCK/);
+	assert.match(gap, /^The last scoped review \(run run-a\) ended with the merge verdict BLOCK \(round 1 of 2 on this branch\)/);
 	assert.match(gap, /tell Michael which finding and why, and end your turn/);
+	assert.match(gap, /A second BLOCK on a changed tree opens the gate/);
 	assert.match(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb"))], dir) ?? "", /^The last scoped review ended with the merge verdict BLOCK/);
-	assert.equal(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb")), res(reviewMark(dir, "ccccccc"))], dir), undefined, "the fix was reviewed");
+	// reviewGap is only asked when the gate is shut, so a finished last mark means the tree moved on since the fix was reviewed.
+	assert.match(reviewGap([user, res(reviewBlockedMark(dir, "bbbbbbb")), res(reviewMark(dir, "ccccccc"))], dir) ?? "", /^The tree changed since the last review that counted/);
 });
 
 test("designDoc: specs and plans under docs/superpowers, nothing else", () => {
@@ -1380,28 +1383,18 @@ test("previewNote names the dir and the tool call, asks a question after the rev
 	});
 }
 
-test("shipOverride: Michael's ship instruction after a review of the app opens the gate without another review", () => {
+test("two BLOCK rounds on a branch open the gate; Michael's ship order alone does not (the cap bounds the loop, his words don't steer it)", () => {
 	const dir = "/home/m/workspace/apps/keeb";
-	const other = "/home/m/workspace/apps/fret";
 	const user = (text: string) => ({ type: "message", message: { role: "user", content: text } });
 	const res = (text: string) => ({ type: "message", message: { role: "toolResult", content: [{ type: "text", text }] } });
 	const block = () => "## Review\n**Merge verdict: BLOCK**";
-	const blocked = res(reviewBlockedMark(dir, "bbbbbbb"));
-	const asyncBlocked = res(reviewPendingMark(dir, "aaaaaaa", "run-a"));
-	// keeb 2026-11-23: five BLOCK passes, "Just ship the pr and we can fix that later.", and `pr` was still refused.
-	assert.equal(shipOverride([user("fix it"), blocked, user("Just ship the pr and we can fix that later.")], dir), true);
-	assert.equal(shipOverride([user("fix it"), asyncBlocked, user("ship it")], dir, () => "complete", block), true, "an async BLOCK read from its transcript");
-	assert.equal(shipOverride([user("fix it"), res(reviewMark(dir, "ccccccc")), user("open the PR")], dir), true, "a review that passed counts too");
-	// Without a review of this app before it, a ship message is the ordinary request and the gate stays shut.
-	assert.equal(shipOverride([user("ship it")], dir), false);
-	assert.equal(shipOverride([user("fix it"), res(reviewBlockedMark(other, "bbbbbbb")), user("ship it")], dir), false, "another app's review");
-	// Only his last message counts, and only when it says to ship.
-	assert.equal(shipOverride([user("fix it"), blocked, user("ship it"), user("hold on, the fold test is wrong")], dir), false);
-	assert.equal(shipOverride([user("fix it"), blocked, user("the P1 is right, fix it here")], dir), false);
-	assert.equal(shipOverride([user("fix it"), blocked, user("the shipping label is cut off")], dir), false, "ship as a noun is not an order");
-	// With the override, there is no gap to report.
-	assert.equal(reviewGap([user("fix it"), blocked, user("Just ship the pr and we can fix that later.")], dir), undefined);
-	assert.match(reviewGap([user("fix it"), blocked], dir) ?? "", /The gate stays shut until he says to ship/);
+	const one = [user("fix it"), res(reviewBlockedMark(dir, "bbbbbbb"))];
+	assert.equal(blockedRounds([...one, user("Just ship the pr and we can fix that later.")], dir), 1, "one round: a ship order changes nothing");
+	assert.match(reviewGap([...one, user("ship it")], dir) ?? "", /round 1 of 2/);
+	const two = [...one, res(reviewPendingMark(dir, "ccccccc", "run-c"))];
+	assert.equal(blockedRounds(two, dir, () => "complete", block), 2, "a second BLOCK on a changed tree, async, read from its transcript");
+	assert.equal(blockedRounds(two, dir, () => "running", block), 1, "still running: not a round yet");
+	assert.match(reviewGap(two, dir, () => "complete", block) ?? "", /round 2 of 2/);
 });
 
 test("inheritedChanges: the first call into a dirty app records the files; Michael keeping them releases the mark", () => {
@@ -1444,7 +1437,7 @@ test("under a discard order, reverting is allowed and committing or shipping dir
 	const ordered = env({ dirty: () => true, discardOrdered: () => true });
 	assert.equal(bash(`${app}git checkout -- .`, ordered), undefined, "the revert Michael asked for");
 	assert.equal(bash(`${app}git reset --hard HEAD`, ordered), undefined);
-	assert.match(bash(`${app}git commit -am "wip"`, ordered) ?? "", /^Blocked: Michael said to discard this work/);
+	assert.equal(bash(`${app}git commit -am "wip"`, ordered), REASONS.discardOrdered);
 	assert.match(bash(`${app}node ~/.pi/agent/skills/thatsit-app/scripts/thatsit-app.ts pr ~/workspace/apps/keeb --title x --body y`, ordered) ?? "", /^Blocked: Michael said to discard this work/);
 	assert.equal(bash(`${app}git commit -am "wip"`, env({ dirty: () => false, discardOrdered: () => true })), undefined, "a clean tree has nothing left to discard");
 	assert.equal(bash(`${app}git checkout -- .`, env({ dirty: () => true, discardOrdered: () => false })), REASONS.discard, "without the order the discard rule stands");
@@ -1653,4 +1646,13 @@ test("reviewHeader on a repo without verify or test scripts: no verify claim, be
 	const withTests = reviewHeader({ dir: "/home/m/workspace/apps/keeb", base: "a".repeat(40), baseFrom: "main", diffPath: "/tmp/keeb-review.diff", files, request: "space switches layers" });
 	assert.match(withTests, /npm run verify/);
 	assert.match(withTests, /A named behavior with no such test is a P1 finding/);
+});
+
+// The freeze from the 2026-11-24 harness review: a block reason without a test is a rule nobody can replay. Every key in
+// REASONS is exercised by name somewhere in guard/test, or this fails and names it.
+test("every REASONS key is covered by a test in guard/test", () => {
+	const dir = new URL("./", import.meta.url);
+	const tests = readdirSync(dir).filter((f) => f.endsWith(".test.ts")).map((f) => readFileSync(new URL(f, dir), "utf8")).join("\n");
+	const uncovered = Object.keys(REASONS).filter((k) => !new RegExp(`REASONS\\.${k}\\b`).test(tests));
+	assert.deepEqual(uncovered, [], "add a test (a replay fixture from the session that motivated the rule) for each");
 });

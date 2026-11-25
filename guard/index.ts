@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -445,7 +445,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 	}
 	input.task = `${header}\n${task}`;
 	// `async` is the caller's: an async review is marked pending on its launch result and counts once its run
-	// completes (rules.ts, reviewedSinceUser/lastReview), so the orchestrator can start the next task meanwhile.
+	// completes (rules.ts, lastReview/upToDate), so the orchestrator can start the next task meanwhile.
 	input.cwd = dir;
 	input.toolBudget = { ...REVIEW_BUDGET };
 	// The review runs on a model that is already loaded: it must never swap the serving group (flash-next, the agent
@@ -537,9 +537,11 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			home,
 			hasScript,
 			dirty,
+			// The gate is about the tree, not about messages: the tree as a counted review left it may go, and so may a
+			// branch whose reviews ended BLOCK REVIEW_ROUNDS times (the PR body carries the findings; Michael decides).
 			reviewed: (dir) => {
 				const b = branch();
-				return reviewedSinceUser(b) || upToDate(dir, b) || shipOverride(b, dir);
+				return upToDate(dir, b) || blockedRounds(b, dir) >= REVIEW_ROUNDS;
 			},
 			codeChanged,
 			docsChanged,
@@ -665,9 +667,12 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		// A sync result is the review itself: without a verdict it gets a note, never the mark, so the PR gate stays shut and
 		// the next review starts from the same base. (An async run's reply is checked when its pending mark is resolved.)
 		if (!runId && !reviewVerdict(text)) return withExtra([{ type: "text", text: REVIEW_NO_VERDICT }]);
-		// A sync BLOCK gets the blocked mark: it refuses a second review of the same tree and never opens the gate.
-		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : reviewBlocked(text) ? reviewBlockedMark(scoped.dir, scoped.snap) : reviewMark(scoped.dir, scoped.snap);
-		return withExtra([{ type: "text", text: mark }]);
+		// A sync BLOCK gets the blocked mark: it refuses a second review of the same tree and never opens the gate on its
+		// own; the BLOCK that fills the rounds says so, since the gate is open from here and another review is waste.
+		const blocked = !runId && reviewBlocked(text);
+		const mark = runId ? reviewPendingMark(scoped.dir, scoped.snap, runId) : blocked ? reviewBlockedMark(scoped.dir, scoped.snap) : reviewMark(scoped.dir, scoped.snap);
+		const rounds = blocked && blockedRounds([...(ctx?.sessionManager?.getBranch() ?? [])], scoped.dir) + 1 >= REVIEW_ROUNDS ? [{ type: "text" as const, text: REVIEW_ROUNDS_OPEN }] : [];
+		return withExtra([{ type: "text", text: mark }, ...rounds]);
 	});
 
 	// Return nothing: pi's default summarizer runs. The summary keeps a line about the app rules at best, so the next
