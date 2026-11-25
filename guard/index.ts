@@ -2,11 +2,12 @@
 // working on thatsit.app apps, and restarts a coding run that stops without a reply. Rules: rules.ts.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, reasonKey, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -466,6 +467,20 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	const chat = env.PI_WEB_SESSION_TYPE === "chat";
 	// With the agent pair in pi's settings, the parent session orchestrates and never edits app code (rules.ts).
 	const orchestrator = !child && pairSettings(readSettings(home));
+	// Every block, one line in ~/.pi/agent/tmp/pi-guard-blocks.jsonl: the reason key, the tool, the repo, the call hash
+	// and whether this is a child, so a session's false positives can be tallied without reading its JSONL by hand (the
+	// measurement protocol of the 2026-11-24 harness review). A log that cannot be written changes nothing about the block.
+	const blockLog = join(home, ".pi", "agent", "tmp", "pi-guard-blocks.jsonl");
+	const logBlock = (reason: string, toolName: string, input: Record<string, unknown> | undefined): Block => {
+		try {
+			mkdirSync(join(home, ".pi", "agent", "tmp"), { recursive: true });
+			const command = typeof input?.command === "string" ? input.command : typeof input?.path === "string" ? input.path : typeof input?.agent === "string" ? `agent:${input.agent}` : "";
+			appendFileSync(blockLog, `${JSON.stringify({ t: new Date().toISOString(), pid: process.pid, child, reason: reasonKey(reason), tool: toolName, call: createHash("sha256").update(command).digest("hex").slice(0, 10) })}\n`);
+		} catch {
+			// the block still stands
+		}
+		return { block: true, reason };
+	};
 	const rewrites = new Set<string>();
 	// Scoped reviewer calls in flight: tool call id -> the app and the snapshot the review covers.
 	const reviews = new Map<string, { dir: string; snap: string; async: boolean }>();
@@ -563,7 +578,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			discardOrdered: () => discardOrder(branch()),
 			onTrunk,
 		});
-		if (block) return block;
+		if (block) return logBlock(block.reason, event.toolName, event.input ?? undefined);
 		// The first call that goes through into an app: its result carries the app's rules, which a session in home never
 		// loaded and which the skill lists but the model does not read (keeb 2026-11-19: a settings dialog rebuilt by
 		// hand, every kit rule unread). A worker in the app already has AGENTS.md and gets the style rules alone.
@@ -611,7 +626,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		}
 		if (event.toolName !== "subagent" || !event.input) return undefined;
 		// A run that spent its whole tool budget is not revived: the revive thrashes in the same context.
-		if (event.input.action === "resume" && exhaustedRun(event.input.id)) return { block: true, reason: REASONS.resumeExhausted };
+		if (event.input.action === "resume" && exhaustedRun(event.input.id)) return logBlock(REASONS.resumeExhausted, event.toolName, event.input);
 		// A resume after a stop tells the worker the stopped run's follow-up is withdrawn (its session file still holds it).
 		noteWithdrawn(event.input, branch());
 		const model = (ctx as { model?: { provider?: string; id?: string } }).model;
@@ -622,14 +637,28 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		} catch (err) {
 			return { block: true, reason: `Blocked: pi-guard could not prepare the review diff (${(err as Error).message.split("\n")[0]}). Check the app's git state (git status in the app), then call the reviewer again.` };
 		}
-		if (scoped && "block" in scoped) return scoped;
+		if (scoped && "block" in scoped) return logBlock(scoped.reason, event.toolName, event.input);
+		// The model the run will use — the one the guard just pinned (scopeReview and pinResidentModel both set
+		// input.model), or the session's when none was pinned — rides back on the result, so the orchestrator stops
+		// believing a dispatch ran on a model the pin had deleted (website 2026-11-24: 12 dispatches named flash-next or
+		// 27b, every one ran on inkling, and the compaction summary kept the wrong belief). Appended by the guard, not
+		// by the model, from what it set; the pin itself is unchanged.
+		const ranOn = () => {
+			const ran = typeof event.input!.model === "string" ? event.input!.model : sessionModel ?? "the session's model";
+			const lvl = typeof event.input!.thinking === "string" ? `, thinking ${event.input!.thinking}` : "";
+			addNote(event.toolCallId, `[pi-guard] ran on ${ran}${lvl}.`);
+		};
 		if (scoped) {
 			reviews.set(event.toolCallId, scoped);
 			// The review is done looking at the screen: the reviewer's result says the Preview panel exists, once.
 			previewNudge(event.toolCallId, scoped.dir, "review", branch, ctx.cwd);
+			ranOn();
 		} else if (event.input.agent === "reviewer") unscoped.add(event.toolCallId);
 		// Every other launch (a worker, a scout) runs on a loaded model too, for the same reason as the review.
-		else if (typeof event.input.agent === "string") pinResidentModel(event.input, readSettings(home), loadedModels(resident), sessionModel);
+		else if (typeof event.input.agent === "string") {
+			pinResidentModel(event.input, readSettings(home), loadedModels(resident), sessionModel);
+			ranOn();
+		}
 		return undefined;
 	});
 
@@ -687,9 +716,13 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// whether a cold prefill came from a changed system prompt (its sections are listed by length) or an earlier message.
 	const promptLog = join(home, ".pi", "agent", "tmp", "pi-guard-prompts.jsonl");
 	let sections: Record<string, number> = {};
+	let sysChars = 0;
 	pi.on("before_agent_start", (event) => {
 		const s = (event.systemPromptOptions?.sections ?? {}) as Record<string, unknown>;
 		sections = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, typeof v === "string" ? v.length : v == null ? 0 : -1]));
+		// pi renders its built-in sections into `systemPrompt` and leaves `sections` holding only what extensions added,
+		// so that map is usually empty; the rendered length is the number the static-prefix budget actually watches.
+		sysChars = typeof (event as { systemPrompt?: unknown }).systemPrompt === "string" ? (event as { systemPrompt: string }).systemPrompt.length : 0;
 		return undefined;
 	});
 	pi.on("before_provider_request", (event) => {
@@ -697,7 +730,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		if (!d) return undefined;
 		try {
 			mkdirSync(join(home, ".pi", "agent", "tmp"), { recursive: true });
-			appendFileSync(promptLog, `${JSON.stringify({ t: new Date().toISOString(), pid: process.pid, child, ...d, sections })}\n`);
+			appendFileSync(promptLog, `${JSON.stringify({ t: new Date().toISOString(), pid: process.pid, child, ...d, sysChars, sections })}\n`);
 		} catch {
 			// A log that cannot be written changes nothing about the request.
 		}

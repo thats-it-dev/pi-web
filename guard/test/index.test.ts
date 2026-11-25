@@ -250,7 +250,9 @@ test("a reviewer launch the guard could not scope gets a note saying it will not
 	assert.ok(text(r).endsWith(REVIEW_UNSCOPED));
 	assert.equal(h.tool_result({ toolCallId: "u1", toolName: "subagent", content: [{ type: "text", text: "again" }], isError: false }, ctx), undefined, "the note goes on once");
 	assert.equal(h.tool_call({ toolName: "subagent", toolCallId: "w1", input: { agent: "worker", task: "build it" } }, ctx), undefined);
-	assert.equal(h.tool_result({ toolCallId: "w1", toolName: "subagent", content: [{ type: "text", text: "ok" }], isError: false }, ctx), undefined, "workers get no note");
+	const wr = h.tool_result({ toolCallId: "w1", toolName: "subagent", content: [{ type: "text", text: "ok" }], isError: false }, ctx);
+	assert.match(text(wr), /\[pi-guard\] ran on /, "a worker gets the model line but no unscoped note");
+	assert.doesNotMatch(text(wr), /does not count for the PR gate/);
 });
 
 test("tool_result marks a scoped review so the PR gate sees it", () => {
@@ -828,6 +830,32 @@ test("a reviewer or worker launch runs on the session's model when the configure
 	const status: Record<string, unknown> = { action: "status", id: "cc9f4fa1" };
 	assert.equal(handlers.tool_call({ toolName: "subagent", toolCallId: "m4", input: status }, ctx("inkling-2-mini")), undefined);
 	assert.equal(status.model, undefined, "a status call names no agent and gets no model");
+	// The result says which model the run used: the one the guard pinned, not the one the orchestrator asked for.
+	const txt = (r: any) => r.content.map((c: any) => c.text ?? "").join("\n");
+	const wr = handlers.tool_result({ toolCallId: "m2", toolName: "subagent", content: [{ type: "text", text: "Implemented the toggle." }], isError: false }, ctx("inkling-2-mini"));
+	assert.match(txt(wr), /\[pi-guard\] ran on spark\/inkling-2-mini\./, "the worker's pinned model");
+	const fr = handlers.tool_result({ toolCallId: "m3", toolName: "subagent", content: [{ type: "text", text: "## Review\n- Merge verdict: OK" }], isError: false }, ctx("flash-auto"));
+	assert.match(txt(fr), /\[pi-guard\] ran on spark\/flash-auto\./, "the configured model was left on, so it ran on the session model");
+});
+
+test("a subagent launch records a block in the block log; a passing call does not", () => {
+	const { home, dir } = appRepo();
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 7;\n");
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: dir, sessionManager: { getBranch: () => ready(dir) } };
+	const log = join(home, ".pi", "agent", "tmp", "pi-guard-blocks.jsonl");
+	// A push is blocked; the log gets one line naming the reason key.
+	assert.deepEqual(h.tool_call({ toolName: "bash", input: { command: `cd ${dir} && git push` } }, ctx), { block: true, reason: REASONS.push });
+	const lines = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+	const pushLine = lines.find((e) => e.reason === "push");
+	assert.ok(pushLine, "the push block is logged");
+	assert.equal(pushLine.tool, "bash");
+	assert.equal(pushLine.child, false);
+	assert.match(pushLine.call, /^[0-9a-f]{10}$/);
+	const before = readFileSync(log, "utf8");
+	// A read is not blocked and logs nothing.
+	assert.equal(h.tool_call({ toolName: "read", input: { path: `${dir}/src/a.ts` } }, ctx), undefined);
+	assert.equal(readFileSync(log, "utf8"), before, "a passing call adds no line");
 });
 
 {

@@ -39,6 +39,16 @@ export const REASONS = {
 		'Blocked: run the reviewer before opening the PR or pushing this branch. A git repo under ~/workspace gets the same review gate as an app: call the `subagent` tool (call `subagents_enable` first if it is not available) with agent "reviewer", `cwd` set to the repo, and a task that names Michael\'s request. The guard writes the diff against main and the review scope itself; don\'t write a diff. If the repo has `npm run verify`, run it green first. A review that ended without a `## Review` block or `No issues found.` doesn\'t count: call the reviewer again. Fix what you confirm, commit, list the findings you fixed and rejected in the PR body, then rerun this command.',
 };
 
+/** The REASONS key a block reason belongs to, for the block log: the static reason whose text the block starts with
+ *  (the review gate and the pr-timeout rule append lines), else a slug of the first few words (workerBusy and the
+ *  inherited-changes block are built per call). The log counts rules, so a stable key matters more than the exact text. */
+export function reasonKey(reason: string): string {
+	for (const [key, text] of Object.entries(REASONS)) if (typeof text === "string" && reason.startsWith(text.slice(0, 40))) return key;
+	if (/^Blocked: an async `worker`/.test(reason)) return "workerBusy";
+	if (/predate this session|was changed before this session/.test(reason)) return "inherited";
+	return reason.replace(/^Blocked:\s*/, "").toLowerCase().split(/\s+/).slice(0, 3).join("-").replace(/[^a-z0-9-]/g, "") || "other";
+}
+
 // Merging or closing a PR by the gh CLI or the REST API (a push to main in an app is the push rule's). Michael merges (SKILL.md step 7),
 // and on 2026-11-16 the orchestrator, having never read the skill, merged keeb #28 with `gh pr merge` the moment CI was green.
 const MERGES = /\bgh\s+pr\s+(?:merge|close)\b|\bgh\s+api\b[^;&|\n]*(?:\/merge\b|-X\s*PUT\b[^;&|\n]*\/pulls\/|--method[\s=]*PUT\b[^;&|\n]*\/pulls\/)/;
@@ -1669,17 +1679,18 @@ export function noteWithdrawn(input: Record<string, unknown>, branch: Iterable<u
 // prefills, 18 of 55 orchestrator minutes); the server log shows the miss, not its cause. Hashes of the system prompt
 // and of each message say whether the request changed before its last message, and where. ---
 
-export type PromptDigest = { model?: string; sys: string; msgs: string[]; chars: number };
+export type PromptDigest = { model?: string; sys: string; msgs: string[]; chars: number; tools: number };
 
 /** Hashes of a provider payload: the system text (any `system`/`instructions` field and system-role messages) and each
- *  other message in order; undefined when the payload carries no message list. */
+ *  other message in order; undefined when the payload carries no message list. `tools` is the tool-definition count
+ *  (the measurement protocol of the 2026-11-24 harness review budgets it), 0 when the payload lists none. */
 export function promptDigest(payload: unknown): PromptDigest | undefined {
 	if (!payload || typeof payload !== "object") return undefined;
-	const p = payload as { model?: unknown; system?: unknown; instructions?: unknown; messages?: unknown; input?: unknown };
+	const p = payload as { model?: unknown; system?: unknown; instructions?: unknown; messages?: unknown; input?: unknown; tools?: unknown };
 	const list = Array.isArray(p.messages) ? p.messages : Array.isArray(p.input) ? p.input : undefined;
 	if (!list) return undefined;
 	const role = (m: unknown) => (m && typeof m === "object" ? (m as { role?: unknown }).role : undefined);
 	const h = (v: unknown) => createHash("sha256").update(JSON.stringify(v) ?? "").digest("hex").slice(0, 10);
 	const system = [p.system, p.instructions, ...list.filter((m) => role(m) === "system")].filter((v) => v !== undefined);
-	return { model: typeof p.model === "string" ? p.model : undefined, sys: h(system), msgs: list.filter((m) => role(m) !== "system").map(h), chars: JSON.stringify(payload).length };
+	return { model: typeof p.model === "string" ? p.model : undefined, sys: h(system), msgs: list.filter((m) => role(m) !== "system").map(h), chars: JSON.stringify(payload).length, tools: Array.isArray(p.tools) ? p.tools.length : 0 };
 }

@@ -878,6 +878,9 @@ test("promptDigest hashes the system text and each message; the hashes move only
 	assert.equal(d.msgs.length, 1);
 	assert.equal(promptDigest({ model: "m" }), undefined);
 	assert.equal(promptDigest("x"), undefined);
+	// The tool-definition count rides along for the static-prefix budget (Add #8 of the 2026-11-24 harness review).
+	assert.equal(a.tools, 0, "no tools in the payload");
+	assert.equal(promptDigest({ model: "m", messages: [{ role: "user", content: "hi" }], tools: [{ name: "read" }, { name: "edit" }, { name: "bash" }] })!.tools, 3);
 });
 
 test("merging or closing a PR is blocked with or without an app path; reading PRs and local merges are not", () => {

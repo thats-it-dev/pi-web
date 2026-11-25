@@ -309,8 +309,16 @@ every `ship` are blocked until the orchestrator has looked at the screen as the 
   message. The chain of runs (launch, each revive) is read from the branch; a run that had finished before the stop
   withdraws nothing.
 - Every provider request is digested into `~/.pi/agent/tmp/pi-guard-prompts.jsonl`: time, pid, model, a hash of
-  the system text, a hash per message, the payload size, and the system prompt sections by length (from
-  `before_agent_start`). With the server's cached-token count per request this says whether a cold prefill came
-  from a changed system prompt or an earlier message, and which. Why: the fret session of 2026-11-14 paid for
-  eight full prefills on the 27b, about 18 of its 55 orchestrator minutes, and the server log shows the miss but
-  not its cause.
+  the system text, a hash per message, the payload size (`chars`), the tool-definition count (`tools`), the rendered
+  system-prompt length (`sysChars`, from `before_agent_start`), and the custom sections by length (`sections`, usually
+  empty: pi renders its built-in sections into the prompt string and leaves that field for extension-added ones). With
+  the server's cached-token count per request this says whether a cold prefill came from a changed system prompt or an
+  earlier message, and which, and lets the static-prefix budget of the 2026-11-24 harness review (Add #8: a fresh
+  parent request stays small and stable) be checked from the log. Why: the fret session of 2026-11-14 paid for eight
+  full prefills on the 27b, about 18 of its 55 orchestrator minutes, and the server log shows the miss but not its cause.
+- Every block is logged to `~/.pi/agent/tmp/pi-guard-blocks.jsonl` (Add #9): time, pid, child, the `REASONS` key
+  (`reasonKey`), the tool, and a hash of the command or path. A false-positive tally over this file is the direct
+  "harness fighting the model" metric in the measurement protocol, without reading each session's JSONL by hand.
+- Every subagent launch's result ends with `[pi-guard] ran on <model>` (Add #7): the model the guard pinned, not the
+  one the orchestrator asked for, so a dispatch the pin redirected no longer leaves a false belief that survives
+  compaction (website 2026-11-24: 12 dispatches named flash-next or 27b and every one ran on inkling).
