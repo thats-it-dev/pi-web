@@ -1,0 +1,11 @@
+{
+	"name": "@pi-web/bench-suite",
+	"private": true,
+	"type": "module",
+	"description": "The harness measurement suite: 12 frozen tasks, a metrics parser and a runner (2026-11-24 review's protocol)",
+	"scripts": {
+		"test": "node --test --test-concurrency=1 test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.json"
+	},
+	"devDependencies": { "typescript": "5.9.3", "@types/node": "26.6.5" }
+}
