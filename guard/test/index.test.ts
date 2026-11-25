@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import piGuard, { codeChanged, mainBranch, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
+import piGuard, { codeChanged, mainBranch, onTrunk, repoRoot, docsChanged, mergedBranch, needsPr, scopeReview, screenUpToDate, snapshot, switchToMain, uiChanged, upToDate } from "../index.ts";
 import { KIT_PATTERNS_MARK, previewNote, MERGE_NUDGE_TYPE, NUDGE_TYPE, PR_NUDGE_TYPE, REASONS, reviewBlockedMark, reviewedSinceUser, reviewMark, reviewPendingMark, REVIEW_UNSCOPED, screenMark, TODO_NUDGE_TYPE } from "../rules.ts";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -981,4 +981,54 @@ test("a UI edit in an app gets the kit patterns it touches on its result, each o
 	// After a compaction the summary has lost the patterns: the next edit touching one gets it again.
 	h.session_before_compact({ preparation: { messagesToSummarize: [], turnPrefixMessages: [] } }, ctx);
 	assert.match(edit("e5", join(dir, "src", "ui", "settings-dialog.ts"), 'html`<tk-sheet heading="Settings"><div class="form"></div></tk-sheet>`')!, /## Overlays: Settings dialog/);
+});
+
+test("onTrunk: true on main or master, false on a branch, in detached HEAD or outside a repo", () => {
+	const { dir, git } = wsRepo();
+	assert.equal(onTrunk(dir), false, "on next");
+	git("switch", "-q", "master");
+	assert.equal(onTrunk(dir), true);
+	git("switch", "-q", "--detach");
+	assert.equal(onTrunk(dir), false);
+	assert.equal(onTrunk(join(dir, "missing")), false);
+});
+
+test("scopeReview: commits made on main are reviewed against origin/main, not against main itself", () => {
+	// website 2026-11-24: the orchestrator committed on main, so merge-base(main, HEAD) was HEAD, the reviewer call was
+	// refused as "nothing changed" and the push stayed gated, with no review possible.
+	const { home, dir, git } = wsRepo("main");
+	const remote = mkdtempSync(join(tmpdir(), "guard-remote-"));
+	execFileSync("git", ["init", "-q", "--bare", "-b", "main"], { cwd: remote, stdio: "pipe" });
+	git("remote", "add", "origin", remote);
+	git("switch", "-q", "main");
+	git("push", "-qu", "origin", "main");
+	writeFileSync(join(dir, "src", "a.ts"), "export const a = 2;\n");
+	git("commit", "-qam", "on main");
+	assert.equal(codeChanged(dir), true);
+	const input: Record<string, unknown> = { agent: "reviewer", cwd: dir, task: "Review the change" };
+	const r = scopeReview(input, [msg("user", { content: "drop the submodule" })], home, home) as { dir: string };
+	assert.equal(r.dir, dir, "a review, not reviewNothing");
+	assert.match(String(input.task), /src\/a\.ts \(\+1 -1\)/);
+	assert.match(readFileSync("/tmp/site-review.diff", "utf8"), /\+export const a = 2;/);
+	git("push", "-q", "origin", "main");
+	assert.deepEqual(scopeReview({ agent: "reviewer", cwd: dir, task: "Review the change" }, [msg("user", { content: "drop the submodule" })], home, home), { block: true, reason: REASONS.reviewNothing }, "once pushed, nothing differs from origin/main");
+});
+
+test("a repo outside apps whose page loads the kit gets the kit handover too, start and layout sections included", () => {
+	const { home, dir } = wsRepo();
+	writeFileSync(join(dir, "index.html"), '<!doctype html><link rel="stylesheet" href="https://kit.thatsit.app/kit.css">');
+	const h = load(() => false, { HOME: home });
+	const ctx = { cwd: home, sessionManager: { getBranch: () => [] } };
+	assert.equal(h.tool_call({ toolName: "write", toolCallId: "w1", input: { path: join(dir, "app-main.js"), content: 'import { LitElement, html } from "https://kit.thatsit.app/lit.js";\nclass A extends LitElement { render() { return html`<tk-shell><tk-header></tk-header></tk-shell>`; } }' } }, ctx), undefined);
+	const note = h.tool_result({ toolName: "write", toolCallId: "w1", content: [{ type: "text", text: "ok" }] }, ctx).content.map((c: { text: string }) => c.text).find((t: string) => t.startsWith(KIT_PATTERNS_MARK));
+	assert.ok(note, "the write carries the kit sections");
+	assert.match(note!, /## Start here\n/);
+	assert.match(note!, /## Start here: A component\n/);
+	assert.match(note!, /## Layout\n/);
+	// A repo that does not load the kit gets nothing.
+	const other = wsRepo();
+	const h2 = load(() => false, { HOME: other.home });
+	assert.equal(h2.tool_call({ toolName: "write", toolCallId: "w2", input: { path: join(other.dir, "app-main.js"), content: "class A extends LitElement {}" } }, { cwd: other.home, sessionManager: { getBranch: () => [] } }), undefined);
+	const r2 = h2.tool_result({ toolName: "write", toolCallId: "w2", content: [{ type: "text", text: "ok" }] }, { cwd: other.home, sessionManager: { getBranch: () => [] } });
+	assert.equal((r2?.content ?? []).some((c: { text: string }) => c.text.startsWith(KIT_PATTERNS_MARK)), false);
 });

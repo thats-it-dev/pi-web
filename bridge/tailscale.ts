@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -22,11 +22,53 @@ export interface ServeEntry {
 	target: string; // like "http://127.0.0.1:5173"
 }
 
+/** The HTTPS proxy entries in a `tailscale serve status --json` output, sorted by port. */
+function parseEntries(raw: string): ServeEntry[] {
+	const out = raw.trim();
+	if (!out) return [];
+	const cfg = JSON.parse(out);
+	const tcp = cfg?.TCP ?? {};
+	const web = cfg?.Web ?? {};
+	const result: ServeEntry[] = [];
+	for (const [key, value] of Object.entries(web)) {
+		const port = Number(key.slice(key.lastIndexOf(":") + 1));
+		if (!Number.isInteger(port) || tcp[String(port)]?.HTTPS !== true) continue;
+		const target = (value as any)?.Handlers?.["/"]?.Proxy;
+		if (typeof target !== "string") continue;
+		result.push({ port, target });
+	}
+	return result.sort((a, b) => a.port - b.port);
+}
+
+/** The synchronous twin of Exec, for teardown that must finish before the process exits. */
+export type ExecSync = (cmd: string, args: string[]) => string;
+
+export const defaultExecSync: ExecSync = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "pipe"] });
+
 export class Tailscale {
 	private exec: Exec;
+	private execSync: ExecSync | undefined;
 
-	constructor(exec: Exec = defaultExec) {
+	constructor(exec: Exec = defaultExec, execSync: ExecSync | undefined = exec === defaultExec ? defaultExecSync : undefined) {
 		this.exec = exec;
+		this.execSync = execSync;
+	}
+
+	/** True when this instance can run tailscale synchronously (removeSync, entriesSync). */
+	get sync(): boolean {
+		return this.execSync !== undefined;
+	}
+
+	/** entries(), synchronously; throws without a sync exec. */
+	entriesSync(): ServeEntry[] {
+		if (!this.execSync) throw new Error("no synchronous tailscale exec");
+		return parseEntries(this.execSync("tailscale", ["serve", "status", "--json"]));
+	}
+
+	/** remove(), synchronously; throws without a sync exec. */
+	removeSync(port: number): void {
+		if (!this.execSync) throw new Error("no synchronous tailscale exec");
+		this.execSync("tailscale", ["serve", `--https=${port}`, "off"]);
 	}
 
 	/** Self.DNSName from `tailscale status --json`, trailing dot stripped. */
@@ -39,20 +81,7 @@ export class Tailscale {
 
 	/** HTTPS proxy entries from `tailscale serve status --json`, sorted by port. */
 	async entries(): Promise<ServeEntry[]> {
-		const out = (await this.exec("tailscale", ["serve", "status", "--json"])).trim();
-		if (!out) return [];
-		const cfg = JSON.parse(out);
-		const tcp = cfg?.TCP ?? {};
-		const web = cfg?.Web ?? {};
-		const result: ServeEntry[] = [];
-		for (const [key, value] of Object.entries(web)) {
-			const port = Number(key.slice(key.lastIndexOf(":") + 1));
-			if (!Number.isInteger(port) || tcp[String(port)]?.HTTPS !== true) continue;
-			const target = (value as any)?.Handlers?.["/"]?.Proxy;
-			if (typeof target !== "string") continue;
-			result.push({ port, target });
-		}
-		return result.sort((a, b) => a.port - b.port);
+		return parseEntries(await this.exec("tailscale", ["serve", "status", "--json"]));
 	}
 
 	/** `tailscale serve --bg --https=<port> http://127.0.0.1:<local>` */

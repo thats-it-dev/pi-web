@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -149,6 +149,27 @@ export function mainBranch(dir: string): string {
 	return "main";
 }
 
+/** The trunk as the remote has it (`origin/main`) when that ref exists, else the local trunk: the review base and the
+ *  changed-files checks diff against it, so commits made on the local trunk still count as the branch's changes. */
+export function trunkRef(dir: string): string {
+	const main = mainBranch(dir);
+	try {
+		execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${main}`], { cwd: dir, stdio: "pipe", timeout: 5000 });
+		return `origin/${main}`;
+	} catch {
+		return main;
+	}
+}
+
+/** The checkout sits on the trunk (main or master). False on a branch, in detached HEAD, or outside a repo. */
+export function onTrunk(dir: string): boolean {
+	try {
+		return execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd: dir, encoding: "utf8", stdio: "pipe", timeout: 5000 }).trim() === mainBranch(dir);
+	} catch {
+		return false;
+	}
+}
+
 /** The git root of a path under ~/workspace outside apps, for the review gate on other repos: the toplevel of the
  *  nearest directory that exists (a worktree is its own root). Undefined outside ~/workspace, under apps, or outside any repo. */
 export function repoRoot(path: string, home: string): string | undefined {
@@ -170,7 +191,7 @@ export function repoRoot(path: string, home: string): string | undefined {
 export function codeChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 });
-		const files = [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n"), ...run(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(Boolean);
+		const files = [...run(["diff", "--name-only", `${trunkRef(dir)}...HEAD`]).split("\n"), ...run(["diff", "--name-only", "HEAD"]).split("\n"), ...run(["ls-files", "--others", "--exclude-standard"]).split("\n")].filter(Boolean);
 		return files.length === 0 || files.some((f) => !reviewFree(f));
 	} catch {
 		return true;
@@ -181,7 +202,7 @@ export function codeChanged(dir: string): boolean {
 export function docsChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
-		return [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(designDoc);
+		return [...run(["diff", "--name-only", `${trunkRef(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(designDoc);
 	} catch {
 		return false;
 	}
@@ -191,7 +212,7 @@ export function docsChanged(dir: string): boolean {
 export function uiChanged(dir: string): boolean {
 	try {
 		const run = (args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", timeout: 5000 }).split("\n").filter(Boolean);
-		return [...run(["diff", "--name-only", `${mainBranch(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
+		return [...run(["diff", "--name-only", `${trunkRef(dir)}...HEAD`]), ...run(["diff", "--name-only", "HEAD"]), ...run(["ls-files", "--others", "--exclude-standard"])].some(uiFile);
 	} catch {
 		return true;
 	}
@@ -394,7 +415,7 @@ export function scopeReview(input: Record<string, unknown>, branch: unknown[], c
 		baseFrom = "review";
 	} else {
 		try {
-			base = git(dir, ["merge-base", mainBranch(dir), snap]);
+			base = git(dir, ["merge-base", trunkRef(dir), snap]);
 		} catch {
 			base = git(dir, ["rev-parse", "HEAD"]);
 		}
@@ -457,6 +478,20 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// Kit patterns already handed to each app this session (again after a compaction), and the design system page they
 	// come from: kit/demo/index.html in this repo, read once; the live page is the same file deployed.
 	const handed = new Map<string, Set<string>>();
+	// A repo outside apps whose index.html loads the kit: checked once per repo per session.
+	const kitRepos = new Map<string, boolean>();
+	const kitRepo = (dir: string): boolean => {
+		let is = kitRepos.get(dir);
+		if (is === undefined) {
+			try {
+				is = kitLoaded(readFileSync(join(dir, "index.html"), "utf8"));
+			} catch {
+				is = false;
+			}
+			kitRepos.set(dir, is);
+		}
+		return is;
+	};
 	let kitCache: ReturnType<typeof kitPatterns> | undefined | null = null;
 	const kit = () => {
 		if (kitCache === null) {
@@ -524,6 +559,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 				return files.filter((f) => now.has(f));
 			},
 			discardOrdered: () => discardOrder(branch()),
+			onTrunk,
 		});
 		if (block) return block;
 		// The first call that goes through into an app: its result carries the app's rules, which a session in home never
@@ -537,19 +573,22 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		}
 		// A UI edit in an app: its result carries the code of the kit patterns it touches, each once per app, and names
 		// what the edit builds by hand. The rules say to fetch the design system page first; 3 of 18 sessions did.
-		if (inApp && (event.toolName === "edit" || event.toolName === "write") && typeof event.input?.path === "string") {
+		if (scope && (event.toolName === "edit" || event.toolName === "write") && typeof event.input?.path === "string") {
+			const text = event.toolName === "write" ? String(event.input.content ?? "") : ((event.input.edits ?? []) as { newText?: unknown }[]).map((e) => String(e?.newText ?? "")).join("\n");
+			// Any other repo under ~/workspace gets the handover once its page or this edit loads the kit from the CDN.
+			const kitDir = inApp ?? (kitLoaded(text) || kitRepo(scope) ? scope : undefined);
 			const abs = absPath(event.input.path, ctx.cwd, home);
-			const rel = abs.startsWith(`${inApp}/`) ? abs.slice(inApp.length + 1) : /\/(src\/.+|index\.html|public\/.+)$/.exec(abs)?.[1];
-			if (rel && uiFile(rel)) {
-				const text = event.toolName === "write" ? String(event.input.content ?? "") : ((event.input.edits ?? []) as { newText?: unknown }[]).map((e) => String(e?.newText ?? "")).join("\n");
-				const seen = handed.get(inApp) ?? new Set<string>();
+			const rel = kitDir && abs.startsWith(`${kitDir}/`) ? abs.slice(kitDir.length + 1) : /\/(src\/.+|index\.html|public\/.+)$/.exec(abs)?.[1];
+			const ui = rel && (inApp ? uiFile(rel) : /\.(?:ts|js|css|html)$/.test(rel) && !/^(?:node_modules|dist|test)\//.test(rel));
+			if (kitDir && rel && ui) {
+				const seen = handed.get(kitDir) ?? new Set<string>();
 				const ids = kitPatternIds(rel, text).filter((id) => !seen.has(id));
 				const patterns = kit()?.filter((p) => ids.includes(p.id)) ?? [];
 				const departures = kitDepartures(text);
 				if (patterns.length || departures.length) {
 					addNote(event.toolCallId, kitPatternNote(patterns, departures));
 					for (const p of patterns) seen.add(p.id);
-					handed.set(inApp, seen);
+					handed.set(kitDir, seen);
 				}
 			}
 		}
@@ -569,6 +608,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			return undefined;
 		}
 		if (event.toolName !== "subagent" || !event.input) return undefined;
+		// A run that spent its whole tool budget is not revived: the revive thrashes in the same context.
+		if (event.input.action === "resume" && exhaustedRun(event.input.id)) return { block: true, reason: REASONS.resumeExhausted };
 		// A resume after a stop tells the worker the stopped run's follow-up is withdrawn (its session file still holds it).
 		noteWithdrawn(event.input, branch());
 		const model = (ctx as { model?: { provider?: string; id?: string } }).model;

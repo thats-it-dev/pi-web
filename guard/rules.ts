@@ -1,6 +1,6 @@
 // Pure rules for the guard extension. index.ts wires them to pi's events.
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 export type Block = { block: true; reason: string };
@@ -31,6 +31,10 @@ export const REASONS = {
 	merge: "Blocked: never merge or close a pull request; Michael merges. Green CI means your work is done: reply with the PR link and the preview link, say CI is green, and end your turn. Don't suggest a merge command either.",
 	ciRepo:
 		"Blocked: don't wait for or poll CI yourself (no sleep, gh run list, gh pr checks without --watch). Wait once, in the background: run `gh pr checks <number> --watch --fail-fast` (or `gh run watch <run-id> --exit-status`) with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes. On a failure read `gh run view <run-id> --log-failed`, fix, commit, push, and watch again with bg_bash.",
+	resumeExhausted:
+		"Blocked: this run ended with its tool budget exhausted (hard-blocked), and a resume inherits that context: on website 2026-11-24 the revived worker made 57 bash calls, never called the edit tool, landed nothing and reported that its edits had not landed; a fresh worker did the fix in 14 calls. Dispatch a fresh run of the same agent with the brief, the report path and the findings verbatim.",
+	commitMain:
+		"Blocked: never commit on main (or master); every piece of work gets its own branch and ships as a PR. Branch first: `git switch -c <short-kebab-name>` keeps your staged and unstaged changes, then commit on it. Commits already made on main move the same way: `git switch -c <name>` takes them along, then `git branch -f main origin/main` puts main back where the remote is.",
 	reviewRepo:
 		'Blocked: run the reviewer before opening the PR or pushing this branch. A git repo under ~/workspace gets the same review gate as an app: call the `subagent` tool (call `subagents_enable` first if it is not available) with agent "reviewer", `cwd` set to the repo, and a task that names Michael\'s request. The guard writes the diff against main and the review scope itself; don\'t write a diff. If the repo has `npm run verify`, run it green first. A review that ended without a `## Review` block or `No issues found.` doesn\'t count: call the reviewer again. Fix what you confirm, commit, list the findings you fixed and rejected in the PR body, then rerun this command.',
 };
@@ -124,7 +128,9 @@ const WRITES = /(?:^|[\s|])(?:sed\s+(?:-\S+\s+)*-[A-Za-z]*i|perl\s+(?:-\S+\s+)*-
 /** A shell command that writes app code: a writing verb or a redirect in a segment that names an app code path. */
 export function writesAppCode(command: string, cwd: string, home: string): boolean {
 	const dir = workDir(command, cwd, home);
-	for (const seg of command.split(/;|&&|\|\||\n/)) {
+	// A heredoc's body is text, not commands: website 2026-11-24, a ledger note quoting `Node >=18` and `package.json`
+	// read as a redirect into app code and blocked the orchestrator's own ledger append.
+	for (const seg of withoutHeredocBodies(command).split(/;|&&|\|\||\n/)) {
 		const bare = seg.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "");
 		if (!WRITES.test(bare)) continue;
 		const paths = bare.split(/\s+/).filter((t) => /^(?:~|\$HOME|\/|\.{1,2}\/)|\/|\.[A-Za-z0-9]{1,6}$/.test(t) && !/^[<>|&;-]/.test(t));
@@ -149,6 +155,14 @@ export function fullE2e(command: string): boolean {
 		if (!/\.spec\.|\.ts\b|\s(?:-g|--grep)\b/.test(m[1])) return true;
 	}
 	return false;
+}
+
+/** A Python script whose file paths all lie under docs/superpowers or .superpowers, or are Markdown: ticking a plan's
+ *  checkboxes or appending to the SDD ledger, which the shell rules allow as well (website 2026-11-24: two blocked plan
+ *  ticks, then two partial edit-tool applies). Code paths anywhere in the script keep the block. */
+export function planRewrite(code: string): boolean {
+	const paths = [...code.matchAll(/(["'])([^"'\n]+)\1/g)].map((m) => m[2]).filter((t) => /\/|\.[A-Za-z0-9]{1,6}$/.test(t) && !/^[-\s]/.test(t) && !/\s/.test(t));
+	return paths.length > 0 && paths.every((p) => /(?:^|\/)(?:docs\/superpowers|\.superpowers)\//.test(p) || /\.md$/i.test(p));
 }
 
 export function pythonRewrite(code: string): boolean {
@@ -232,6 +246,8 @@ export type Env = {
 	/** Michael's last message says to throw the work away (discardOrder): reverting is allowed, committing and shipping
 	 *  a dirty tree are blocked. Absent: not checked. */
 	discardOrdered?: () => boolean;
+	/** The checkout sits on the trunk (main or master): a commit there is blocked, the work gets a branch first. Absent: not checked. */
+	onTrunk?: (dir: string) => boolean;
 };
 
 /** A file whose change can change what the app draws. */
@@ -360,6 +376,13 @@ export function discards(command: string): boolean {
 	return false;
 }
 
+/** The command creates or switches to a branch (`git switch`, `git checkout -b`) in a segment before its first commit. */
+function switchesBeforeCommit(command: string): boolean {
+	const segs = command.split(/;|&&|\|\||\||\n/);
+	const at = segs.findIndex((s) => new RegExp(`${GIT}commit\\b`).test(s));
+	return segs.slice(0, Math.max(at, 0)).some((s) => new RegExp(`${GIT}(?:switch\\s+(?!--)(?!(?:-\\S+\\s+)*(?:main|master)\\b)|checkout\\s+-b\\b)`).test(s));
+}
+
 export function checkShell(command: string, env: Env): Block | undefined {
 	// Merging needs no app path in the command (`gh pr merge 28 --repo thats-it-dev/keeb` names only the repo).
 	if (merges(command)) return { block: true, reason: REASONS.merge };
@@ -381,7 +404,7 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	const sleep = /\bsleep\s+(\d+)/.exec(command);
 	if (sleep && Number(sleep[1]) >= 60) return { block: true, reason: ci };
 	// A rewrite that runs inside the app or repo; a scratch script in /tmp that only mentions the path is fine.
-	if (/\bpython3?\b/.test(command) && pythonRewrite(command)) {
+	if (/\bpython3?\b/.test(command) && pythonRewrite(command) && !planRewrite(command)) {
 		const runsIn = workDir(command, env.cwd, env.home);
 		if (appDir("", runsIn, env.home) || repoOf("", { ...env, cwd: runsIn })) return { block: true, reason: REASONS.rewrite };
 	}
@@ -397,6 +420,9 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	const commits = new RegExp(`${GIT}commit\\b`).test(command);
 	if (ordered && env.dirty(dir) && (commits || OPENS_PR.test(command) || PUBLISHES.test(command))) return { block: true, reason: REASONS.discardOrdered };
 	// Changes an earlier session left in the tree are not this session's to commit until Michael keeps them.
+	// Work never lands on the trunk: website 2026-11-24, a commit on main left the reviewer nothing to diff against main,
+	// and the push stayed gated with no review possible. A branch cut earlier in the same command counts.
+	if (commits && env.onTrunk?.(dir) && !switchesBeforeCommit(command)) return { block: true, reason: REASONS.commitMain };
 	if (commits) {
 		const left = env.inherited?.(dir) ?? [];
 		if (left.length) return { block: true, reason: inheritedBlock(left) };
@@ -569,6 +595,20 @@ export function defaultRunState(runId: string, root: string = ASYNC_RUNS): Retur
 		return /fail|error|stopp|timeout|cancel/i.test(state) ? "failed" : "running";
 	} catch {
 		return "missing";
+	}
+}
+
+/** True when the run `id` (a full id, or the 8+ character prefix the model passes to `resume`) ended with its tool
+ *  budget exhausted: pi-subagents writes `toolBudget.outcome: "hard-blocked"` to its status.json. */
+export function exhaustedRun(id: unknown, root: string = ASYNC_RUNS): boolean {
+	if (typeof id !== "string" || id.length < 8) return false;
+	try {
+		const runId = existsSync(join(root, id)) ? id : readdirSync(root).find((d) => d.startsWith(id));
+		if (!runId) return false;
+		const status = JSON.parse(readFileSync(join(root, runId, "status.json"), "utf8")) as { toolBudget?: { outcome?: unknown } };
+		return status.toolBudget?.outcome === "hard-blocked";
+	} catch {
+		return false;
 	}
 }
 
@@ -1129,6 +1169,9 @@ export function kitPatterns(html: string): KitPattern[] {
 // What an edit's text says it is building, mapped to the page's patterns, in page order.
 const ICONISH = /<svg\b|<path\b|_ICON\b|icon-btn|\bICONS\[/i;
 const KIT_PICKS: [string, RegExp][] = [
+	["start", /kit\.thatsit\.app\/kit\.(?:css|js)|theme-init\.js|<tk-shell\b|<tk-header\b/],
+	["start/a-component", /kit\.thatsit\.app\/lit\.js|\bLitElement\b|customElements\.define/],
+	["layout", /<tk-shell\b|<tk-header\b|data-shell|slot="(?:nav|aside)"/],
 	["buttons", new RegExp(`\\.btn\\b|class="btn\\b|${ICONISH.source}`, "i")],
 	["forms", /<label\b|<input\b|<select\b|<textarea\b|class="form\b|\.form\b|\bswitch\b|aria-checked|<dialog\b|tk-sheet|\bsettings\b|\bconfirm/i],
 	["forms/pattern-css", /<label\b|<input\b|<select\b|<textarea\b|class="form\b|\.form\b|\bswitch\b|aria-checked|<dialog\b|tk-sheet|\bsettings\b|\bconfirm/i],
@@ -1144,6 +1187,10 @@ const KIT_PICKS: [string, RegExp][] = [
 	["data", /\bd3\b|<canvas\b|tk-(?:stats?|sparkline|timeseries|bars|heatmap)\b|\bcharts?\b|<svg\b[\s\S]*<(?:polyline|rect|line|circle)\b/i],
 	["icons", ICONISH],
 ];
+
+/** The text loads the kit from its CDN: a repo outside apps that does so gets the kit handover too (website 2026-11-24:
+ *  the Task 3 worker spent 11 of its 20 minutes downloading kit.js, kit.css and the kit page to learn the shell). */
+export const kitLoaded = (text: string): boolean => /kit\.thatsit\.app/.test(text);
 
 /** The ids of the page patterns an edit to `path` with `text` touches. */
 export function kitPatternIds(path: string, text: string): string[] {

@@ -74,7 +74,7 @@ pi builds web apps (the thatsit.app apps, mockups, prototypes) and today the onl
 ### Behind the URL
 
 - **pi starts the app's own dev server** in its checkout. Live reload comes with it.
-- **Lifecycle: tied to the pi session.** The server dies when the session shuts down and when the hub reaps the idle pi child (20 minutes today). Reopening the chat later means pi starts it again on demand; the panel shows "stopped" until then.
+- **Lifecycle: tied to the pi session, which a live preview holds open.** Since 2026-11-24 the hub's idle reaper skips a session whose `preview` status is set (`SessionHandle.hasPreview`), so the page stays up while Michael looks; a session holding a preview is still the last pick when `maxHeadless` needs room. When the pi process does end, `killNow` removes the tailscale serve entry synchronously (the queued async stop never ran before the process was gone, leaving `10600 → dead port` on 2026-11-24), and the bridge records each open preview as a `pi-web-preview` session entry: a resumed session reopens its last preview (if under 24 h old and not stopped) on `session_start`.
 - **PR / Pages preview links** in the Progress tab open in the Preview tab instead of a new browser tab.
 
 ### Agent habit

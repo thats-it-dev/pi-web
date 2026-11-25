@@ -56,6 +56,8 @@ uses a temporary `PI_WEB_DATA_DIR` (port 7898).
 }
 ```
 
+`idleMinutes`: an idle headless pi is closed after this long; a session with a live preview is kept, since the preview server runs in that process.
+
 `push` turns the hub's Web Push alerts (a finished turn, a dialog that needs you, a ring question) on or off; the phone mirrors them to the watch. It is Web Push only. The older `watchAlert: "off"` still loads as `push: false`.
 
 `approvalMode` is the approval mode new app-started sessions begin in; the session settings sheet in the app (the sliders next to the model) changes it per session. While a turn is running, the hub answers a permission extension's Allow/Deny select (picking Allow) or yes/no confirm itself, so the agent keeps going with the app closed:

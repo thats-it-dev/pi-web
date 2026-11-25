@@ -22,6 +22,7 @@ Checked for `bash`, `ctx_execute` (shell and python) and `ctx_batch_execute`.
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
 | worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched without `worktree: true` is still running in the app (its launch named the app, or its status.json's cwd or tool calls show it there; a worker that has not shown where it works yet holds every app) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
 | rewrite | a script that writes a file in the app or repo: Python (`open(..., "w")`, `write_text`), `sed -i` / `perl -i`, a `>`/`>>` redirect or heredoc into a file in the tree, or `mv`/`cp` from outside the tree over one (2026-11-24: keeb's copy-diagnostics session did eight such edits past the Python-only rule, with the AGENTS.md rule in context) | the edit tool; the write tool for a new file. Build output and plans/briefs under superpowers are exempt |
+| commit-main | `git commit` while the checkout sits on `main` or `master`, in an app or any repo under ~/workspace (a `git switch -c` / `git checkout -b` earlier in the same command counts as branching) | `git switch -c <name>` first; commits already on main: `git switch -c <name>`, then `git branch -f main origin/main`. Why: website 2026-11-24, the orchestrator committed on main, so the review base (merge-base with main) was HEAD, the reviewer call was refused as nothing changed, and the push stayed gated; four blocked pushes, then Michael's "always branch" |
 | discard | `git checkout <ref> -- <path>`, `git restore`, `git reset --hard`, only while the app has uncommitted changes | write the test first and run it red before the fix; `git show <ref>:<path>` to look at old code |
 
 ## Stalled turns
@@ -137,7 +138,9 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
 
 - Blocked until `npm run verify` passed in the app after the last code edit (docs and Markdown edits don't count).
 - The guard snapshots the working tree (uncommitted and untracked files included, in a throwaway index) and writes
-  `/tmp/<name>-review.diff` itself: from the last review's snapshot, or from where the branch left main. Lockfiles,
+  `/tmp/<name>-review.diff` itself: from the last review's snapshot, or from where the branch left the trunk as the
+  remote has it (`origin/main` when that ref exists, else the local `main`/`master`, so a commit made on the local main
+  is still reviewed; the changed-files checks use the same ref). Lockfiles,
   `dist` and source maps are left out. With nothing new since the last review the call is blocked.
 - The task gets a header with the changed files, the base, "verify passed, don't check tests or config", the
   budget, and Michael's last message on the branch word for word, with the rule that every behavior he names must
@@ -204,6 +207,19 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   in `~/.pi/agent/settings.json` when it is a boolean, else the agent pair's models. The superpowers extension reads the
   same flag for its orchestrator notes. Why: the pair was unloaded on 2026-11-17 and delegation went with it; 0 workers
   in the 14 build sessions that followed, reviewer calls only.
+- A `subagent` `resume` of a run whose status.json says its tool budget was exhausted (`toolBudget.outcome:
+  "hard-blocked"`) is blocked (`REASONS.resumeExhausted`): dispatch a fresh run of the same agent with the brief, the
+  report path and the findings. Why: website 2026-11-24, the revived Task 3 worker made 57 bash calls (30 of them bare
+  `echo`), never called the edit tool, landed nothing and reported that its edits had not landed; a fresh worker did
+  the same fix in 14 calls.
+- A Python script whose file paths all lie under `docs/superpowers/` or `.superpowers/`, or are Markdown, is not a
+  rewrite (`planRewrite`): ticking plan checkboxes and appending to the SDD ledger pass, as they do for `sed`. A code
+  path anywhere in the script keeps the block. Why: website 2026-11-24, two blocked plan ticks, then two partial
+  edit-tool applies.
+- The kit-pattern handover (next bullet) also covers a repo outside apps once its `index.html`, or the edit itself,
+  loads the kit from `kit.thatsit.app`; the page's `Start here`, `Start here: A component` and `Layout` sections are
+  picked by the kit links, `LitElement` and `tk-shell`/`tk-header`. Why: the website Task 3 worker spent 11 of its 20
+  minutes downloading kit.js, kit.css and the kit page to learn the shell.
 - When the diff of an app touches a UI file, the brief carries the skill's `## Style rules` and names them: a changed
   UI file that hand-builds what the kit provides (a dialog that is not `tk-sheet` with `.form`, a toggle that is not
   `.switch`, an icon button that is not `.icon-btn`, a pasted SVG, a local copy of a kit class or pattern) or that

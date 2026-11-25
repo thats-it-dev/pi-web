@@ -131,7 +131,9 @@ export class Registry {
 	reap(): void {
 		const now = (this.opts.now ?? Date.now)();
 		for (const h of this.all()) {
-			if (h.kind === "rpc" && this.isIdle(h) && now - h.lastActive > this.opts.idleMs) {
+			// A live preview holds the session: its server runs in the pi process, and when the reaper took the process the
+			// page Michael opened later served nothing (website 2026-11-24, 20 min after the last message).
+			if (h.kind === "rpc" && this.isIdle(h) && !h.hasPreview() && now - h.lastActive > this.opts.idleMs) {
 				this.forget(h);
 				h.close();
 			}
@@ -209,7 +211,8 @@ export class Registry {
 	private makeRoom(): void {
 		const headless = this.all().filter((h) => h.kind === "rpc");
 		if (headless.length + this.pending < this.opts.maxHeadless) return;
-		const victim = headless.filter((h) => this.isIdle(h)).sort((a, b) => a.lastActive - b.lastActive)[0];
+		// Room for a new session comes from the oldest idle one; a session holding a preview goes last, not never.
+		const victim = headless.filter((h) => this.isIdle(h)).sort((a, b) => Number(a.hasPreview()) - Number(b.hasPreview()) || a.lastActive - b.lastActive)[0];
 		if (!victim) throw new HttpError(503, `${this.opts.maxHeadless} pi sessions are already running. Close one first.`);
 		this.forget(victim);
 		victim.close();

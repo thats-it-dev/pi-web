@@ -25,9 +25,9 @@ function viteApp(name = `app-${++seq}`): string {
 }
 
 /** A Tailscale whose exec works on an in-memory serve table: port -> local target port. */
-function fakeTailscale(serve = new Map<number, number>(), onAdd?: (port: number, local: number) => void) {
+function fakeTailscale(serve = new Map<number, number>(), onAdd?: (port: number, local: number) => void, sync = false) {
 	const calls: string[] = [];
-	const ts = new Tailscale(async (cmd, args) => {
+	const handle = (cmd: string, args: string[]): string => {
 		calls.push([cmd, ...args].join(" "));
 		if (args[0] === "status") return STATUS;
 		if (args[0] === "serve" && args[1] === "status") {
@@ -48,7 +48,8 @@ function fakeTailscale(serve = new Map<number, number>(), onAdd?: (port: number,
 			serve.delete(port);
 		}
 		return "";
-	});
+	};
+	const ts = new Tailscale(async (cmd, args) => handle(cmd, args), sync ? handle : undefined);
 	return { ts, calls, serve };
 }
 
@@ -474,6 +475,25 @@ test("an expose kills the dev servers of dead pi processes and leaves live owner
 	assert.equal(await exitedWithin(liveChild, 200), false, "live owner's server untouched");
 	assert.equal(await exitedWithin(ownChild, 50), false, "own server untouched");
 	await mgr.stop();
+});
+
+test("killNow also removes the serve entry synchronously when tailscale can run that way; another session's entry on the port is left", async () => {
+	const serve = new Map<number, number>();
+	const tail = fakeTailscale(serve, undefined, true);
+	const { mgr } = setup({ tailscale: tail.ts });
+	const dir = join(scratch, `killsync-${++seq}`);
+	mkdirSync(dir);
+	writeFileSync(join(dir, "index.html"), "<body>k</body>");
+	await mgr.run({ dir }, scratch, "s1");
+	assert.equal(serve.has(10600), true);
+	mgr.killNow();
+	assert.equal(serve.has(10600), false, "the entry is gone before any await");
+	assert.ok(tail.calls.at(-1)?.startsWith("tailscale serve --https=10600 off"));
+	// A second run, then another session takes the port over before our killNow: not ours to remove.
+	await mgr.run({ dir }, scratch, "s1");
+	serve.set(10600, 1);
+	mgr.killNow();
+	assert.equal(serve.get(10600), 1);
 });
 
 test("killNow closes a static server synchronously; stop then removes the entry", async () => {

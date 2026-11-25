@@ -461,6 +461,16 @@ test("a bg-jobs status marks the handle as having background jobs; clearing it u
 	assert.equal(changes, 2); // each toggle fires state_changed so the registry can free waiters
 });
 
+test("a preview status marks the handle as holding a preview; clearing it unmarks", async (t) => {
+	const { h } = await startHandle(t);
+	const ui = (statusText?: string) => (h as unknown as { onUiRequest(r: object): void }).onUiRequest({ method: "setStatus", statusKey: "preview", statusText });
+	assert.equal(h.hasPreview(), false);
+	ui("preview keeb :10600");
+	assert.equal(h.hasPreview(), true);
+	ui(undefined);
+	assert.equal(h.hasPreview(), false);
+});
+
 test("fork, clone and new_session are refused while a background job runs (pi would kill it)", async (t) => {
 	const { h } = await startHandle(t);
 	const ui = (statusText?: string) => (h as unknown as { onUiRequest(r: object): void }).onUiRequest({ method: "setStatus", statusKey: "bg-jobs", statusText });

@@ -57,6 +57,11 @@ export class FakeHandle implements SessionHandle {
 	hasBackgroundJobs(): boolean {
 		return this.backgroundJobs;
 	}
+	/** What hasPreview() returns. */
+	preview = false;
+	hasPreview(): boolean {
+		return this.preview;
+	}
 	isBusy(): boolean {
 		return this.busy;
 	}

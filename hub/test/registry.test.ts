@@ -360,6 +360,34 @@ test("reap leaves an idle session with background jobs alone", async () => {
 	assert.ok(started.length >= 1);
 });
 
+test("reap leaves an idle session with a live preview alone until the preview closes", async () => {
+	const { registry, setClock } = setup();
+	const h = (await registry.create("/w")) as FakeHandle;
+	h.lastActive = 0;
+	h.preview = true;
+	setClock(2000);
+	registry.reap();
+	assert.equal(h.closed, false);
+	h.preview = false;
+	registry.reap();
+	assert.equal(h.closed, true);
+});
+
+test("makeRoom takes an idle session without a preview before one holding a preview, and that one before failing", async () => {
+	const { registry, started } = setup({ maxHeadless: 2 });
+	await registry.ensure("disk-1");
+	await registry.ensure("disk-2");
+	started[0].preview = true;
+	started[0].lastActive = 0;
+	started[1].lastActive = 5;
+	await registry.create("/w");
+	assert.equal(started[0].closed, false, "the preview holder stays while another idle session can go");
+	assert.equal(started[1].closed, true);
+	started[2].busy = true;
+	await registry.create("/w");
+	assert.equal(started[0].closed, true, "with no other idle session, the preview holder goes rather than a 503");
+});
+
 test("makeRoom never picks a session with background jobs", async () => {
 	const { registry, started } = setup({ maxHeadless: 2 });
 	await registry.ensure("disk-1");

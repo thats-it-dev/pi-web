@@ -21,6 +21,7 @@ export interface SessionHandle {
 	subscriberCount(): number;
 	isBusy(): boolean; // running, compacting, or waiting on a dialog
 	hasBackgroundJobs(): boolean; // a bg_bash job is still running; keeps the session alive and holds the finished push
+	hasPreview(): boolean; // the session's preview server is open; the reaper leaves the session alone, so the page Michael is looking at stays up
 	liveState(): LiveState;
 	snapshot(): Snapshot;
 	command(cmd: AppCommand): Promise<CommandResult>;

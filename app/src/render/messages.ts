@@ -210,7 +210,7 @@ export const markdownStyles = css`
 
 // The preview card: in the reply and in the Preview tab on a phone.
 export const previewCardStyles = css`
-	.preview-card { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
+	.preview-card { display: inline-flex; max-width: 100%; justify-self: start; box-sizing: border-box; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
 	.preview-card .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; color: var(--text-secondary); }
 	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
 `;

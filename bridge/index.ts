@@ -9,13 +9,14 @@ import { homedir } from "node:os";
 import { Type } from "typebox";
 import { socketPath } from "./client.ts";
 import { BridgeSession, type CtxLike, type PiLike } from "./session.ts";
-import { PreviewManager, STATUS_KEY, defaultDeps } from "./preview.ts";
+import { PreviewManager, STATUS_KEY, defaultDeps, type PreviewParams } from "./preview.ts";
 import { registerSearchTool } from "./search-tool.ts";
 import { type ShowImageParams, showImage } from "./show-image.ts";
 import { FORWARDED_EVENTS } from "./wire.ts";
 
 type PiApi = PiLike & {
 	on(event: string, handler: (event: any, ctx: CtxLike) => void): unknown;
+	appendEntry(customType: string, data?: unknown): void;
 	registerTool(tool: {
 		name: string;
 		label: string;
@@ -28,10 +29,32 @@ type PiApi = PiLike & {
 export interface BridgeOptions {
 	preview?: PreviewManager;
 	env?: NodeJS.ProcessEnv;
+	now?: () => number;
+}
+
+/** The session entry that records the open preview (its tool params), or `{ stopped: true }` once it is stopped. */
+export const PREVIEW_ENTRY = "pi-web-preview";
+/** A preview older than this is not reopened on resume: the mockup or branch it showed has moved on. */
+export const PREVIEW_REOPEN_MS = 24 * 60 * 60 * 1000;
+
+type PreviewRecord = { params?: PreviewParams; at?: number; stopped?: boolean };
+
+/** The preview to reopen when a session resumes: the params of the last preview entry, when it is not a stop and is
+ *  younger than PREVIEW_REOPEN_MS. The hub reaps an idle pi after 20 minutes (its preview server with it) and starts a
+ *  new one on the next message; without this the Preview panel's URL served nothing (website 2026-11-24). */
+export function previewToReopen(entries: Iterable<unknown>, now: number): PreviewParams | undefined {
+	let last: PreviewRecord | undefined;
+	for (const raw of entries) {
+		const e = raw as { type?: string; customType?: string; data?: PreviewRecord };
+		if (e.type === "custom" && e.customType === PREVIEW_ENTRY) last = e.data;
+	}
+	if (!last || last.stopped || !last.params || typeof last.at !== "number" || now - last.at > PREVIEW_REOPEN_MS) return undefined;
+	return last.params;
 }
 
 export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 	const env = opts.env ?? process.env;
+	const now = opts.now ?? Date.now;
 	// Lazy: loading the extension must not touch tailscale or the filesystem.
 	let manager: PreviewManager | undefined = opts.preview;
 	let lastCtx: CtxLike | undefined;
@@ -55,7 +78,7 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 		name: "preview",
 		label: "Preview",
 		description:
-			"Show Michael a live, clickable preview in pi-web's Preview panel (and in his phone's browser). Call it with cwd after the first visual change to an app and before any PR, then ask Michael to look (one line ending in a question) and end your turn; the page live-reloads as you edit. Call it with dir or file for an HTML mockup or prototype (no arguments returns a scratch folder to write the mockup in). Tailnet only; one preview per session; it stops when the session ends.",
+			"Show Michael a live, clickable preview in pi-web's Preview panel (and in his phone's browser). Call it with cwd after the first visual change to an app and before any PR, then ask Michael to look (one line ending in a question) and end your turn; the page live-reloads as you edit. Call it with dir or file for an HTML mockup or prototype (no arguments returns a scratch folder to write the mockup in). Tailnet only; one preview per session; it stays up while the session is open in pi-web and comes back when the session resumes.",
 		parameters: Type.Object({
 			cwd: Type.Optional(Type.String({ description: "A Vite app checkout (has a dev script): start its dev server and show it" })),
 			dir: Type.Optional(Type.String({ description: "A folder of static files (an HTML mockup or prototype): serve it and show it" })),
@@ -73,8 +96,20 @@ export default function piWebBridge(pi: PiApi, opts: BridgeOptions = {}): void {
 			manager ??= new PreviewManager(defaultDeps(homedir()));
 			const result = await manager.run(params, ctx.cwd, ctx.sessionManager.getSessionId());
 			ctx.ui.setStatus(STATUS_KEY, manager.statusText());
+			const details = (result as { details?: { url?: unknown; stopped?: unknown } }).details;
+			if (details?.stopped) pi.appendEntry(PREVIEW_ENTRY, { stopped: true });
+			else if (typeof details?.url === "string") pi.appendEntry(PREVIEW_ENTRY, { params, at: now() });
 			return result;
 		},
+	});
+	// A resumed session reopens the preview it had: the hub starts a fresh pi for it, and the old one's server is gone.
+	pi.on("session_start", (_event, ctx) => {
+		if (env.PI_SUBAGENT_CHILD) return;
+		const params = previewToReopen(ctx.sessionManager.getEntries(), now());
+		if (!params) return;
+		lastCtx = ctx;
+		manager ??= new PreviewManager(defaultDeps(homedir()));
+		void manager.run(params, ctx.cwd, ctx.sessionManager.getSessionId()).then(() => ctx.ui.setStatus(STATUS_KEY, manager?.statusText()));
 	});
 	pi.on("session_shutdown", async (_event, ctx) => {
 		if (!manager) return;

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
+import { exhaustedRun, planRewrite, kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, previewOpened, previewNote, PREVIEW_NOTE_MARK, busyWorker, checkShell, defaultRunDir, defaultRunText, designDoc, lastBlockedReview, lastRequest, reviewBlocked, reviewBlockedMark, reviewGap, REVIEW_PENDING_MARK, reviewVerdict, indirectReviewer, lastReview, noteWithdrawn, promptDigest, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewHeader, reviewMark, screenCompareContent, userPictures, verifiedSinceEdit, withdrawnFollowUps, withdrawnNote, workerBusy, WORKTREE, workspacePath, reposNeedingPr, repoPrNudge, appCodePath } from "../rules.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appDir, appsNeedingPr, asyncRunId, defaultRunState, pairSettings, partialAnswers, checkToolCall, PR_NUDGE_TYPE, prNudge, reviewPendingMark, shouldNudgePr, discards, fullE2e, MAX_NUDGES, MAX_TODO_NUDGES, MERGE_NUDGE_TYPE, shouldNudgeMerge, suggestsMerge, NUDGE_TYPE, openTodos, REASONS, shouldNudge, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, type Env, type RunState } from "../rules.ts";
@@ -1565,6 +1565,9 @@ test("kitPatternIds picks the patterns an edit touches, in the page's order", ()
 	assert.deepEqual(kitPatternIds("src/ui/app-main.ts", 'toast("saved"); html`<div class="empty">nothing yet</div>`'), ["feedback/toasts", "feedback/empty-and-loading-states"]);
 	assert.deepEqual(kitPatternIds("src/lesson/ladder.ts", "export function next(stats: StatMap) { return 1; }"), []);
 	assert.deepEqual(kitPatternIds("src/ui/app-styles.ts", ".row { gap: 4px }"), ["lists", "lists/cards"]);
+	// A page bootstrapping on the kit, and a Lit element: the start and layout sections.
+	assert.deepEqual(kitPatternIds("index.html", '<link rel="stylesheet" href="https://kit.thatsit.app/kit.css"><tk-shell><tk-header></tk-header></tk-shell>'), ["start", "layout"]);
+	assert.deepEqual(kitPatternIds("app-main.js", 'import { LitElement, html } from "https://kit.thatsit.app/lit.js";'), ["start/a-component"]);
 });
 
 test("kitDepartures names what an edit builds by hand", () => {
@@ -1588,4 +1591,57 @@ test("absPath resolves ~ and relative paths", () => {
 	assert.equal(absPath("~/workspace/apps/keeb/src/a.ts", "/x", home), "/home/m/workspace/apps/keeb/src/a.ts");
 	assert.equal(absPath("src/a.ts", "/home/m/workspace/apps/keeb", home), "/home/m/workspace/apps/keeb/src/a.ts");
 	assert.equal(absPath("/tmp/a.ts", "/x", home), "/tmp/a.ts");
+});
+
+test("a commit on main or master is blocked until the work has a branch; a switch earlier in the same command counts", () => {
+	const trunk = env({ onTrunk: () => true, repoRoot: (p) => (p.startsWith("/home/m/workspace/website") ? "/home/m/workspace/website" : undefined) });
+	assert.equal(bash(`${app}git commit -m "x"`, trunk), REASONS.commitMain);
+	assert.equal(bash(`${app}git add -A && git commit -qm "x"`, trunk), REASONS.commitMain);
+	assert.equal(bash("cd ~/workspace/website && git commit -m x", trunk), REASONS.commitMain, "any repo under ~/workspace");
+	assert.equal(bash(`${app}git switch -c drop-vault && git commit -m x`, trunk), undefined);
+	assert.equal(bash(`${app}git checkout -b drop-vault && git add -A && git commit -m x`, trunk), undefined);
+	assert.equal(bash(`${app}git commit -m x && git switch -c late`, trunk), REASONS.commitMain, "the switch comes after the commit");
+	assert.equal(bash(`${app}git commit -m x`, env({ onTrunk: () => false })), undefined);
+	assert.equal(bash(`${app}git commit -m x`), undefined, "not checked when the env does not say");
+	assert.equal(bash(`${app}git log --oneline -3`, trunk), undefined);
+	assert.match(REASONS.commitMain, /git switch -c/);
+	assert.match(REASONS.commitMain, /git branch -f (?:main|<trunk>) origin\//, "says how to move commits already made on main");
+});
+
+test("the orchestrator's ledger append is not app code, whatever its heredoc body says", () => {
+	const o = env({ orchestrator: true, repoRoot: (p) => (p.startsWith("/home/m/workspace/website") ? "/home/m/workspace/website" : undefined) });
+	const note = "cd ~/workspace/website && cat >> .superpowers/sdd/plan/progress.md <<'EOF'\n### Ruling\nThe brief mandated deleting package.json (Node >=18 floor); re-add a minimal `package.json` with `{\"type\":\"module\"}`.\nEOF\necho ok";
+	assert.equal(bash(note, o), undefined);
+	assert.equal(bash("cd ~/workspace/website && cat >> package.json <<'EOF'\n{}\nEOF", o), REASONS.orchestrator, "the redirect target is still checked");
+});
+
+test("exhaustedRun: a run whose status says hard-blocked, by full id or prefix; anything else is not", () => {
+	const root = mkdtempSync(join(tmpdir(), "guard-runs-"));
+	const id = "e54202e3-d925-4f16-8263-842b8681414c";
+	mkdirSync(join(root, id));
+	writeFileSync(join(root, id, "status.json"), JSON.stringify({ state: "complete", toolBudget: { hard: 40, outcome: "hard-blocked", hardReachedAt: 40 } }));
+	const ok = "26a4f07b-d08e-4b1b-9293-8e39c15742ad";
+	mkdirSync(join(root, ok));
+	writeFileSync(join(root, ok, "status.json"), JSON.stringify({ state: "complete", toolBudget: { hard: 40, outcome: "within-budget" } }));
+	assert.equal(exhaustedRun(id, root), true);
+	assert.equal(exhaustedRun("e54202e3", root), true, "the 8-character prefix the model passes");
+	assert.equal(exhaustedRun(ok, root), false);
+	assert.equal(exhaustedRun("00000000", root), false);
+	assert.equal(exhaustedRun("e54", root), false, "too short to name a run");
+	assert.equal(exhaustedRun(id, join(root, "missing")), false);
+	assert.match(REASONS.resumeExhausted, /fresh run of the same agent/);
+});
+
+test("a Python script that only ticks a plan or appends to the SDD ledger is not a rewrite; one that touches code is", () => {
+	const tick = `${app}python3 - <<'PY'\np='docs/superpowers/plans/2026-11-24-kit-rebuild.md'\ns=open(p).read()\nopen(p,'w').write(s.replace('- [ ] **Step 1','- [x] **Step 1'))\nPY`;
+	assert.equal(planRewrite(tick), true);
+	assert.equal(bash(tick), undefined);
+	const ledger = `${app}python3 -c "open('.superpowers/sdd/plan/progress.md','a').write('ok')"`;
+	assert.equal(bash(ledger), undefined);
+	const code = `${app}python3 - <<'PY'\np='src/app-main.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nPY`;
+	assert.equal(planRewrite(code), false);
+	assert.equal(bash(code), REASONS.rewrite);
+	const both = `${app}python3 - <<'PY'\nfor p in ['docs/superpowers/plans/x.md','src/a.ts']:\n  open(p,'w').write('x')\nPY`;
+	assert.equal(bash(both), REASONS.rewrite, "a code path anywhere keeps the block");
+	assert.equal(planRewrite("open(p,'w').write(s)"), false, "no literal path: not exempt");
 });

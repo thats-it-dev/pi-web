@@ -202,6 +202,17 @@ export class PreviewManager {
 		} catch {
 			// already gone
 		}
+		// The serve entry goes with the server, synchronously: the hub's idle reaper ends pi with its stdin, and the
+		// queued stop() did not get to run before the process was gone, so the entry stayed on, pointing at a dead
+		// port (website 2026-11-24: the panel URL served nothing for 80 minutes).
+		const ts = this.deps.tailscale;
+		if (!ts.sync) return;
+		try {
+			const entry = ts.entriesSync().find((e) => e.port === cur.details.port);
+			if (entry && sameTarget(entry.target, cur.localPort)) ts.removeSync(cur.details.port);
+		} catch {
+			// stop() or the next start's reconcile gets it
+		}
 	}
 
 	/** `~` and `~/x` are the home folder; anything else resolves against the session cwd. */
