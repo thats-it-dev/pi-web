@@ -1,0 +1,3 @@
+# Run artifacts: session transcripts and per-arm result rows are reproduced by running the suite, not committed.
+*.jsonl
+sessions/
