@@ -1,18 +1,20 @@
-// pi-web superpowers switch: the superpowers skills stay manual (/skill:<name>) until the chat turns them on.
-// The superpowers package loads no skills and no extension (settings.json); this extension serves copies of its
-// skills marked disable-model-invocation, so the session's first system prompt never lists them. Off: nothing
-// more. On: the using-superpowers bootstrap goes with every request and offers the copies to the model,
-// as the package's own extension would do, with the list of skills in that message (pi leaves manual skills out of
-// the system prompt, and a mid-chat prompt change is not reliable). The state is per chat, saved in the session.
+// pi-web superpowers: a per-chat switch over a vendored, pi-patched subset of superpowers' skills (./skills:
+// brainstorming, writing-plans, executing-plans, systematic-debugging, test-driven-development). The skills are
+// manual (/skill:<name>) and never in the system prompt. Off: nothing more. On: a short catalog (name, description,
+// path) rides with every request so the model can read one when it applies. There is no bootstrap and no
+// mandatory workflow (2026-11-25; the raw obra/superpowers checkout is gone, so nothing excluded can be found on disk).
+// The pi note on writing-plans and executing-plans switches to orchestrator wording when pi's settings say so.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const ENTRY_TYPE = "pi-web-superpowers";
 export const STATUS_KEY = "superpowers";
 export const STATUS_ON = "superpowers on";
-const MARKER = "superpowers:using-superpowers bootstrap for pi";
+/** The catalog message's first line; also how withCatalog tells it is already in the messages. */
+export const MARKER = "## Superpowers skills in this chat";
 
 /** flash-auto's reasoning floor entry (`{ level }`, latest wins, null clears). Following a long process skill
  *  falls apart when the router reads a short reply ("No I want options lists") as a reason to stop thinking. */
@@ -28,37 +30,20 @@ function savedFloor(branch: Iterable<unknown>): string | null {
 	return level;
 }
 
-/** Superpowers skills left out: they fight the thatsit-app flow and the guard (worktrees move app edits out of
- *  ~/workspace/apps, finishing-a-development-branch pushes and merges, the review skills send unscoped reviewers). */
-export const EXCLUDED = ["using-git-worktrees", "finishing-a-development-branch", "subagent-driven-development", "requesting-code-review"];
-
-/** Excluded skills whose files executing-plans uses by relative path (`sdd-workspace`, `review-package`, the
- *  task-start/task-done helpers, code-reviewer.md). Their files are linked with no SKILL.md, so pi never lists them. */
-export const SUPPORT_ONLY = ["subagent-driven-development", "requesting-code-review"];
-
-/** pi's rules, put at the top of a skill's body. Plans run inline: on flash-next a fresh worker per task starts
- *  cold, re-reads the codebase and thinks for 5-11 min per turn; on the cad run (2026-11-11) 14 of 20 workers
- *  timed out and the parent redid their tasks in the main session in a fraction of the time. */
-export const PI_NOTES: Record<string, string> = {
-	"writing-plans":
-		"> **In pi:** plans run inline with superpowers:executing-plans: you implement every task yourself, in this session. subagent-driven-development is not available here, so don't offer it, recommend it, or look for it elsewhere on disk (e.g. ~/.claude/plugins). At the handoff, don't ask which execution approach to use; ask only whether the plan captures what they want, then use superpowers:executing-plans.",
-	"executing-plans":
-		"> **In pi:** every plan runs this way. Never switch to subagent-driven-development and never dispatch a `worker` subagent per task. Final review: in an app under ~/workspace/apps, use the thatsit-app skill's Review step (`subagent` with agent `reviewer`; the guard writes the scoped diff) instead of review-package and code-reviewer.md, and finish with its pr steps, not finishing-a-development-branch. Elsewhere, run review-package and call `subagent` with agent `reviewer` on the file it prints.",
-};
-
-/** The notes when the agent pair is pi's model (spec: docs/superpowers/specs/2026-11-11-spark-agent-pair-design.md):
- *  the orchestrator still runs executing-plans itself, with subagents for scouting, writing and review. */
+/** The notes when an orchestrator runs plans (spec: docs/superpowers/specs/2026-11-11-spark-agent-pair-design.md):
+ *  the session still runs executing-plans itself, with subagents for scouting, writing and review. Inline
+ *  execution needs no note: the vendored skills say it. */
 export const PI_NOTES_PAIR: Record<string, string> = {
 	"writing-plans":
-		"> **In pi (agent pair):** plans run with superpowers:executing-plans by the orchestrator, with subagents for scouting, writing and review as that skill's pi note describes. Don't ask which execution approach to use. Mark tasks that don't depend on each other's files or interfaces with a line `**Parallel group:** <letter>` right under the task heading; tasks in one group run as parallel workers in worktrees. A task without the line runs alone.",
+		"> **In pi (orchestrator):** plans run with the executing-plans skill by the orchestrator, with subagents for scouting, writing and review as that skill's pi note describes. Mark tasks that don't depend on each other's files or interfaces with a line `**Parallel group:** <letter>` right under the task heading; tasks in one group run as parallel workers in worktrees. A task without the line runs alone.",
 	"executing-plans": [
-		"> **In pi (agent pair):** you orchestrate; subagents do the reading, writing and reviewing. The rules, in order:",
+		"> **In pi (orchestrator):** you orchestrate; subagents do the reading, writing and reviewing. The rules, in order:",
 		"> 1. **Prefetch.** When task N starts, launch two `scout` subagents async (read-only, ≤ 2k tokens each) for task N+1: the files it names and their seams, the test files and names, the spec sections. Their output goes into N+1's brief.",
 		"> 2. **Brief.** A worker brief carries: the task text from the plan, the scout findings, acceptance (the exact failing test to write first, the verify command), the budget rules, and \"do not open a PR, do not push\". Briefs live in the plan's `.superpowers/sdd/` workspace.",
 		"> 3. **Write.** One `worker` per task, launched as an async single (`async: true`, with `checkpointBeforeDeadlineMs`); you stay awake for scout and reviewer results and steer the worker on a P1. A task group the plan marks `**Parallel group:**` is one async single per task with `worktree: true`; merge the branches in plan order onto the plan branch and rerun verify after each merge. Worktree workers run typecheck and unit tests only, never e2e; the full `npm run verify` runs once in the main checkout after each merge. Commit the plan branch before a fan-out. A worker launched without `worktree: true` owns the main checkout until its result arrives: no verify, e2e or commit there meanwhile (the guard blocks verify and e2e). A worktree shares the main checkout's node_modules through a symlink: the packages are already there, so never run `npm ci` or `npm install` in a worktree (the guard blocks it), and say so in every brief.",
 		"> 4. **Gate.** On the worker's commit: run verify; on green, call `subagent` with agent `reviewer` and `async: true` (the guard writes the scoped diff and marks the review when the run completes) and start task N+1 at once. On red, resume the worker (`action: \"resume\"`) with the failing output, or dispatch a fresh worker whose brief names the failure; you never edit, write or delete app code yourself (the guard blocks it). Your files are the plan, the ledger and the briefs; merges, commits and verify in the main checkout are yours.",
 		"> 5. **Fix.** Review findings queue to the next task boundary, except a P1 on a file the current task edits, which is fixed now. Every fix is RED → GREEN plus a green suite.",
-		"> 6. **Final.** After the last task: a final whole-branch review with agent `reviewer` and `model: \"spark/qwen3.8-27b-pi\"`, one fix pass (by workers), then the thatsit-app skill's pr steps. Never finishing-a-development-branch. A reviewer run that fails (stopReason `length`, a timeout) is re-dispatched once on a smaller diff; never review in its place, and if it fails again tell Michael which diff went unreviewed.",
+		"> 6. **Final.** After the last task: a final whole-branch review with agent `reviewer`, one fix pass (by workers), then the thatsit-app skill's pr steps. A reviewer run that fails (stopReason `length`, a timeout) is re-dispatched once on a smaller diff; never review in its place, and if it fails again tell Michael which diff went unreviewed.",
 		"> 7. **Runaways.** A worker that hits its deadline hands off state on disk (its checkpoint); resume it with `action: \"resume\"`, or dispatch a fresh worker whose brief names the checkpoint. Never dispatch a second worker on the same files while one is running.",
 	].join("\n"),
 };
@@ -73,33 +58,32 @@ export function pairMode(settings: unknown): boolean {
 	return (main.endsWith("pair-auto") || main.endsWith("qwen3.8-27b-pi")) && sub.endsWith("qwen3.6-35b-a3b-sglang");
 }
 
-/** A skill's SKILL.md for pi: its pi note after the frontmatter, and no plan header pointing at a skill pi doesn't have. */
-export function forPi(name: string, md: string, notes: Record<string, string> = PI_NOTES): string {
-	let out = md.replace("superpowers:subagent-driven-development (recommended) or superpowers:executing-plans", "superpowers:executing-plans");
+/** A skill's SKILL.md with its pi note (if any) right after the frontmatter. */
+export function forPi(name: string, md: string, notes: Record<string, string> = {}): string {
 	const note = notes[name];
-	if (!note) return out;
-	const m = /^---\n[\s\S]*?\n---\n/.exec(out);
+	if (!note) return md;
+	const m = /^---\n[\s\S]*?\n---\n/.exec(md);
 	const at = m ? m[0].length : 0;
-	return `${out.slice(0, at)}\n${note}\n\n${out.slice(at)}`;
+	return `${md.slice(0, at)}\n${note}\n\n${md.slice(at)}`;
 }
 
-const SOURCE = join(homedir(), ".pi", "agent", "git", "github.com", "obra", "superpowers", "skills");
+/** The vendored skills, next to this file. */
+export const SOURCE = join(dirname(fileURLToPath(import.meta.url)), "skills");
 const MANUAL = join(homedir(), ".pi", "agent", "tmp", "superpowers-manual");
 
-/** Writes manual-only copies of the superpowers skills to `out`: each SKILL.md gains disable-model-invocation,
- *  every other file is a symlink to the original, so relative references still resolve. Returns `out`, or
- *  undefined when superpowers is not installed. */
-export function buildManualSkills(src = SOURCE, out = MANUAL, exclude = EXCLUDED, supportOnly = SUPPORT_ONLY, notes: Record<string, string> = PI_NOTES): string | undefined {
+/** Writes manual-only copies of the vendored skills to `out`: each SKILL.md gains disable-model-invocation (and its
+ *  pi note), every other file is a symlink to the original, so relative references still resolve. Returns `out`,
+ *  or undefined when `src` is missing. */
+export function buildManualSkills(src = SOURCE, out = MANUAL, notes: Record<string, string> = {}): string | undefined {
 	if (!existsSync(src)) return undefined;
 	rmSync(out, { recursive: true, force: true });
 	for (const name of readdirSync(src)) {
 		const skill = join(src, name, "SKILL.md");
-		const support = supportOnly.includes(name);
-		if ((exclude.includes(name) && !support) || !existsSync(skill)) continue;
+		if (!existsSync(skill)) continue;
 		const dir = join(out, name);
 		mkdirSync(dir, { recursive: true });
 		for (const f of readdirSync(join(src, name))) if (f !== "SKILL.md") symlinkSync(join(src, name, f), join(dir, f));
-		if (!support) writeFileSync(join(dir, "SKILL.md"), manualOnly(forPi(name, readFileSync(skill, "utf8"), notes)));
+		writeFileSync(join(dir, "SKILL.md"), manualOnly(forPi(name, readFileSync(skill, "utf8"), notes)));
 	}
 	return out;
 }
@@ -120,34 +104,17 @@ type PiApi = {
 	appendEntry(customType: string, data?: unknown): void;
 };
 
-/** True when the hub launched this process for a pi-web code session. pi-subagents children inherit the
- *  parent's env (plus PI_SUBAGENT_CHILD=1): a worker, reviewer or scout never starts with superpowers on. */
-export function codeSession(env: NodeJS.ProcessEnv = process.env): boolean {
-	return env.PI_WEB_SESSION_TYPE === "code" && !env.PI_SUBAGENT_CHILD;
-}
-
-const hasEntry = (branch: Iterable<unknown>) => [...branch].some((raw) => (raw as Entry).type === "custom" && (raw as Entry).customType === ENTRY_TYPE);
-const hasMessages = (branch: Iterable<unknown>) => [...branch].some((raw) => (raw as Entry).type === "message");
-
-/** The default a session takes at start, or null when none applies: on for a brand-new pi-web code session (no
- *  saved switch, no messages yet), never for a subagent child or an existing session (resumes stay as they were). */
-export function initialState(branch: Iterable<unknown>, env: NodeJS.ProcessEnv = process.env): boolean | null {
-	const entries = [...branch];
-	return codeSession(env) && !hasEntry(entries) && !hasMessages(entries) ? true : null;
-}
-
-/** The chat's switch: the last saved state on the branch; with none, initialState's default, else off. */
-export function savedState(branch: Iterable<unknown>, env: NodeJS.ProcessEnv = process.env): boolean {
-	const entries = [...branch];
-	let on = initialState(entries, env) ?? false;
-	for (const raw of entries) {
+/** The chat's switch: the last saved state on the branch, off when none (every session type, every session). */
+export function savedState(branch: Iterable<unknown>): boolean {
+	let on = false;
+	for (const raw of branch) {
 		const e = raw as Entry;
 		if (e.type === "custom" && e.customType === ENTRY_TYPE) on = (e.data as { on?: unknown } | undefined)?.on === true;
 	}
 	return on;
 }
 
-/** The superpowers skills in `dir` (the manual copies), as a list the model can act on. */
+/** The skills in `dir` (the manual copies), as a short list the model can act on; "" when there are none. */
 export function catalog(dir = MANUAL): string {
 	let names: string[] = [];
 	try {
@@ -160,33 +127,16 @@ export function catalog(dir = MANUAL): string {
 		try {
 			const front = /^---\n([\s\S]*?)\n---/.exec(readFileSync(file, "utf8"))?.[1] ?? "";
 			const description = /^description:\s*(.+)$/m.exec(front)?.[1].replace(/^["']|["']$/g, "").trim() ?? "";
-			return name === "using-superpowers" ? [] : [`- ${name}: ${description} (${file})`];
+			return [`- ${name}: ${description} (${file})`];
 		} catch {
 			return [];
 		}
 	});
-	return rows.length ? `## Superpowers skills in this chat\n\nWhen one applies, read its SKILL.md with the read tool and follow it.\n\n${rows.join("\n")}` : "";
+	return rows.length ? `${MARKER}\n\nSwitched on for this chat. When one clearly applies, read its SKILL.md with the read tool and follow it. A request whose details are all stated needs none of them: do the work.\n\n${rows.join("\n")}` : "";
 }
 
-const SUPERPOWERS = join(SOURCE, "using-superpowers");
-const strip = (md: string) => /^---\n[\s\S]*?\n---\n([\s\S]*)$/.exec(md)?.[1].trim() ?? md.trim();
-
-/** The bootstrap the package's own extension sends: using-superpowers plus its pi tool mapping. */
-export function bootstrap(dir = SUPERPOWERS, skills = MANUAL): string | null {
-	try {
-		const skill = strip(readFileSync(join(dir, "SKILL.md"), "utf8"));
-		let tools = "";
-		try {
-			tools = readFileSync(join(dir, "references", "pi-tools.md"), "utf8").trim();
-		} catch {}
-		return `<EXTREMELY_IMPORTANT>\n${MARKER}\n\nYou have superpowers.\n\nThe using-superpowers skill content is included below and is already loaded for this Pi session. Follow it now. Do not try to load using-superpowers again.\n\n${skill}\n\n${tools}\n\n${catalog(skills)}\n</EXTREMELY_IMPORTANT>`;
-	} catch {
-		return null;
-	}
-}
-
-/** Messages with the bootstrap after any compaction summary at the start; unchanged when already there. */
-export function withBootstrap<M extends { role?: string; content?: unknown }>(messages: M[], text: string): M[] {
+/** Messages with the catalog after any compaction summary at the start; unchanged when already there. */
+export function withCatalog<M extends { role?: string; content?: unknown }>(messages: M[], text: string): M[] {
 	if (messages.some((m) => JSON.stringify(m.content ?? "").includes(MARKER))) return messages;
 	let at = 0;
 	while (at < messages.length && messages[at].role === "compactionSummary") at++;
@@ -203,18 +153,15 @@ export default function superpowersSwitch(pi: PiApi): void {
 		try {
 			settings = JSON.parse(readFileSync(join(homedir(), ".pi", "agent", "settings.json"), "utf8"));
 		} catch {
-			settings = undefined; // no settings: the inline-only notes
+			settings = undefined; // no settings: inline wording
 		}
-		const dir = buildManualSkills(undefined, undefined, undefined, undefined, pairMode(settings) ? PI_NOTES_PAIR : PI_NOTES);
+		const dir = buildManualSkills(undefined, undefined, pairMode(settings) ? PI_NOTES_PAIR : {});
 		return dir ? { skillPaths: [dir] } : undefined;
 	});
 
 	pi.on("session_start", (_event, ctx) => {
 		const branch = [...(ctx.sessionManager?.getBranch() ?? [])];
-		const initial = initialState(branch, process.env);
-		on = initial ?? savedState(branch, process.env);
-		// A brand-new code session: write the default into the session, so a resume, fork or clone keeps it.
-		if (initial !== null) pi.appendEntry(ENTRY_TYPE, { on: initial });
+		on = savedState(branch);
 		// Chats switched on before the floor existed, or left with one after switching off.
 		const want = on ? FLOOR : null;
 		if (savedFloor(branch) !== want) pi.appendEntry(FLOOR_ENTRY, { level: want });
@@ -222,7 +169,7 @@ export default function superpowersSwitch(pi: PiApi): void {
 	});
 
 	pi.registerCommand("superpowers", {
-		description: "Superpowers in this chat: on (the model uses the skills on its own) or off (only /skill:<name>)",
+		description: "Superpowers in this chat: on (the skills are listed for the model) or off (only /skill:<name>)",
 		handler: (args, ctx) => {
 			const want = args.trim().toLowerCase();
 			const next = want === "on" ? true : want === "off" ? false : !on;
@@ -230,13 +177,13 @@ export default function superpowersSwitch(pi: PiApi): void {
 			pi.appendEntry(ENTRY_TYPE, { on });
 			pi.appendEntry(FLOOR_ENTRY, { level: on ? FLOOR : null });
 			show(ctx);
-			ctx.ui?.notify(on ? "Superpowers on for this chat." : "Superpowers off: use /skill:<name> to run one.", "info");
+			ctx.ui?.notify(on ? "Superpowers on for this chat: the skills are listed for the model." : "Superpowers off: use /skill:<name> to run one.", "info");
 		},
 	});
 
 	pi.on("context", (event) => {
 		if (!on) return undefined;
-		const text = bootstrap();
-		return text ? { messages: withBootstrap(event.messages ?? [], text) } : undefined;
+		const text = catalog();
+		return text ? { messages: withCatalog(event.messages ?? [], text) } : undefined;
 	});
 }

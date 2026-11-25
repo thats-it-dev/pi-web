@@ -7,11 +7,11 @@ beforeEach(() => {
 });
 
 describe("draft chat", () => {
-	it("a fresh code draft is ~ with no model and superpowers on", () => {
-		expect(getDraft()).toEqual({ text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: true });
+	it("a fresh code draft is ~ with no model and superpowers off", () => {
+		expect(getDraft()).toEqual({ text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false });
 	});
-	it("freshDraft: code has superpowers on, chat off, both in ~", () => {
-		expect(freshDraft("code")).toMatchObject({ cwd: "~", superpowers: true });
+	it("freshDraft: superpowers off for code and chat, both in ~", () => {
+		expect(freshDraft("code")).toMatchObject({ cwd: "~", superpowers: false });
 		expect(freshDraft("chat")).toMatchObject({ cwd: "~", superpowers: false });
 	});
 	it("retypeDraft keeps the text and attachments, resets cwd and superpowers", () => {
@@ -21,8 +21,9 @@ describe("draft chat", () => {
 		retypeDraft("chat");
 		expect(getDraft()).toEqual({ text: "x", images, files, cwd: "~", model: { provider: "p", modelId: "m" }, thinking: "high", approval: "auto", superpowers: false });
 		updateDraft({ cwd: "/b" });
+		updateDraft({ superpowers: true });
 		retypeDraft("code");
-		expect(getDraft()).toMatchObject({ text: "x", cwd: "~", superpowers: true });
+		expect(getDraft()).toMatchObject({ text: "x", cwd: "~", superpowers: false });
 	});
 	it("takeHandoff returns the message once, superpowers and type included", () => {
 		const msg: Handoff = { text: "hi", images: [], files: [], approval: null, superpowers: false, type: "chat" };
@@ -43,6 +44,7 @@ describe("superpowersCommand", () => {
 	it("chat draft on, status absent (chat default off): send on", () => expect(superpowersCommand(true, undefined, "chat")).toBe(true));
 	it("code draft on, status on: nothing", () => expect(superpowersCommand(true, true, "code")).toBeNull());
 	it("chat draft off, status absent: nothing", () => expect(superpowersCommand(false, undefined, "chat")).toBeNull());
-	it("code draft off, status absent (code default on): send off", () => expect(superpowersCommand(false, undefined, "code")).toBe(false));
+	it("code draft off, status absent (default off): nothing", () => expect(superpowersCommand(false, undefined, "code")).toBeNull());
+	it("code draft on, status absent (default off): send on", () => expect(superpowersCommand(true, undefined, "code")).toBe(true));
 	it("a reported status wins over the type default", () => expect(superpowersCommand(true, false, "code")).toBe(true));
 });

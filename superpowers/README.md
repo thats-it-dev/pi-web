@@ -1,36 +1,33 @@
 # @pi-web/superpowers
 
-pi extension: a per-chat switch for [superpowers](https://github.com/obra/superpowers). Off by default, so its
-skills are manual (`/skill:<name>`) until a chat turns them on from the ＋ menu's **superpowers** switch in pi-web.
+pi extension: a per-chat switch over a vendored, pi-patched subset of [superpowers](https://github.com/obra/superpowers)'
+skills. Off by default everywhere; the skills are manual (`/skill:<name>`) until a chat turns the switch on from the
+＋ menu in pi-web.
 
-- `settings.json` loads the superpowers package with `"skills": []` and `"extensions": []`, and this package after it.
-- At resource discovery the extension writes copies of the superpowers skills to `~/.pi/agent/tmp/superpowers-manual/`
-  with `disable-model-invocation: true` (other files are symlinks to the originals). pi registers them as
-  `/skill:<name>` commands and leaves them out of the system prompt, so a chat that never turns the switch on pays
-  nothing for them.
-- Left out entirely (`EXCLUDED`): `using-git-worktrees` (moves app edits out of `~/workspace/apps`, so the guard
-  stops seeing them), `finishing-a-development-branch` (pushes and merges; the thatsit-app flow opens PRs),
-  `subagent-driven-development` and `requesting-code-review` (unscoped reviewers next to the guard's).
+- The skills live in `skills/` here: `brainstorming`, `writing-plans`, `executing-plans`, `systematic-debugging`,
+  `test-driven-development`. They are copies of superpowers v7.0.2 with pi's changes applied in the files themselves:
+  no `superpowers:` prefixes, no routes to the skills that are not here (subagent-driven-development, worktrees,
+  finishing-a-development-branch, requesting-code-review, verification-before-completion), writing-plans hands off
+  to executing-plans without asking which approach to use, brainstorming is "use when design questions are open"
+  rather than "you MUST", and executing-plans is a short pi-native skill (branch, TDD, tick the plan, thatsit-app
+  review and pr, Michael merges). The raw `obra/superpowers` checkout is not installed, so nothing left out can be
+  found on disk (2026-11-25).
+- At resource discovery the extension writes copies of these skills to `~/.pi/agent/tmp/superpowers-manual/` with
+  `disable-model-invocation: true` (other files are symlinks). pi registers them as `/skill:<name>` commands and
+  leaves them out of the system prompt, so a chat with the switch off pays nothing for them.
 - `/superpowers on|off` (what the switch sends) saves the state as a `pi-web-superpowers` session entry and shows
   `superpowers on` as the session status, which the app reads back. A resumed chat restores it.
-- On: every request carries the using-superpowers bootstrap (as the package's own extension sends it, with the pi
-  tool mapping) plus the list of skills with their paths. pi omits manual skills from the system prompt, and a
-  mid-chat system prompt change did not reach flash-next reliably, so the list rides in that message.
+- On: a short catalog (one line per skill: name, description, path; under 1.2k chars) rides with every request, after
+  any compaction summary, so the model can read one when it clearly applies. There is no using-superpowers bootstrap
+  and no mandatory workflow; the old ~6k-char bootstrap on every request, and the default-on for code sessions, went
+  on 2026-11-25 after the website session (brainstorming turned "keep the look" into a menu; the excluded skills were
+  loaded from the raw checkout anyway).
+- On also sets flash-auto's reasoning floor to medium for the chat (`flash-auto-floor` entry); off clears it.
 
-Checked live over RPC (flash-next, 2026-11-10): off, "which skill first for a new feature?" gets `thatsit-app`;
-after the switch, `brainstorming` with its manual copy's path.
+Orchestrator mode: with `subagents.orchestrate: true` in `~/.pi/agent/settings.json` (or, with no flag, the agent
+pair as the model), the pi note on `writing-plans` (parallel groups) and `executing-plans` (scout, brief a `worker`
+per task, gate on verify and the reviewer, never edit app code; the guard enforces that part) replaces the inline
+wording. Read at resource discovery, so a new pi session picks a change up; no hub restart.
 
-Default state: a brand-new pi-web code session (`PI_WEB_SESSION_TYPE=code`, set by the hub; no messages and no
-saved `pi-web-superpowers` entry yet) starts on, and the extension writes that into the session at once
-(`pi-web-superpowers {on: true}` plus the flash-auto floor), so a resume, fork or clone keeps it as the session's own
-state. The default never applies to a subagent child (`PI_SUBAGENT_CHILD` set: pi-subagents workers, reviewers and
-scouts inherit the parent's env) or to an existing session that has messages but no entry: those stay off, as do chat
-sessions and terminal pi. A saved entry always wins.
-
-Orchestrator mode: the pi notes on writing-plans and executing-plans come in two sets. The inline set (the default)
-has the session implement every task itself; the orchestrator set has it scout, brief a `worker` per task, gate on
-verify and the reviewer, and never edit app code (the guard enforces that part). `pairMode` picks the orchestrator set
-when `~/.pi/agent/settings.json` has `subagents.orchestrate: true`, or, with no flag, when the agent pair is the model
-(`pair-auto` or the pi tune with the 35B as subagent default). The flag came on 2026-11-24: the pair was unloaded on
-11-17 for flash-auto and inkling, and in the 14 build sessions after that no worker was dispatched, since every
-session read the inline note. Read at resource discovery, so a new pi session picks a change up; no hub restart.
+Updating the vendored skills: copy the skill dirs from a superpowers checkout over `skills/`, re-apply the patches
+above (the test "the vendored skills" fails on a missed one), and keep `executing-plans/SKILL.md` as it is.

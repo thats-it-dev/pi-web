@@ -22,15 +22,15 @@ export interface Handoff {
 
 // The superpowers switch to send after the hand-off, or null when pi already
 // matches. `status` is what the session reports (undefined until the extension
-// has said); without it pi runs on the type's default (on for code).
-export function superpowersCommand(want: boolean, status: boolean | undefined, type: SessionType): boolean | null {
-	const current = status ?? type === "code";
+// has said); without it pi runs with the switch off, whatever the type.
+export function superpowersCommand(want: boolean, status: boolean | undefined, _type: SessionType): boolean | null {
+	const current = status ?? false;
 	return want === current ? null : want;
 }
 
-// A new chat starts in the home folder; code sessions have superpowers on, chats off.
-export function freshDraft(type: SessionType): Draft {
-	return { text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: type === "code" };
+// A new chat starts in the home folder with superpowers off (2026-11-25: the skills are manual until the switch is on).
+export function freshDraft(_type: SessionType): Draft {
+	return { text: "", images: [], files: [], cwd: "~", model: null, thinking: null, approval: null, superpowers: false };
 }
 
 // The new-chat draft and the first message waiting for its session; one per tab.
