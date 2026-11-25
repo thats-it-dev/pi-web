@@ -124,15 +124,12 @@ test("needsPr: dirty tree, unpushed commits and never-pushed branches need a PR;
 	assert.equal(needsPr(join(dir, "missing")), false);
 });
 
-test("compaction leaves re-injected rule messages out of the summary input", () => {
-	const rules = { role: "custom", customType: "i-have-adhd-rules", content: "ADHD MODE ACTIVE…", display: false };
+test("compaction: the guard leaves the summary to pi", () => {
 	const task = { role: "user", content: "Make keeb teach like keybr" };
-	const nudge = { role: "custom", customType: NUDGE_TYPE, content: "continue" };
-	const preparation = { messagesToSummarize: [rules, task, nudge, { ...rules }], turnPrefixMessages: [{ ...rules }, task] };
+	const preparation = { messagesToSummarize: [task], turnPrefixMessages: [task] };
 	const r = load().session_before_compact({ preparation, reason: "threshold" }, { cwd: "/" });
-	assert.equal(r, undefined, "pi's own summarizer still writes the summary");
-	assert.deepEqual(preparation.messagesToSummarize, [task, nudge]);
-	assert.deepEqual(preparation.turnPrefixMessages, [task]);
+	assert.equal(r, undefined, "pi's own summarizer writes the summary");
+	assert.deepEqual(preparation.messagesToSummarize, [task]);
 });
 
 test("codeChanged: a branch that only touches docs, Markdown or CI skips the review", () => {

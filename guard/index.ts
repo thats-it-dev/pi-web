@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, dropReinjected, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, shipOverride, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewedSinceUser, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string };
@@ -670,11 +670,9 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 		return withExtra([{ type: "text", text: mark }]);
 	});
 
-	// Filter in place and return nothing: pi's default summarizer then runs on the same preparation object.
-	pi.on("session_before_compact", (event) => {
-		dropReinjected(event.preparation?.messagesToSummarize);
-		dropReinjected(event.preparation?.turnPrefixMessages);
-		// The summary keeps a line about the rules at best: the next call into each app hands them over again.
+	// Return nothing: pi's default summarizer runs. The summary keeps a line about the app rules at best, so the next
+	// call into each app hands them over again.
+	pi.on("session_before_compact", () => {
 		briefed.clear();
 		handed.clear();
 		return undefined;

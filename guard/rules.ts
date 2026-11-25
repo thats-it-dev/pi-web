@@ -1583,20 +1583,6 @@ export function shouldNudgeMerge(messages: Msg[]): boolean {
 	return suggestsMerge(textOf(last));
 }
 
-// Compaction. Some extensions inject their rules as a message at session start and again after every
-// compaction (i-have-adhd). pi's summarizer reads that message as the user's first request and makes it the
-// summary's goal, so the real task is lost when a compaction falls between turns. They are re-added anyway.
-export const REINJECTED_TYPES: ReadonlySet<string> = new Set(["i-have-adhd-rules", "i-have-adhd-disabled"]);
-
-/** Remove re-injected rule messages from `messages` in place; pi summarizes the same array after the hook. */
-export function dropReinjected(messages: unknown[] | undefined): void {
-	if (!messages) return;
-	for (let i = messages.length - 1; i >= 0; i -= 1) {
-		const m = messages[i] as { role?: string; customType?: string };
-		if (m?.role === "custom" && REINJECTED_TYPES.has(m.customType ?? "")) messages.splice(i, 1);
-	}
-}
-
 // --- a questionnaire closed partway ---
 
 type Answer = { questionIndex?: number; question?: string; kind?: string; answer?: string | null; selected?: string[] };

@@ -106,11 +106,9 @@ CI, so they must go through the `bg_bash` tool, which wakes the agent with a bg-
 
 ## Compaction summaries
 
-i-have-adhd adds its rules as a message at session start and again after every compaction. pi's
-summarizer read that message as the user's first request and made it the summary's goal, so the real
-task could be lost. Before compaction the guard removes those messages (`REINJECTED_TYPES` in
-`rules.ts`) from what pi summarizes; pi's own summarizer still writes the summary. This relies on pi
-summarizing the same `preparation` object it passes to `session_before_compact` (true in pi 1.0.2).
+pi's own summarizer writes the summary; the guard only forgets which apps it has briefed, so the next call into
+each app hands the rules over again. (Until 2026-11-25 it also stripped i-have-adhd's re-injected ruleset from the
+summary input; that package is gone, replaced by three lines in `~/.pi/agent/AGENTS.md`.)
 
 ## Long rewrites
 
