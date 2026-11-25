@@ -128,15 +128,12 @@ function renderShowImage(call: ToolCall, image: ImageContent, loader: ImageLoade
 
 type PreviewCard = { url: string; label: string; kind: "dev" | "static" | "pages" };
 
-// A finished preview call: a card with an Open button (the app focuses the Preview tab; a phone follows the link).
+// A finished preview call: a card with an Open button (the app focuses the Preview tab; a phone follows the link) and
+// the preview's label. The host is not shown: the card is what Michael taps, and the URL made it wider than a phone.
 export function renderPreviewCard(d: PreviewCard, onOpen?: (d: PreviewCard, el: Element) => boolean) {
-	let host = d.url;
-	try {
-		host = new URL(d.url).host;
-	} catch {}
 	return html`<div class="preview-card"><a class="btn" href=${d.url} target="_blank" rel="noopener" @click=${(e: Event) => {
 		if (onOpen?.(d, e.currentTarget as Element)) e.preventDefault();
-	}}>Open preview</a><span class="txt">${d.label} · <code>${host}</code></span></div>`;
+	}}>Open preview</a><span class="txt">${d.label}</span></div>`;
 }
 
 function renderTool(call: ToolCall, result: AgentMessage | undefined, run: ToolRun | undefined, streaming: boolean, loader: ImageLoader | null) {
@@ -212,7 +209,6 @@ export const markdownStyles = css`
 export const previewCardStyles = css`
 	.preview-card { display: inline-flex; max-width: 100%; justify-self: start; box-sizing: border-box; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); margin: 6px 0; }
 	.preview-card .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; color: var(--text-secondary); }
-	.preview-card code { font-family: var(--font-mono); font-size: 0.8em; }
 `;
 
 type Washable = Pick<HTMLElement, "classList" | "offsetWidth" | "addEventListener" | "removeEventListener">;

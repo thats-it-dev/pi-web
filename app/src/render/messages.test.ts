@@ -208,7 +208,7 @@ describe("preview in the conversation", () => {
 		expect(out).toContain('target="_blank"');
 		expect(out).toContain('rel="noopener"');
 		expect(out).toContain("fret");
-		expect(out).toContain("spark-713a.tail9274fa.ts.net:10600");
+		expect(out).not.toContain("<code>"); // the host is the link's, not shown: it made the card wider than a phone
 	});
 	it("an error result is the ordinary error card", () => {
 		const out = flat(renderConversation(convWith([previewCall], { content: [{ type: "text", text: "no" }], isError: true, details })));
@@ -220,10 +220,11 @@ describe("preview in the conversation", () => {
 		expect(out).toContain("<details");
 		expect(out).not.toContain("preview-card");
 	});
-	it("renderPreviewCard shows the raw url when it does not parse", () => {
-		const out = flat(renderPreviewCard({ url: "not a url", label: "x", kind: "static" }));
-		expect(out).toContain("<code>");
-		expect(out).toContain("not a url");
+	it("renderPreviewCard shows the label and links the url without printing it", () => {
+		const out = flat(renderPreviewCard({ url: "https://h:1/", label: "x", kind: "static" }));
+		expect(out).toContain("href=https://h:1/");
+		expect(out).toContain(">x<");
+		expect(out).not.toContain("h:1/<");
 	});
 });
 
