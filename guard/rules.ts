@@ -11,7 +11,6 @@ export const REASONS = {
 	push: `Blocked: in an app, never push yourself. Commit, then run \`${SKILL_CLI} pr <dir> ...\`; it pushes and opens the PR. Then wait for CI: run \`${SKILL_CLI} pr-wait <dir>\` with the bg_bash tool. For the first version, run \`ship\` with the bg_bash tool instead.`,
 	ci: `Blocked: don't wait for or poll CI yourself (no sleep, gh run list/watch/view, gh pr checks). Wait with \`pr-wait\`, \`gateway-pr-wait\` or \`ship\` through the bg_bash tool; it prints the failing log lines. After a fix commit, rerun the same \`pr\` command, then \`pr-wait\` with bg_bash.`,
 	e2e: "Blocked: the full e2e suite runs only before a commit, through `npm run verify`. While iterating, run one spec: `npm run e2e:one -- e2e/<file>.spec.ts`.",
-	rewrite: "Blocked: don't rewrite files with a script: no Python, `sed -i`, `perl -i`, heredoc or `>` into a file in the tree, or a copy over one. Use the edit tool (read the lines first); it checks the edit and tells you when the old text doesn't match. A new file goes through the write tool.",
 	prTimeout: "Blocked: `pr` and `gateway-pr` return as soon as the PR is open. Run the same command again with no timeout.",
 	waitInBackground: "Blocked: `pr-wait`, `gateway-pr-wait` and `ship` wait on CI. Run the same command with the bg_bash tool, tell Michael the PR link, then end your turn; a bg-bash-done message wakes you when CI finishes.",
 	review: `Blocked: run the reviewer before opening the PR. A design doc or plan under docs/superpowers gets a review too (the guard briefs the reviewer for it; no verify needed for a docs-only change). Run \`npm run verify\` in the app if you edited code since it last passed, then call the \`subagent\` tool (call \`subagents_enable\` first if it is not available) with agent "reviewer" and a task that names Michael's request and \`docs/spec.md\` (and, if the app generates content or changes with the user's progress, a file sampling output at the first, a middle and the last stage). The guard writes the diff and the review scope itself; don't write a diff. A review that ended without a \`## Review\` block or \`No issues found.\` doesn't count: call the reviewer again. Fix what you confirm, rerun \`npm run verify\`, commit, then have the changed tree reviewed: a fresh reviewer call, or \`resume\` of the last reviewer run with what changed (the guard scopes both). List the findings you fixed and rejected in the PR body, then rerun this command.`,
@@ -35,10 +34,6 @@ export const REASONS = {
 		"Blocked: this run ended with its tool budget exhausted (hard-blocked), and a resume inherits that context: on website 2026-11-24 the revived worker made 57 bash calls, never called the edit tool, landed nothing and reported that its edits had not landed; a fresh worker did the fix in 14 calls. Dispatch a fresh run of the same agent with the brief, the report path and the findings verbatim.",
 	commitMain:
 		"Blocked: never commit on main (or master); every piece of work gets its own branch and ships as a PR. Branch first: `git switch -c <short-kebab-name>` keeps your staged and unstaged changes, then commit on it. Commits already made on main move the same way: `git switch -c <name>` takes them along, then `git branch -f main origin/main` puts main back where the remote is.",
-	bashClosed:
-		"Blocked: bash is closed until the edit is made; this call did not run. The rewrite block above sent you to the edit tool. To look at lines, use the read tool. Then call edit: path, and edits with oldText (a line exactly as in the file) and newText.",
-	bashClosedStop:
-		"Stopped: six bash calls were refused after the rewrite block and no edit or write call was made, so the turn ends here. Nothing was changed, and the guard did not block an edit. Michael: ask for the exact change it meant to make (file, old text, new text), or start a fresh session.",
 	stuck:
 		"Stopped: this is the third `bash` call in a few steps that does nothing (`true`), which happens when the model means to call edit or write and `bash` is what leaves it; repeating has never got out of it, so the turn ends here. Nothing was changed, and the guard did not block an edit: no edit call was made. Michael: ask for the exact change it meant to make (file, old text, new text), or start a fresh session.",
 	reviewRepo:
@@ -55,20 +50,24 @@ export function reasonKey(reason: string): string {
 	return reason.replace(/^Blocked:\s*/, "").toLowerCase().split(/\s+/).slice(0, 3).join("-").replace(/[^a-z0-9-]/g, "") || "other";
 }
 
+/** The line a script that wrote files in an app or repo gets on its result: what it changed, from the tree before and
+ *  after, or that it changed nothing. It replaces the rewrite block (2026-11-28): the block cost a generated script each
+ *  time and on keeb sent Inkling into a bash loop it never left, while the one thing the edit tool adds over a script, a
+ *  loud failure when the old text is not there, is what this note restores. */
+export function rewriteNote(dir: string, stat: string): string {
+	const changed = stat.trim();
+	if (!changed) return `[pi-guard] This script changed no file in ${dir}. The text it looked for is probably not there as written: read the lines again. The edit tool says so when its old text does not match.`;
+	return `[pi-guard] This script changed, in ${dir}:\n${changed}\nCheck that this is the change you meant and nothing else.`;
+}
+
 /** A bash call that does nothing: `true`, `:` or an empty command, alone or after a `cd`. On keeb 2026-11-27 Inkling,
- *  told by the rewrite block to use the edit tool, reasoned "now the edit tool" on every step and emitted `bash true`
+ *  told by the (since removed) rewrite block to use the edit tool, reasoned "now the edit tool" on every step and emitted `bash true`
  *  20 times in 10 minutes; no edit call ever left it (replayed: the model itself puts ~100% on `bash` there). */
 export function noopCall(toolName: string, input: Record<string, unknown>): boolean {
 	if (toolName !== "bash") return false;
 	const command = typeof input.command === "string" ? input.command : "";
 	return /^\s*(?:cd\s+\S+\s*&&\s*)?(?:true|:)?\s*;?\s*$/.test(command) && !/^\s*cd\s+\S+\s*$/.test(command);
 }
-/** Bash calls refused after a rewrite block before the turn is ended (REASONS.bashClosedStop). Why bash closes at all:
- *  on keeb 2026-11-27 and 11-28 Inkling answered the rewrite block with more bash, and replays of the second session
- *  showed the lock setting in at once: edit in 11 of 40 samples right after the block, 0 of 40 one stray bash call
- *  later, whatever the block said. With every bash call refused from the block on, 6 of 6 simulated runs reached an
- *  edit within four calls. */
-export const BASH_CLOSED_LIMIT = 6;
 /** No-op calls within this many recent tool calls make a loop, the last of them being the call at hand. */
 export const NOOP_LIMIT = 3;
 export const NOOP_WINDOW = 8;
@@ -242,6 +241,9 @@ function withoutHeredocBodies(command: string): string {
 export type Env = {
 	cwd: string;
 	home: string;
+	/** Called with the app or repo a script in this command writes files in (Python, `sed -i`, a redirect, a copy over
+	 *  a file). Not a block since 2026-11-28: index.ts reports what the script changed on the call's result. */
+	rewrote?: (dir: string) => void;
 	hasScript: (dir: string, name: string) => boolean;
 	dirty: (dir: string) => boolean;
 	/** The app's current state was reviewed (a scoped reviewer finished since Michael's last message, or nothing
@@ -436,9 +438,9 @@ export function checkShell(command: string, env: Env): Block | undefined {
 	// A rewrite that runs inside the app or repo; a scratch script in /tmp that only mentions the path is fine.
 	if (/\bpython3?\b/.test(command) && pythonRewrite(command) && !planRewrite(command)) {
 		const runsIn = workDir(command, env.cwd, env.home);
-		if (appDir("", runsIn, env.home) || repoOf("", { ...env, cwd: runsIn })) return { block: true, reason: REASONS.rewrite };
-	}
-	if (shellRewrite(command, dir, env.cwd, env.home)) return { block: true, reason: REASONS.rewrite };
+		const root = appDir("", runsIn, env.home) || repoOf("", { ...env, cwd: runsIn });
+		if (root) env.rewrote?.(root);
+	} else if (shellRewrite(command, dir, env.cwd, env.home)) env.rewrote?.(dir ?? workDir(command, env.cwd, env.home));
 	if (RUNS_E2E.test(command) && env.busy) {
 		const worker = env.busy(dir);
 		if (worker) return { block: true, reason: workerBusy(worker) };
@@ -1337,7 +1339,10 @@ export function checkToolCall(toolName: string, input: Record<string, unknown>, 
 	if (prTimeout) return { block: true, reason: REASONS.prTimeout };
 	// Waiting on CI belongs to bg_bash, whether or not the command is backgrounded.
 	if (toolName === "bash" && CI_WAIT.test(command)) return { block: true, reason: REASONS.waitInBackground };
-	if (python.some((code) => pythonRewrite(code) && (appDir(code, env.cwd, env.home) || workspacePath(code, env.cwd, env.home)))) return { block: true, reason: REASONS.rewrite };
+	for (const code of python) {
+		const at = pythonRewrite(code) ? appDir(code, env.cwd, env.home) || workspacePath(code, env.cwd, env.home) : undefined;
+		if (at) env.rewrote?.(at);
+	}
 	if (env.orchestrator && (toolName === "edit" || toolName === "write") && typeof input.path === "string" && appCodePath(input.path, env.cwd, env.home)) {
 		return { block: true, reason: REASONS.orchestrator };
 	}

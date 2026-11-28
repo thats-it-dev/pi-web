@@ -10,6 +10,12 @@ const home = "/home/m";
 const env = (over: Partial<Env> = {}): Env => ({ cwd: home, home, hasScript: () => true, dirty: () => true, ...over });
 const bash = (command: string, e = env()) => checkToolCall("bash", { command }, e)?.reason;
 const app = "cd ~/workspace/apps/keeb && ";
+// Whether the command is seen as a script that writes files in an app or repo (rules.ts `rewrote`); a block reads as its reason.
+const rewrites = (command: string, e = env()): boolean | string => {
+	let dir: string | undefined;
+	const r = checkToolCall("bash", { command }, { ...e, rewrote: (d) => void (dir = d) });
+	return r ? r.reason : dir !== undefined;
+};
 
 test("appDir finds the app from the command or the cwd", () => {
 	assert.equal(appDir("cd ~/workspace/apps/keeb && ls", home, home), "/home/m/workspace/apps/keeb");
@@ -60,12 +66,13 @@ test("the full suite is blocked only in apps that have e2e:one", () => {
 	assert.equal(bash(`${app}npm run e2e`, env({ hasScript: () => false })), undefined);
 });
 
-test("Python file rewrites in an app are blocked", () => {
+test("Python file rewrites in an app are seen, and not blocked", () => {
 	const py = `${app}python3 - <<'PY'\np="src/app-main.ts"; s=open(p).read()\nopen(p,"w").write(s.replace("a","b"))\nPY`;
-	assert.equal(bash(py), REASONS.rewrite);
-	assert.equal(bash(`${app}python3 -c 'print(open("src/x.ts").read())'`), undefined);
+	assert.equal(rewrites(py), true);
+	assert.equal(bash(py), undefined);
+	assert.equal(rewrites(`${app}python3 -c 'print(open("src/x.ts").read())'`), false);
 	// A scratch file in /tmp, even when the script mentions the app.
-	assert.equal(bash(`cd /tmp && python3 - <<'PY'\nopen("m3check.cjs","w").write("~/workspace/apps/keeb")\nPY`), undefined);
+	assert.equal(rewrites(`cd /tmp && python3 - <<'PY'\nopen("m3check.cjs","w").write("~/workspace/apps/keeb")\nPY`), false);
 });
 
 test("only bash and bg_bash carry shell for the rules; other tools pass", () => {
@@ -547,9 +554,9 @@ test("the orchestrator of the agent pair never edits app code itself; docs, plan
 	assert.equal(bash(`${app}git merge 6339a62 && git commit -m "merge"`, o), undefined);
 	assert.equal(bash(`${app}npm run verify > /tmp/verify.log 2>&1; tail -20 /tmp/verify.log`, o), undefined);
 	assert.equal(bash(`${app}sed -i 's/- \\[ \\]/- [x]/' docs/superpowers/plans/x.md`, o), undefined);
-	// Not the orchestrator (inline mode, or a worker child): the edit tool is free, and a shell rewrite is the rewrite rule's.
+	// Not the orchestrator (inline mode, or a worker child): the edit tool is free, and a shell rewrite runs (its result gets the rewrite note).
 	assert.equal(checkToolCall("edit", { path: code, edits: [] }, env())?.reason, undefined);
-	assert.equal(bash(`${app}sed -i 's/a/b/' src/ui/card.ts`), REASONS.rewrite);
+	assert.equal(rewrites(`${app}sed -i 's/a/b/' src/ui/card.ts`), true);
 });
 
 test("pairSettings reads only the orchestrate flag; the pair's model names mean nothing since 2026-11-25", () => {
@@ -1155,7 +1162,9 @@ test("in a workspace repo outside apps: CI is watched once through bg_bash, pyth
 	assert.equal(checkShell(at("gh pr checks 2 --watch --fail-fast"), { ...base, tool: "bg_bash" }), undefined);
 	assert.equal(checkShell(at("gh run watch 1 --exit-status"), { ...base, tool: "bg_bash" }), undefined);
 	assert.equal(checkShell(at("gh run watch 1 --exit-status"), { ...base, tool: "bash" })?.reason, REASONS.ciRepo);
-	assert.equal(checkShell(at("python3 - <<'PY'\np='src/a.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nPY"), base)?.reason, REASONS.rewrite);
+	let wrote: string | undefined;
+	assert.equal(checkShell(at("python3 - <<'PY'\np='src/a.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nPY"), { ...base, rewrote: (d: string) => void (wrote = d) }), undefined);
+	assert.equal(wrote, repo, "seen as a rewrite of the repo, not blocked");
 	assert.equal(checkShell(at("git checkout -- src/a.ts"), base)?.reason, REASONS.discard);
 	assert.equal(checkShell(at("git checkout -- src/a.ts"), { ...base, dirty: () => false }), undefined);
 	assert.equal(checkShell(at("npm run e2e"), base)?.reason, REASONS.e2e);
@@ -1491,7 +1500,7 @@ test("reviewHeader: where a control sits is a look the screenshot checked, not a
 	assert.match(h, /A named behavior with no such test is a P1 finding/);
 });
 
-test("shell rewrites of files in the app are blocked like Python ones; reads, scratch files and renames are not", () => {
+test("shell rewrites of files in the app are seen like Python ones; reads, scratch files and renames are not", () => {
 	for (const c of [
 		"sed -i '111d' src/app-main.ts",
 		"perl -0pi -e 's/a: string; name: string;/a: string;/' src/app/diagnostics.ts && grep -n name src/app/diagnostics.ts",
@@ -1500,8 +1509,8 @@ test("shell rewrites of files in the app are blocked like Python ones; reads, sc
 		"head -93 src/app/diagnostics.ts > /tmp/diagnostics.ts && mv /tmp/diagnostics.ts src/app/diagnostics.ts && tail -3 src/app/diagnostics.ts",
 		"echo 'export {};' > src/app/empty.ts",
 		"cp /tmp/fixed.ts src/app/diagnostics.ts",
-	]) assert.equal(bash(app + c), REASONS.rewrite, c);
-	assert.equal(checkToolCall("bash", { command: "sed -i 's/a/b/' src/ui/icons.ts" }, env({ cwd: "/home/m/workspace/apps/keeb/src" }))?.reason, REASONS.rewrite, "relative to the cwd");
+	]) assert.equal(rewrites(app + c), true, c);
+	assert.equal(rewrites("sed -i 's/a/b/' src/ui/icons.ts", env({ cwd: "/home/m/workspace/apps/keeb/src" })), true, "relative to the cwd");
 	for (const c of [
 		"npm test 2>&1 | tail -5",
 		"npm run typecheck 2>&1 | tail -10 && npm test 2>&1 | grep -E 'Tests |Test Files '",
@@ -1515,8 +1524,8 @@ test("shell rewrites of files in the app are blocked like Python ones; reads, sc
 		"grep -rn 'x => y' src | head; echo 'done' > /dev/null",
 		"awk 'NF==0{print NR\": \"$0}' src/app-main.ts",
 		"cat <<'EOF'\nconst f = (a: number) => a > 1;\nEOF",
-	]) assert.equal(bash(app + c), undefined, c);
-	assert.equal(bash("sed -i 's/a/b/' ~/notes/todo.md"), undefined, "outside any app or repo");
+	]) assert.equal(rewrites(app + c), false, c);
+	assert.equal(rewrites("sed -i 's/a/b/' ~/notes/todo.md"), false, "outside any app or repo");
 });
 
 test("a pr with a timeout behind a shut review gate reports the gate, and the timeout with it", () => {
@@ -1627,14 +1636,14 @@ test("exhaustedRun: a run whose status says hard-blocked, by full id or prefix; 
 test("a Python script that only ticks a plan or appends to the SDD ledger is not a rewrite; one that touches code is", () => {
 	const tick = `${app}python3 - <<'PY'\np='docs/superpowers/plans/2026-11-24-kit-rebuild.md'\ns=open(p).read()\nopen(p,'w').write(s.replace('- [ ] **Step 1','- [x] **Step 1'))\nPY`;
 	assert.equal(planRewrite(tick), true);
-	assert.equal(bash(tick), undefined);
+	assert.equal(rewrites(tick), false);
 	const ledger = `${app}python3 -c "open('.superpowers/sdd/plan/progress.md','a').write('ok')"`;
-	assert.equal(bash(ledger), undefined);
+	assert.equal(rewrites(ledger), false);
 	const code = `${app}python3 - <<'PY'\np='src/app-main.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nPY`;
 	assert.equal(planRewrite(code), false);
-	assert.equal(bash(code), REASONS.rewrite);
+	assert.equal(rewrites(code), true);
 	const both = `${app}python3 - <<'PY'\nfor p in ['docs/superpowers/plans/x.md','src/a.ts']:\n  open(p,'w').write('x')\nPY`;
-	assert.equal(bash(both), REASONS.rewrite, "a code path anywhere keeps the block");
+	assert.equal(rewrites(both), true, "a code path anywhere makes it a rewrite");
 	assert.equal(planRewrite("open(p,'w').write(s)"), false, "no literal path: not exempt");
 });
 
@@ -1666,4 +1675,10 @@ test("noopCall: a bash call that does nothing", async () => {
 	for (const c of ["true && npm test", "ls", "echo true", "test -f x || true", "cd /tmp"]) assert.equal(noopCall("bash", { command: c }), false, c);
 	assert.equal(noopCall("read", { path: "true" }), false);
 	assert.equal(noopCall("bash", {}), true);
+});
+
+test("rewriteNote: what a script changed, or that it changed nothing", async () => {
+	const { rewriteNote } = await import("../rules.ts");
+	assert.match(rewriteNote("/r", " src/a.ts | 2 +-\n 1 file changed, 1 insertion(+), 1 deletion(-)\n"), /^\[pi-guard\] This script changed, in \/r:\nsrc\/a\.ts \| 2 \+-\n 1 file changed/);
+	assert.match(rewriteNote("/r", "  \n"), /changed no file in \/r\. .*read the lines again/);
 });

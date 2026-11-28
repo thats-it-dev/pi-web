@@ -8,7 +8,7 @@ in `rules.ts` as pure functions; `index.ts` wires them to pi's `tool_call` and `
 
 For commands that work in `~/workspace/apps/<name>` (a path in the command, or the session cwd), and since 2026-11-18
 for any other git repo under `~/workspace` (its git root; a worktree is its own). The app skill's rules, `push`,
-`worktree-install`, the screen gate and the `pr` gate, stay apps-only; `merge`, `rewrite`, `discard`, `e2e`, the
+`worktree-install`, the screen gate and the `pr` gate, stay apps-only; `merge`, the rewrite note, `discard`, `e2e`, the
 long-overwrite rule and the pair's code-path rule apply to both; `ci` has a repo form (`ciRepo`: watch once through
 `bg_bash` with `gh pr checks --watch` or `gh run watch`), and the review gate sits on `git push` / `gh pr create` there.
 The merged-branch switch and the PR nudge cover both as well, against the repo's `main` or `master`.
@@ -21,9 +21,8 @@ Checked for `bash` and `bg_bash` (context-mode's `ctx_*` tools were covered unti
 | ci | `gh run list/watch/view` (not `--log-failed`), `gh pr checks`, `sleep` of 60 s or more | `pr-wait` / `gateway-pr-wait` / `ship` through `bg_bash` |
 | e2e | the full e2e suite (`npm run e2e`, `playwright test` with no spec), only in apps with an `e2e:one` script | `npm run e2e:one -- e2e/x.spec.ts`, and `npm run verify` before a commit |
 | worker-busy | `npm run verify`, `npm run e2e*`, `playwright test` while an async `worker` launched without `worktree: true` is still running in the app (its launch named the app, or its status.json's cwd or tool calls show it there; a worker that has not shown where it works yet holds every app) | wait for the worker's result, then run verify once; a worker that must run beside you gets `worktree: true` |
-| rewrite | a script that writes a file in the app or repo: Python (`open(..., "w")`, `write_text`), `sed -i` / `perl -i`, a `>`/`>>` redirect or heredoc into a file in the tree, or `mv`/`cp` from outside the tree over one (2026-11-24: keeb's copy-diagnostics session did eight such edits past the Python-only rule, with the AGENTS.md rule in context) | the edit tool; the write tool for a new file. Build output and plans/briefs under superpowers are exempt |
-| bash-closed | any `bash` or `bg_bash` call after a `rewrite` block, until an edit or write call is made or Michael sends the next message; the sixth refused call ends the turn (2026-11-28: Inkling on keeb answered the rewrite block with more bash and one stray call locked it there, 0 edits in 40 replays; with bash refused from the block on, 6 of 6 simulated runs edited within four calls) | the read tool to look at lines, then the edit tool |
-| stuck | the third `bash` call within eight tool calls that does nothing (`true`, `:`, empty), anywhere; an edit or write clears the count (2026-11-27: Inkling on keeb, told by the rewrite block to use the edit tool, meant edit on every step and emitted `bash true` 20 times in 10 minutes) | nothing: the block carries `terminate`, so the turn ends instead of spinning, with a result that says no edit was made or blocked |
+| rewrite (a note, not a block, since 2026-11-28) | a script that writes a file in the app or repo: Python (`open(..., "w")`, `write_text`), `sed -i` / `perl -i`, a `>`/`>>` redirect or heredoc into a file in the tree, or `mv`/`cp` from outside the tree over one. It was a block from 2026-11-09 (64 Python rewrites blocked by 11-23); each block cost a generated script, and on keeb 2026-11-27/28 it sent Inkling into a bash loop it never left (edit in 11 of 40 replays right after the block, 0 of 40 one call later) | the script runs; its result gets `[pi-guard] This script changed, in <repo>:` and the `git diff --stat` between the tree before and after, or `changed no file`, which is the check the edit tool gave. Build output and plans/briefs under superpowers get no note |
+| stuck | the third `bash` call within eight tool calls that does nothing (`true`, `:`, empty), anywhere; an edit or write clears the count (2026-11-27: Inkling on keeb, told by the rewrite block (since removed) to use the edit tool, meant edit on every step and emitted `bash true` 20 times in 10 minutes) | nothing: the block carries `terminate`, so the turn ends instead of spinning, with a result that says no edit was made or blocked |
 | commit-main | `git commit` while the checkout sits on `main` or `master`, in an app or any repo under ~/workspace (a `git switch -c` / `git checkout -b` earlier in the same command counts as branching) | `git switch -c <name>` first; commits already on main: `git switch -c <name>`, then `git branch -f main origin/main`. Why: website 2026-11-24, the orchestrator committed on main, so the review base (merge-base with main) was HEAD, the reviewer call was refused as nothing changed, and the push stayed gated; four blocked pushes, then Michael's "always branch" |
 | discard | `git checkout <ref> -- <path>`, `git restore`, `git reset --hard`, only while the app has uncommitted changes | write the test first and run it red before the fix; `git show <ref>:<path>` to look at old code |
 
@@ -218,7 +217,7 @@ on an app (an apps path or `/tmp/<name>-review.diff` in the task, or the session
   the same fix in 14 calls.
 - A Python script whose file paths all lie under `docs/superpowers/` or `.superpowers/`, or are Markdown, is not a
   rewrite (`planRewrite`): ticking plan checkboxes and appending to the SDD ledger pass, as they do for `sed`. A code
-  path anywhere in the script keeps the block. Why: website 2026-11-24, two blocked plan ticks, then two partial
+  path anywhere in the script makes it a rewrite (which gets the note). Why: website 2026-11-24, two blocked plan ticks, then two partial
   edit-tool applies.
 - The kit-pattern handover (next bullet) also covers a repo outside apps once its `index.html`, or the edit itself,
   loads the kit from `kit.thatsit.app`; the page's `Start here`, `Start here: A component` and `Layout` sections are
