@@ -1659,3 +1659,11 @@ test("every REASONS key is covered by a test in guard/test", () => {
 	const uncovered = Object.keys(REASONS).filter((k) => !new RegExp(`REASONS\\.${k}\\b`).test(tests));
 	assert.deepEqual(uncovered, [], "add a test (a replay fixture from the session that motivated the rule) for each");
 });
+
+test("noopCall: a bash call that does nothing", async () => {
+	const { noopCall } = await import("../rules.ts");
+	for (const c of ["true", " true ", ":", "", "true;", "cd ~/workspace/apps/keeb && true"]) assert.equal(noopCall("bash", { command: c }), true, JSON.stringify(c));
+	for (const c of ["true && npm test", "ls", "echo true", "test -f x || true", "cd /tmp"]) assert.equal(noopCall("bash", { command: c }), false, c);
+	assert.equal(noopCall("read", { path: "true" }), false);
+	assert.equal(noopCall("bash", {}), true);
+});

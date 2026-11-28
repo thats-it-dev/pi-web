@@ -7,10 +7,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, reasonKey, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, noopCall, NOOP_LIMIT, NOOP_WINDOW, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, reasonKey, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
-type Block = { block: true; reason: string };
+type Block = { block: true; reason: string; terminate?: true };
 type PiApi = { on(event: string, handler: (event: any, ctx: Ctx) => unknown): unknown };
 
 /** pi's settings.json under `home`, or undefined when it is missing or unreadable. */
@@ -532,8 +532,19 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	// Reviewer launches the guard could not tie to an app: their result says so, since they never count.
 	const unscoped = new Set<string>();
 
+	// The last few tool calls, each a no-op or not: the third no-op in the window ends the turn (REASONS.stuck).
+	let recent: boolean[] = [];
+
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
+		if (event.toolName === "edit" || event.toolName === "write") recent = [];
+		else {
+			recent = [...recent, noopCall(event.toolName, event.input ?? {})].slice(-NOOP_WINDOW);
+			if (recent.at(-1) && recent.filter(Boolean).length >= NOOP_LIMIT) {
+				recent = [];
+				return { ...logBlock(REASONS.stuck, event.toolName, event.input), terminate: true };
+			}
+		}
 		// The first call into an app this session: a clean checkout on a merged branch goes back to main before the
 		// call runs, so neither the worker's edits nor the orchestrator's commit land on top of the merge.
 		const scope = callScope(event.toolName, event.input ?? {}, ctx.cwd, home);

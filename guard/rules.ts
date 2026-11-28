@@ -35,6 +35,8 @@ export const REASONS = {
 		"Blocked: this run ended with its tool budget exhausted (hard-blocked), and a resume inherits that context: on website 2026-11-24 the revived worker made 57 bash calls, never called the edit tool, landed nothing and reported that its edits had not landed; a fresh worker did the fix in 14 calls. Dispatch a fresh run of the same agent with the brief, the report path and the findings verbatim.",
 	commitMain:
 		"Blocked: never commit on main (or master); every piece of work gets its own branch and ships as a PR. Branch first: `git switch -c <short-kebab-name>` keeps your staged and unstaged changes, then commit on it. Commits already made on main move the same way: `git switch -c <name>` takes them along, then `git branch -f main origin/main` puts main back where the remote is.",
+	stuck:
+		"Stopped: this is the third `bash` call in a few steps that does nothing (`true`), which happens when the model means to call edit or write and `bash` is what leaves it; repeating has never got out of it, so the turn ends here. Nothing was changed, and the guard did not block an edit: no edit call was made. Michael: ask for the exact change it meant to make (file, old text, new text), or start a fresh session.",
 	reviewRepo:
 		'Blocked: run the reviewer before opening the PR or pushing this branch. A git repo under ~/workspace gets the same review gate as an app: call the `subagent` tool (call `subagents_enable` first if it is not available) with agent "reviewer", `cwd` set to the repo, and a task that names Michael\'s request. The guard writes the diff against main and the review scope itself; don\'t write a diff. If the repo has `npm run verify`, run it green first. A review that ended without a `## Review` block or `No issues found.` doesn\'t count: call the reviewer again. Fix what you confirm, commit, list the findings you fixed and rejected in the PR body, then rerun this command.',
 };
@@ -48,6 +50,18 @@ export function reasonKey(reason: string): string {
 	if (/predate this session|was changed before this session/.test(reason)) return "inherited";
 	return reason.replace(/^Blocked:\s*/, "").toLowerCase().split(/\s+/).slice(0, 3).join("-").replace(/[^a-z0-9-]/g, "") || "other";
 }
+
+/** A bash call that does nothing: `true`, `:` or an empty command, alone or after a `cd`. On keeb 2026-11-27 Inkling,
+ *  told by the rewrite block to use the edit tool, reasoned "now the edit tool" on every step and emitted `bash true`
+ *  20 times in 10 minutes; no edit call ever left it (replayed: the model itself puts ~100% on `bash` there). */
+export function noopCall(toolName: string, input: Record<string, unknown>): boolean {
+	if (toolName !== "bash") return false;
+	const command = typeof input.command === "string" ? input.command : "";
+	return /^\s*(?:cd\s+\S+\s*&&\s*)?(?:true|:)?\s*;?\s*$/.test(command) && !/^\s*cd\s+\S+\s*$/.test(command);
+}
+/** No-op calls within this many recent tool calls make a loop, the last of them being the call at hand. */
+export const NOOP_LIMIT = 3;
+export const NOOP_WINDOW = 8;
 
 // Merging or closing a PR by the gh CLI or the REST API (a push to main in an app is the push rule's). Michael merges (SKILL.md step 7),
 // and on 2026-11-16 the orchestrator, having never read the skill, merged keeb #28 with `gh pr merge` the moment CI was green.

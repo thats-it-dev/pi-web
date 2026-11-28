@@ -1058,3 +1058,50 @@ test("a repo outside apps whose page loads the kit gets the kit handover too, st
 	const r2 = h2.tool_result({ toolName: "write", toolCallId: "w2", content: [{ type: "text", text: "ok" }] }, { cwd: other.home, sessionManager: { getBranch: () => [] } });
 	assert.equal((r2?.content ?? []).some((c: { text: string }) => c.text.startsWith(KIT_PATTERNS_MARK)), false);
 });
+
+test("the third no-op bash call in a few steps ends the turn: the model means edit and keeps calling bash", () => {
+	// keeb 2026-11-27 (Inkling): after a script-rewrite block the model reasoned "now the edit tool" on every step and
+	// emitted `bash true` 20 times in 10 minutes; no edit call ever left it.
+	const h = load();
+	const call = (toolName: string, input: Record<string, unknown>) => h.tool_call({ toolName, input, toolCallId: "c" }, { cwd: "/" });
+	assert.equal(call("bash", { command: "true" }), undefined);
+	assert.equal(call("bash", { command: "grep -n focus test/ladder.test.ts" }), undefined);
+	assert.equal(call("bash", { command: " true " }), undefined);
+	assert.equal(call("bash", { command: "sed -n '1,5p' test/ladder.test.ts" }), undefined);
+	const r = call("bash", { command: "true" });
+	assert.equal(r.block, true);
+	assert.equal(r.terminate, true);
+	assert.equal(r.reason, REASONS.stuck);
+	// The count starts over, so Michael's "try again" gets a fresh three.
+	assert.equal(call("bash", { command: "true" }), undefined);
+	assert.equal(call("bash", { command: ":" }), undefined);
+	// An edit or write shows the tool is reachable: the count clears.
+	assert.equal(call("edit", { path: "/tmp/x.ts", edits: [] }), undefined);
+	assert.equal(call("bash", { command: "true" }), undefined);
+	assert.equal(call("bash", { command: "true" }), undefined);
+	assert.equal(call("bash", { command: ":" }).terminate, true);
+});
+
+test("no-op calls spread over a long run are not a loop, and real commands never count", () => {
+	const h = load();
+	const call = (command: string) => h.tool_call({ toolName: "bash", input: { command }, toolCallId: "c" }, { cwd: "/" });
+	for (let round = 0; round < 3; round++) {
+		assert.equal(call("true"), undefined);
+		for (let i = 0; i < 8; i++) assert.equal(call(`ls /tmp/${i}`), undefined);
+	}
+	for (const c of ["true && npm test", "test -f x || true", "echo true", "cd /tmp && ls"]) assert.equal(call(c), undefined);
+});
+
+test("a turn ended by the no-op stop is not sent back to work by a nudge", () => {
+	const keeb = join(homedir(), "workspace", "apps", "keeb");
+	const messages = [
+		{ role: "user", content: "fix it" },
+		{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "edit", arguments: { path: `${keeb}/src/app-main.ts` } }] },
+		{ role: "toolResult", content: [{ type: "text", text: "ok" }] },
+		{ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", name: "bash", arguments: { command: "true" } }] },
+		{ role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: REASONS.stuck }] },
+	];
+	const branch = [{ type: "message", message: { role: "toolResult", toolName: "todo", details: { nextId: 3, tasks: [{ id: 2, subject: "b", status: "in_progress" }] } } }];
+	const r = load((d) => d === keeb).agent_before_settle({ outcome: "completed", context: { canContinue: false, contextMessages: messages } }, { cwd: "/", sessionManager: { getBranch: () => branch } });
+	assert.equal(r, undefined);
+});
