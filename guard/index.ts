@@ -7,7 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, 
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, noopCall, NOOP_LIMIT, NOOP_WINDOW, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, reasonKey, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
+import { kitPatterns, kitPatternIds, kitDepartures, kitPatternNote, kitLoaded, exhaustedRun, noopCall, NOOP_LIMIT, NOOP_WINDOW, BASH_CLOSED_LIMIT, absPath, branchRequests, discardOrder, inheritedChanges, inheritedNote, blockedRounds, REVIEW_ROUNDS, REVIEW_ROUNDS_OPEN, opensPr, previewNote, previewOpened, appBrief, skillRead, styleRulesOf, reasonKey, appDir, appsNeedingPr, asyncRunId, busyWorker, checkToolCall, codeOf, designDoc, pairSettings, pinResidentModel, reviewRun, indirectReviewer, lastBlockedReview, lastReview, lastScreen, noteWithdrawn, promptDigest, REASONS, REVIEW_BUDGET, reviewApp, reviewFree, reviewGap, reviewHeader, requestFiles, reviewBlocked, reviewBlockedMark, reviewMark, reviewPendingMark, REVIEW_NO_VERDICT, REVIEW_UNSCOPED, reviewVerdict, type ReviewScope, screenCompareContent, screenMark, screenResult, screenshotDir, screenshotUpload, uiFile, userPictures, UNKNOWN_RUN, verifiedSinceEdit, NUDGE, NUDGE_TYPE, MERGE_NUDGE, MERGE_NUDGE_TYPE, shouldNudgeMerge, openTodos, partialAnswers, PR_NUDGE_TYPE, prNudge, shouldNudge, shouldNudgePr, shouldNudgeTodos, TODO_NUDGE_TYPE, todoNudge, workspacePath, reposNeedingPr, repoPrNudge } from "./rules.ts";
 
 type Ctx = { cwd: string; sessionManager?: { getBranch(): Iterable<unknown> } };
 type Block = { block: true; reason: string; terminate?: true };
@@ -534,11 +534,21 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 
 	// The last few tool calls, each a no-op or not: the third no-op in the window ends the turn (REASONS.stuck).
 	let recent: boolean[] = [];
+	// Bash calls refused since a rewrite block; undefined while bash is open. An edit, a write or a new prompt opens it.
+	let bashRefused: number | undefined;
 
 	pi.on("tool_call", (event, ctx) => {
 		const branch = () => [...(ctx.sessionManager?.getBranch() ?? [])];
-		if (event.toolName === "edit" || event.toolName === "write") recent = [];
-		else {
+		if (event.toolName === "edit" || event.toolName === "write") {
+			recent = [];
+			bashRefused = undefined;
+		} else if (bashRefused !== undefined && (event.toolName === "bash" || event.toolName === "bg_bash")) {
+			// A rewrite block is owed an edit: bash stays closed until it comes, and the turn ends at the limit.
+			if (++bashRefused < BASH_CLOSED_LIMIT) return logBlock(REASONS.bashClosed, event.toolName, event.input);
+			bashRefused = undefined;
+			recent = [];
+			return { ...logBlock(REASONS.bashClosedStop, event.toolName, event.input), terminate: true };
+		} else {
 			recent = [...recent, noopCall(event.toolName, event.input ?? {})].slice(-NOOP_WINDOW);
 			if (recent.at(-1) && recent.filter(Boolean).length >= NOOP_LIMIT) {
 				recent = [];
@@ -589,6 +599,7 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 			discardOrdered: () => discardOrder(branch()),
 			onTrunk,
 		});
+		if (block?.reason === REASONS.rewrite) bashRefused = 0;
 		if (block) return logBlock(block.reason, event.toolName, event.input ?? undefined);
 		// The first call that goes through into an app: its result carries the app's rules, which a session in home never
 		// loaded and which the skill lists but the model does not read (keeb 2026-11-19: a settings dialog rebuilt by
@@ -729,6 +740,8 @@ export default function piGuard(pi: PiApi, gitNeedsPr: (dir: string) => boolean 
 	let sections: Record<string, number> = {};
 	let sysChars = 0;
 	pi.on("before_agent_start", (event) => {
+		bashRefused = undefined;
+		recent = [];
 		const s = (event.systemPromptOptions?.sections ?? {}) as Record<string, unknown>;
 		sections = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, typeof v === "string" ? v.length : v == null ? 0 : -1]));
 		// pi renders its built-in sections into `systemPrompt` and leaves `sections` holding only what extensions added,

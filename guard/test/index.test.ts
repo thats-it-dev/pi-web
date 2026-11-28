@@ -1105,3 +1105,42 @@ test("a turn ended by the no-op stop is not sent back to work by a nudge", () =>
 	const r = load((d) => d === keeb).agent_before_settle({ outcome: "completed", context: { canContinue: false, contextMessages: messages } }, { cwd: "/", sessionManager: { getBranch: () => branch } });
 	assert.equal(r, undefined);
 });
+
+test("after a script-rewrite block, bash stays closed until the edit is made", () => {
+	// keeb 2026-11-27/28 (Inkling): after the rewrite block the model went on with bash, and one stray bash call was
+	// enough to lock it there (0 edits in 40 replays one step later). With bash refused from the block on, 6 of 6
+	// simulated runs reached an edit within four calls.
+	const h = load();
+	const keeb = "cd ~/workspace/apps/keeb && ";
+	const call = (toolName: string, input: Record<string, unknown>) => h.tool_call({ toolName, input, toolCallId: "c" }, { cwd: "/" });
+	const script = { command: `${keeb}python3 - <<'EOF'\np='test/ladder.test.ts'\ns=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF` };
+	assert.equal(call("bash", { command: `${keeb}sed -n 1,5p test/ladder.test.ts` }), undefined, "bash is open before any block");
+	assert.equal(call("bash", script).reason, REASONS.rewrite);
+	const closed = call("bash", { command: `${keeb}sed -n 180,186p test/ladder.test.ts` });
+	assert.equal(closed.block, true);
+	assert.equal(closed.reason, REASONS.bashClosed);
+	assert.equal(closed.terminate, undefined);
+	assert.equal(call("bg_bash", { command: "npm test" }).reason, REASONS.bashClosed);
+	// Looking is still possible, and other tools are untouched.
+	assert.equal(call("read", { path: "/tmp/x.ts" }), undefined);
+	assert.equal(call("bash", { command: "true" }).reason, REASONS.bashClosed);
+	// The edit opens bash again.
+	assert.equal(call("edit", { path: "/tmp/x.ts", edits: [] }), undefined);
+	assert.equal(call("bash", { command: `${keeb}npm test` }), undefined);
+});
+
+test("bash closed after a rewrite block: the sixth refused call ends the turn, and a new prompt opens bash", () => {
+	const h = load();
+	const call = (toolName: string, input: Record<string, unknown>) => h.tool_call({ toolName, input, toolCallId: "c" }, { cwd: "/" });
+	const script = { command: "cd ~/workspace/apps/keeb && python3 - <<'EOF'\np='test/ladder.test.ts'\nopen(p,'w').write(open(p).read().replace('a','b'))\nEOF" };
+	assert.equal(call("bash", script).reason, REASONS.rewrite);
+	for (let i = 0; i < 5; i++) assert.equal(call("bash", { command: "ls" }).reason, REASONS.bashClosed);
+	const last = call("bash", { command: "ls" });
+	assert.equal(last.terminate, true);
+	assert.equal(last.reason, REASONS.bashClosedStop);
+	assert.equal(call("bash", { command: "ls" }), undefined, "open again after the stop");
+	assert.equal(call("bash", script).reason, REASONS.rewrite);
+	assert.equal(call("bash", { command: "ls" }).reason, REASONS.bashClosed);
+	h.before_agent_start({}, { cwd: "/" });
+	assert.equal(call("bash", { command: "ls" }), undefined, "Michael's next message starts clean");
+});

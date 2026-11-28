@@ -35,6 +35,10 @@ export const REASONS = {
 		"Blocked: this run ended with its tool budget exhausted (hard-blocked), and a resume inherits that context: on website 2026-11-24 the revived worker made 57 bash calls, never called the edit tool, landed nothing and reported that its edits had not landed; a fresh worker did the fix in 14 calls. Dispatch a fresh run of the same agent with the brief, the report path and the findings verbatim.",
 	commitMain:
 		"Blocked: never commit on main (or master); every piece of work gets its own branch and ships as a PR. Branch first: `git switch -c <short-kebab-name>` keeps your staged and unstaged changes, then commit on it. Commits already made on main move the same way: `git switch -c <name>` takes them along, then `git branch -f main origin/main` puts main back where the remote is.",
+	bashClosed:
+		"Blocked: bash is closed until the edit is made; this call did not run. The rewrite block above sent you to the edit tool. To look at lines, use the read tool. Then call edit: path, and edits with oldText (a line exactly as in the file) and newText.",
+	bashClosedStop:
+		"Stopped: six bash calls were refused after the rewrite block and no edit or write call was made, so the turn ends here. Nothing was changed, and the guard did not block an edit. Michael: ask for the exact change it meant to make (file, old text, new text), or start a fresh session.",
 	stuck:
 		"Stopped: this is the third `bash` call in a few steps that does nothing (`true`), which happens when the model means to call edit or write and `bash` is what leaves it; repeating has never got out of it, so the turn ends here. Nothing was changed, and the guard did not block an edit: no edit call was made. Michael: ask for the exact change it meant to make (file, old text, new text), or start a fresh session.",
 	reviewRepo:
@@ -59,6 +63,12 @@ export function noopCall(toolName: string, input: Record<string, unknown>): bool
 	const command = typeof input.command === "string" ? input.command : "";
 	return /^\s*(?:cd\s+\S+\s*&&\s*)?(?:true|:)?\s*;?\s*$/.test(command) && !/^\s*cd\s+\S+\s*$/.test(command);
 }
+/** Bash calls refused after a rewrite block before the turn is ended (REASONS.bashClosedStop). Why bash closes at all:
+ *  on keeb 2026-11-27 and 11-28 Inkling answered the rewrite block with more bash, and replays of the second session
+ *  showed the lock setting in at once: edit in 11 of 40 samples right after the block, 0 of 40 one stray bash call
+ *  later, whatever the block said. With every bash call refused from the block on, 6 of 6 simulated runs reached an
+ *  edit within four calls. */
+export const BASH_CLOSED_LIMIT = 6;
 /** No-op calls within this many recent tool calls make a loop, the last of them being the call at hand. */
 export const NOOP_LIMIT = 3;
 export const NOOP_WINDOW = 8;
